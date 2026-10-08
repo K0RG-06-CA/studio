@@ -13,6 +13,9 @@ workspace = true
 egui = { workspace = true }
 egui_dock = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
+lightcraft-ui-egui = { workspace = true }
+lightcraft-engine = { workspace = true }
 
 [dev-dependencies]
 # same format eframe saves the app state in

@@ -12,12 +12,17 @@ rust-version = "1.95"
 # internal
 studio-shell = { path = "crates/studio-shell" }
 
+# storytold LightCraft, pinned (PRD: Staying in sync with storytold). Update = change both revs.
+lightcraft-ui-egui = { git = "https://github.com/storytold/lightcraft", rev = "eeb136b9eec179805307c4626596f0ccc074368b" }
+lightcraft-engine = { git = "https://github.com/storytold/lightcraft", rev = "eeb136b9eec179805307c4626596f0ccc074368b" }
+
 # external — egui/eframe match storytold's LightCraft and PhotoCraft (0.36); bump in lockstep
 egui = "0.36"
 eframe = { version = "0.36", default-features = false }
 egui_dock = { version = "0.21", features = ["serde"] }
 egui_kittest = "0.36"
 serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

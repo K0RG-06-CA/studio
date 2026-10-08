@@ -16,6 +16,9 @@ pub use persona::Persona;
 #[cfg(test)]
 mod tests_ui;
 
+#[cfg(test)]
+mod tests_lightcraft;
+
 /// Photoshop's tool bar, top to bottom: (shortcut, tool). Placeholders until milestone 4.
 const TOOLS: [(&str, &str); 19] = [
     ("V", "Move"),

@@ -215,6 +215,7 @@ The shared document is the hard, important part: it is what makes Pixel edits an
 Studio must pull in storytold's updates in minutes, not days. The rule: **add around their code, don't edit inside it.**
 
 - **Their code stays untouched.** LightCraft, PhotoCraft, VectorCraft and DesignCraft come in as Git dependencies pinned to a commit, not copied files. Updating is changing one commit hash.
+- **Pinned commits** (in the workspace `Cargo.toml`): LightCraft `eeb136b` (Oct 8, 2026; milestone 2).
 - **Studio's code lives in its own crates:** `studio-shell`, `studio-doc`, `studio-film`, `studio-raw-rw2`. They use storytold's public APIs and command registry instead of changing their files.
 - **Plug in, don't patch.** The RW2 decoder registers as an extra raw decoder, and film effects register as extra pipeline steps. If storytold has no hook for that yet, add the smallest possible hook in their code. A generic hook like that can be offered back to storytold as a pull request, so the patch disappears once they merge it.
 - **Unavoidable patches** live on one branch of the fork, each listed in `PATCHES.md` with why it exists. Keep this list as short as possible.
