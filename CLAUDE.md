@@ -4,6 +4,7 @@ Studio is an Affinity-style all-in-one photo app with Adobe-style personas, buil
 
 ## Source of truth
 - **Follow [`PRD.md`](PRD.md).** It defines the goals, personas, scope per version and milestones. Work one milestone at a time; don't build ahead.
+- For halation, follow PRD-halation.md; it overrides PRD.md on halation.
 - **Track progress in [`PROGRESS.md`](PROGRESS.md).** Update it after every task: tick what's done, note what's in progress.
 
 ## Workflow

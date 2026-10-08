@@ -30,7 +30,13 @@ See [`PRD.md`](PRD.md) → *Milestones for Claude Code*.
   - [ ] Lazy Grain
   - [ ] Lazy Blur
   - [ ] Lazy Bleach
-  - [ ] Halation (from scratch)
+  - [ ] Halation (from scratch) — follow [`PRD-halation.md`](PRD-halation.md), which overrides PRD.md on halation
+    - [ ] 1. Reference model on CPU (scatter + Mode A halation + highlight boost, unit tests; no UI)
+    - [ ] 2. GPU port (WGSL separable blur + mip pyramid; CPU on the same algorithm; CPU/GPU parity test)
+    - [ ] 3. Pipeline + UI (pipeline position, Film persona controls, presets, masks, history, MCP commands)
+    - [ ] 4. Look check (compare with spektrafilm renders and the failure-mode checklist; tune)
+    - [ ] 5. Mode B (physical kernel) behind the Advanced toggle, with its own tests
+    - [ ] 6. Calibration (optional): fit presets to your own bracketed scans
   - [ ] Film stock builder
 
 ## Milestone 1: check by hand
