@@ -25,7 +25,11 @@ impl Document {
             self.source.content_hash = p.content_hash.clone();
         }
         if session.develop_of(id).is_none_or(|now| *now != self.develop) {
-            session.set_develop(id, self.develop.clone(), &format!("Open {}.{EXTENSION}", self.name)).map_err(|e| e.to_string())?;
+            // committed directly, not through `set_develop`: with Auto Sync on, that would carry the
+            // file's settings over to every other selected photo
+            let label = format!("Open {}.{EXTENSION}", self.name);
+            let op = session.develop_op(id, self.develop.clone(), &label).ok_or_else(|| format!("photo {} isn't in the library", id.0))?;
+            session.commit(&label, op).map_err(|e| e.to_string())?;
         }
         Ok(())
     }
@@ -78,6 +82,20 @@ mod tests {
         doc.source.photo = PhotoId(u64::MAX);
         doc.open_into(&mut session).unwrap();
         assert_eq!(doc.source.photo, id);
+    }
+
+    #[test]
+    fn opening_never_auto_syncs_the_files_settings_to_other_selected_photos() {
+        let (mut session, a) = demo();
+        let b = session.catalog.photos().nth(1).unwrap().id;
+        session.selection.ids = vec![a, b];
+        session.selection.active = Some(a);
+        session.auto_sync = true;
+        let mut doc = Document::from_photo(&session, a).unwrap();
+        doc.develop.light.exposure = 0.9;
+        doc.open_into(&mut session).unwrap();
+        assert_eq!(session.develop_of(a).unwrap().light.exposure, 0.9);
+        assert_eq!(session.develop_of(b).unwrap().light.exposure, 0.0, "the other selected photo is untouched");
     }
 
     #[test]
