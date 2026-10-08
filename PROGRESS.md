@@ -4,7 +4,7 @@ See [`PRD.md`](PRD.md) → *Milestones for Claude Code*.
 
 ## Milestones
 
-- [x] **1. Shell** — top bar, empty persona areas, dark Adobe-grey theme, panel docking; switching personas works. *(CI runs for the first time once the repo has a GitHub remote)*
+- [x] **1. Shell** — top bar, empty persona areas, dark Adobe-grey theme, panel docking; switching personas works.
   - [x] 1. Workspace scaffold (Cargo workspace, lints, LICENSE, NOTICE, git)
   - [x] 2. Theme (dark grey tokens, egui + egui_dock styling)
   - [x] 3. Personas + commands (`persona.<id>`, Ctrl+1..7, disabled v2/v3 personas)
@@ -13,7 +13,7 @@ See [`PRD.md`](PRD.md) → *Milestones for Claude Code*.
   - [x] 6. Layout persistence + `window.resetWorkspace`
   - [x] 7. App binary (eframe/wgpu, DX12 on Windows)
   - [x] 8. Tests (egui_kittest)
-  - [x] 9. CI (Windows/Linux × x64/ARM64) — `.github/workflows/ci.yml`; not run yet (no remote)
+  - [x] 9. CI (Windows/Linux × x64/ARM64) — `.github/workflows/ci.yml`; first run green on all four (Oct 8, 2026, private repo K0RG-06-CA/studio)
 - [x] **2. Library + Develop** — embed LightCraft's library and develop views; Lightroom Classic panel positions and shortcuts (G, D, E, R, \\).
   - [x] 1. Pin LightCraft (`eeb136b`) + spike: side panels fill dock tabs; the right panel can't be drawn twice per frame (id clash), so Develop's History shares Edit's group
   - [x] 2. `lightroom` module: one LightCraft instance in the shell, logic + font warm-up, Studio style restored
@@ -78,7 +78,7 @@ Former hand checks and the tests that replaced them:
 - Dragging files in from Explorer: tests hand egui the dropped files; the OS → winit drag-and-drop path isn't exercised.
 - Real keyboard and mouse input through the OS: tests inject egui events and the smoke test runs commands, so OS key mapping (e.g. Ctrl as Cmd) isn't covered.
 - Readability at the real display's scaling: renders are at 1.0 points per pixel.
-- Windows x64 and Linux x64/ARM64: everything above runs only on this Windows ARM64 machine; CI has never run (no GitHub remote).
+- Windows x64 and Linux x64/ARM64: CI runs fmt, clippy and the headless tests there, but not the renders or the smoke test (no GPU/display on the runners).
 
 ## Notes
 
