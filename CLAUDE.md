@@ -17,6 +17,11 @@ Studio is an Affinity-style all-in-one photo app with Adobe-style personas, buil
   ```
 - Never push or add a remote unless asked.
 
+## Checking a milestone
+- **No "check by hand" lists, ever.** Every milestone is checked by automated tests: headless egui_kittest tests for behaviour (clicks, keys, drags, saving), and the opt-in offscreen render test (`$env:WGPU_BACKEND="dx12"; cargo test -p studio-shell -- --ignored render_personas`), whose PNGs in `target/renders/` Claude looks at itself.
+- Before calling a milestone done, also run the smoke test (`cargo test -p studio --test smoke -- --ignored`): the real app on DX12 runs a script through every persona and quits; any panic, error log or GPU failure fails it. Extend its script (`apps/studio/src/smoke.rs`) with each milestone's new commands. It opens a real window, so only run it when the user isn't studying (ask if unsure).
+- What truly can't be automated goes in one line under "Known untested" in `PROGRESS.md`. Never ask the user to check something by hand.
+
 ## Toolchain (Windows dev machine)
 - Use the MSVC toolchain (`aarch64-pc-windows-msvc`) with VS Build Tools 2022 (ARM64 C++ tools), not MSYS2/clang or `*-gnullvm`.
 - **Always run cargo from PowerShell, never Git Bash:** Git Bash's `/usr/bin/link` shadows MSVC's `link.exe` and every link step fails.
