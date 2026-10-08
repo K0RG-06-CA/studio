@@ -6,6 +6,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 pub mod base;
+pub mod file;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -129,7 +130,7 @@ impl Document {
     }
 }
 
-fn is_base(l: &Layer) -> bool {
+pub(crate) fn is_base(l: &Layer) -> bool {
     l.psd_blocks.iter().any(|(key, _)| *key == BASE_MARK)
 }
 
