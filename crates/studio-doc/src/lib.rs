@@ -7,6 +7,7 @@
 
 pub mod base;
 pub mod file;
+pub mod open;
 
 use std::path::PathBuf;
 use std::sync::Arc;
