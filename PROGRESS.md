@@ -4,7 +4,7 @@ See [`PRD.md`](PRD.md) → *Milestones for Claude Code*.
 
 ## Milestones
 
-- [ ] **1. Shell** — top bar, empty persona areas, dark Adobe-grey theme, panel docking; switching personas works. *(all tasks done and tested headless; waiting for your hand check below, and CI's first run once the repo has a GitHub remote)*
+- [x] **1. Shell** — top bar, empty persona areas, dark Adobe-grey theme, panel docking; switching personas works. *(CI runs for the first time once the repo has a GitHub remote)*
   - [x] 1. Workspace scaffold (Cargo workspace, lints, LICENSE, NOTICE, git)
   - [x] 2. Theme (dark grey tokens, egui + egui_dock styling)
   - [x] 3. Personas + commands (`persona.<id>`, Ctrl+1..7, disabled v2/v3 personas)
