@@ -12,6 +12,16 @@ use lightcraft_ui_egui::{LightcraftApp, panels};
 use crate::Persona;
 use crate::dock::Tab;
 
+/// Where a Lightroom Classic module key takes LightCraft.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Go {
+    Grid,
+    Loupe,
+    /// Develop's Edit tab.
+    Edit,
+    Crop,
+}
+
 /// Which edge of a dock tab a LightCraft panel hangs from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Side {
@@ -74,6 +84,22 @@ impl Lightroom {
     /// LightCraft's fonts are installed, so its panels can be drawn.
     pub fn ready(&self) -> bool {
         self.frames >= 2
+    }
+
+    /// Show what a module key asks for (after the persona switch).
+    pub fn go(&mut self, to: Go) {
+        match to {
+            Go::Grid => self.app.ui.view = ViewMode::PhotoGrid,
+            Go::Loupe => self.app.ui.view = ViewMode::Detail,
+            // the Edit tab shows Edit, or the editing tool already open
+            Go::Edit => {}
+            // LightCraft's own command; it toggles, so only when crop isn't open yet
+            Go::Crop => {
+                if self.app.ui.right != RightPanel::Crop {
+                    let _ = self.app.run("panel.crop", serde_json::json!({}));
+                }
+            }
+        }
     }
 
     /// Draw a LightCraft panel into `tab`, in LightCraft's style. Side panels keep room for a photo

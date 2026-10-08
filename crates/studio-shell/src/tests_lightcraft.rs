@@ -9,7 +9,7 @@
 
 use egui::{Rect, Ui, UiBuilder, pos2};
 use egui_kittest::Harness;
-use egui_kittest::kittest::Queryable;
+use egui_kittest::kittest::{NodeT, Queryable};
 use lightcraft_ui_egui::state::{MIN_PHOTO_WIDTH, RightPanel};
 use lightcraft_ui_egui::theme::Tokens;
 use lightcraft_ui_egui::{LightcraftApp, Services, panels};
@@ -242,4 +242,108 @@ fn develop_edits_the_photo_picked_in_library() {
     h.get_by_label("Library").click();
     h.run_steps(3);
     h.get_by_label("Grid");
+}
+
+fn lc<'h>(h: &'h Harness<'_, StudioShell>) -> &'h LightcraftApp {
+    &h.state().lightroom.as_ref().unwrap().app
+}
+
+fn press(h: &mut Harness<'_, StudioShell>, key: egui::Key) {
+    h.key_press(key);
+    h.run_steps(3);
+}
+
+#[test]
+fn g_e_d_r_switch_modules_like_lightroom_classic() {
+    use lightcraft_ui_egui::state::{BeforeAfter, ViewMode};
+    let mut h = studio();
+    h.run_steps(10);
+    press(&mut h, egui::Key::D);
+    assert_eq!((h.state().persona, lc(&h).ui.view, lc(&h).ui.right), (Persona::Develop, ViewMode::Detail, RightPanel::Edit));
+    press(&mut h, egui::Key::G);
+    assert_eq!((h.state().persona, lc(&h).ui.view), (Persona::Library, ViewMode::PhotoGrid));
+    h.get_by_label("Grid");
+    press(&mut h, egui::Key::E);
+    assert_eq!((h.state().persona, lc(&h).ui.view), (Persona::Library, ViewMode::Detail));
+    h.get_by_label("Loupe");
+    // Library keeps its own view while Develop shows the loupe
+    press(&mut h, egui::Key::G);
+    press(&mut h, egui::Key::D);
+    h.get_by_label("Library").click();
+    h.run_steps(3);
+    assert_eq!(lc(&h).ui.view, ViewMode::PhotoGrid);
+    // R: crop in Develop, in the Edit tab even when History was showing
+    press(&mut h, egui::Key::D);
+    h.get_by_label("History").click();
+    h.run_steps(3);
+    press(&mut h, egui::Key::R);
+    assert_eq!((h.state().persona, lc(&h).ui.right), (Persona::Develop, RightPanel::Crop));
+    assert!(lc_widget(&h, "panel:right_panel").is_some(), "crop panel shows");
+    press(&mut h, egui::Key::R);
+    assert_eq!(lc(&h).ui.right, RightPanel::Crop, "R again keeps crop open");
+    // \ is LightCraft's: before/after
+    press(&mut h, egui::Key::Backslash);
+    assert_eq!(lc(&h).ui.before_after, BeforeAfter::Original);
+}
+
+#[test]
+fn ctrl_numbers_only_switch_personas() {
+    let mut h = studio();
+    h.run_steps(10);
+    press(&mut h, egui::Key::D);
+    let sections = lc(&h).ui.open_sections.clone();
+    for n in [egui::Key::Num2, egui::Key::Num1, egui::Key::Num2] {
+        h.key_press_modifiers(egui::Modifiers::COMMAND, n);
+        h.run_steps(3);
+    }
+    assert_eq!(h.state().persona, Persona::Develop);
+    assert_eq!(lc(&h).ui.open_sections, sections, "LightCraft's Cmd+1/2 (Edit sections) didn't fire");
+}
+
+#[test]
+fn lightroom_keys_do_nothing_in_pixel() {
+    let mut h = studio();
+    h.run_steps(10);
+    let marks =
+        |h: &Harness<'_, StudioShell>| -> Vec<String> { lc(h).session.catalog.photos().map(|p| format!("{} {:?}", p.rating, p.flag)).collect() };
+    let before = marks(&h);
+    h.get_by_label("Pixel").click();
+    h.run_steps(3);
+    for key in [egui::Key::G, egui::Key::D, egui::Key::E, egui::Key::R, egui::Key::P, egui::Key::X, egui::Key::Num3, egui::Key::Num0] {
+        press(&mut h, key);
+    }
+    assert_eq!(h.state().persona, Persona::Pixel);
+    assert_eq!(marks(&h), before, "no photo was flagged or rated from Pixel");
+}
+
+#[test]
+fn lightroom_keys_type_into_text_fields() {
+    let mut app = LightcraftApp::new(lightcraft_engine::Session::with_demo(), Services::default());
+    app.ui.settings.gpu = false;
+    let shell = StudioShell { lightroom: Some(Lightroom::new(app)), ..Default::default() };
+    let mut text = String::new();
+    let mut h = Harness::builder().with_size([1400.0, 900.0]).build_ui_state(
+        move |ui, shell: &mut StudioShell| {
+            egui::Window::new("Find").show(ui.ctx(), |ui| {
+                let label = ui.label("Test field");
+                ui.text_edit_singleline(&mut text).labelled_by(label.id);
+            });
+            shell.ui(ui);
+        },
+        shell,
+    );
+    h.run_steps(10);
+    let field = h.get_all_by_role(egui::accesskit::Role::TextInput).find(|n| n.accesskit_node().label().as_deref() == Some("Test field"));
+    field.expect("the test field").focus();
+    h.run_steps(2);
+    for key in [egui::Key::D, egui::Key::E, egui::Key::R, egui::Key::G] {
+        press(&mut h, key);
+        let at = (h.state().persona, lc(&h).ui.view);
+        assert_eq!(at, (Persona::Library, lightcraft_ui_egui::state::ViewMode::PhotoGrid), "{key:?} while typing");
+    }
+    // and with the field unfocused, D works again
+    h.key_press(egui::Key::Escape);
+    h.run_steps(2);
+    press(&mut h, egui::Key::D);
+    assert_eq!(h.state().persona, Persona::Develop);
 }

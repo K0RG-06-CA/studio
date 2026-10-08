@@ -19,7 +19,7 @@ See [`PRD.md`](PRD.md) → *Milestones for Claude Code*.
   - [x] 2. `lightroom` module: one LightCraft instance in the shell, logic + font warm-up, Studio style restored
   - [x] 3. Library persona (Folders, grid/loupe, Keywording | Metadata, bottom bar)
   - [x] 4. Develop persona (Presets, loupe + filmstrip, Edit | History)
-  - [ ] 5. Shortcuts (G, E, D, R studio-side; `\` passed through; Ctrl+1..7 kept for personas)
+  - [x] 5. Shortcuts (G, E, D, R studio-side; `\` passed through; Ctrl+1..7 kept for personas)
   - [ ] 6. App wiring (`Pictures\Studio Library` / `STUDIO_LIBRARY`, UI state saved, save on leaving Library/Develop and on exit, file pickers)
   - [ ] 7. Render check, NOTICE, hand-check list
 - [ ] **3. Shared document** — one document model (layer tree + develop settings) and save format; Develop edits as a non-destructive base layer.

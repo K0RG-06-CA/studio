@@ -43,6 +43,14 @@ const TOOLS: [(&str, &str); 19] = [
     ("Z", "Zoom"),
 ];
 
+/// Lightroom Classic's module keys: (key, command, persona, what LightCraft shows).
+const LIGHTROOM_KEYS: [(egui::Key, &str, Persona, lightroom::Go); 4] = [
+    (egui::Key::G, "view.grid", Persona::Library, lightroom::Go::Grid),
+    (egui::Key::E, "view.loupe", Persona::Library, lightroom::Go::Loupe),
+    (egui::Key::D, "view.develop", Persona::Develop, lightroom::Go::Edit),
+    (egui::Key::R, "tool.crop", Persona::Develop, lightroom::Go::Crop),
+];
+
 /// The shell's state and entry points. Serialisable: the app saves it between launches.
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct StudioShell {
@@ -80,7 +88,23 @@ impl StudioShell {
     ///
     /// - `persona.<id>`: switch persona (v2/v3 personas are disabled and return an error).
     /// - `window.resetWorkspace`: put the current persona's panels back where they started.
+    /// - Lightroom Classic's module keys: `view.grid` (G) and `view.loupe` (E) in Library,
+    ///   `view.develop` (D), `tool.crop` (R) in Develop.
     pub fn run(&mut self, id: &str) -> Result<(), String> {
+        if let Some(&(_, _, persona, view)) = LIGHTROOM_KEYS.iter().find(|k| k.1 == id) {
+            self.run(&persona.command())?;
+            if let Some(lr) = &mut self.lightroom {
+                lr.go(view);
+            }
+            if persona == Persona::Develop {
+                // the tab LightCraft's Edit and Crop panels show in
+                let dock = &mut self.layouts[Persona::Develop as usize];
+                if let Some(path) = dock.find_tab(&Tab::Panel("Edit".to_owned())) {
+                    let _ = dock.set_active_tab(path);
+                }
+            }
+            return Ok(());
+        }
         if id == "window.resetWorkspace" {
             self.layouts[self.persona as usize] = dock::default_layout(self.persona);
             return Ok(());
@@ -195,10 +219,22 @@ impl StudioShell {
     }
 
     fn shortcuts(&mut self, ui: &mut egui::Ui) {
+        // Consumed here, so LightCraft's own Cmd+1..5 (its Edit sections) never see them.
         for p in Persona::ALL {
             if ui.input_mut(|i| i.consume_shortcut(&p.shortcut())) {
                 // A disabled persona's shortcut does nothing, like its greyed-out button.
                 let _ = self.run(&p.command());
+            }
+        }
+        // Lightroom's single keys belong to the Lightroom personas (in Pixel, G and E are Photoshop
+        // tools), never while typing, and only bare: Shift+E and the like stay LightCraft's.
+        let lightroom = matches!(self.persona, Persona::Library | Persona::Develop | Persona::Film);
+        if !lightroom || ui.ctx().egui_wants_keyboard_input() {
+            return;
+        }
+        for (key, id, _, _) in LIGHTROOM_KEYS {
+            if ui.input_mut(|i| i.modifiers.is_none() && i.consume_key(egui::Modifiers::NONE, key)) {
+                let _ = self.run(id);
             }
         }
     }
