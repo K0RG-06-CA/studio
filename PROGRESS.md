@@ -6,7 +6,7 @@ See [`PRD.md`](PRD.md) → *Milestones for Claude Code*.
 
 - [ ] **1. Shell** — top bar, empty persona areas, dark Adobe-grey theme, panel docking; switching personas works. *(in progress)*
   - [x] 1. Workspace scaffold (Cargo workspace, lints, LICENSE, NOTICE, git)
-  - [ ] 2. Theme (dark grey tokens, egui + egui_dock styling)
+  - [x] 2. Theme (dark grey tokens, egui + egui_dock styling)
   - [ ] 3. Personas + commands (`persona.<id>`, Ctrl+1..7, disabled v2/v3 personas)
   - [ ] 4. Top bar (persona buttons left, document name right)
   - [ ] 5. Per-persona layouts + docking (placeholder panels)

@@ -12,5 +12,12 @@ impl eframe::App for App {
 }
 
 fn main() -> eframe::Result {
-    eframe::run_native("Studio", eframe::NativeOptions::default(), Box::new(|_cc| Ok(Box::new(App(StudioShell::default())))))
+    eframe::run_native(
+        "Studio",
+        eframe::NativeOptions::default(),
+        Box::new(|cc| {
+            studio_shell::theme::apply(&cc.egui_ctx);
+            Ok(Box::new(App(StudioShell::default())))
+        }),
+    )
 }
