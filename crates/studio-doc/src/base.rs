@@ -29,6 +29,11 @@ pub struct Base {
     shown: Option<u64>,
     /// The render in flight: the settings hash it renders, and where its result arrives.
     pending: Option<(u64, Receiver<RenderResult>)>,
+    /// A render that failed: the settings hash and why. Not tried again until the settings change
+    /// (a photo whose file is gone would otherwise be re-decoded every frame).
+    failed: Option<(u64, String)>,
+    /// Renders started so far.
+    started: u64,
 }
 
 impl Base {
@@ -41,6 +46,11 @@ impl Base {
         self.pending.is_some()
     }
 
+    /// How many renders were started so far.
+    pub fn started(&self) -> u64 {
+        self.started
+    }
+
     /// The base shows the current settings (and nothing is in flight).
     pub fn up_to_date(&self, doc: &Document) -> bool {
         self.pending.is_none() && self.shown == Some(doc.develop.hash64())
@@ -49,7 +59,8 @@ impl Base {
     /// Once per frame: mirror the catalog's settings into `doc`, take a finished render into the
     /// base layer, and start one when the base is stale and no slider drag is open (a drag then
     /// renders once, at release). Errors are LightCraft's (a photo gone from the library, a
-    /// decode that failed); the base keeps its last pixels.
+    /// decode that failed); the base keeps its last pixels, and a failed render is reported again
+    /// every frame, not retried, until the settings change.
     pub fn sync(&mut self, session: &mut Session, doc: &mut Document) -> Result<(), String> {
         if let Some(now) = session.develop_of(doc.source.photo)
             && !self.mirrored.as_ref().is_some_and(|m| Arc::ptr_eq(m, &now))
@@ -60,8 +71,17 @@ impl Base {
             }
             self.mirrored = Some(now);
         }
-        self.take(session, doc)?;
         let want = doc.develop.hash64();
+        if let Err(e) = self.take(session, doc) {
+            self.failed = Some((want, e.clone()));
+            return Err(e);
+        }
+        if self.failed.as_ref().is_some_and(|(hash, _)| *hash != want) {
+            self.failed = None;
+        }
+        if let Some((_, why)) = &self.failed {
+            return Err(why.clone());
+        }
         if self.pending.is_none() && self.shown != Some(want) && session.interaction.is_none() {
             self.start(session, doc, want)?;
         }
@@ -76,10 +96,14 @@ impl Base {
         // 16 bits: LightCraft renders deep output on the CPU (its GPU kernel writes 8-bit)
         job.request.depth = OutputDepth::U16;
         let (tx, rx) = channel();
-        std::thread::spawn(move || {
-            let _ = tx.send(job.run());
-        });
+        std::thread::Builder::new()
+            .name("studio-base".into())
+            .spawn(move || {
+                let _ = tx.send(job.run());
+            })
+            .map_err(|e| format!("no thread for the render: {e}"))?;
         self.pending = Some((want, rx));
+        self.started += 1;
         Ok(())
     }
 
@@ -192,10 +216,11 @@ mod tests {
         assert!(doc.revision > rev, "mirroring the settings is a change");
         settle(&mut base, &mut session, &mut doc);
         assert!(mean_rgb(&doc) > before + 0.05, "{before} → {}", mean_rgb(&doc));
-        // and without a sync nothing would have moved
+        // without a sync the document doesn't know (the mirror is the sync's job)
         let (mut other_session, mut other, mut other_base) = open();
         settle(&mut other_base, &mut other_session, &mut other);
         other_session.set_develop(id, s, "Exposure").unwrap();
+        assert_eq!(other.develop.light.exposure, 0.0);
         assert!((mean_rgb(&other) - before).abs() < 1e-6);
     }
 
@@ -219,6 +244,56 @@ mod tests {
         assert!(base.rendering());
         settle(&mut base, &mut session, &mut doc);
         assert!(doc.develop.light.exposure == 1.5 && base.up_to_date(&doc));
+        assert_eq!(base.started(), 2, "the first render, and one for the whole drag");
+    }
+
+    /// A 1×1 PNG.
+    const PNG: [u8; 67] = [
+        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
+        0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4, 0x89, 0x00, 0x00, 0x00, 0x0A, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x63, 0x00, 0x01,
+        0x00, 0x00, 0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
+    ];
+
+    #[test]
+    fn a_render_that_fails_is_reported_every_frame_but_tried_once_until_the_settings_change() {
+        lightcraft_engine::gpu::set_enabled(false);
+        let dir = std::env::temp_dir().join(format!("studio-doc-fail-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let png = dir.join("gone.png");
+        std::fs::write(&png, PNG).unwrap();
+        let mut session = Session::new().with_fs().with_system_clock();
+        session.open_library(dir.join("lib"), false).unwrap();
+        let r = session.execute("library.import", &serde_json::json!({"paths": [png.to_string_lossy()]})).unwrap();
+        let id = PhotoId(r["imported"][0].as_u64().unwrap());
+        let mut doc = Document::from_photo(&session, id).unwrap();
+        // the file disappears before the first render
+        std::fs::remove_file(&png).unwrap();
+        let mut base = Base::new();
+        let t0 = Instant::now();
+        let first = loop {
+            match base.sync(&mut session, &mut doc) {
+                Err(e) => break e,
+                Ok(()) => {
+                    assert!(base.rendering() && t0.elapsed() < Duration::from_secs(60), "the render never failed");
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+            }
+        };
+        assert_eq!(base.started(), 1);
+        for _ in 0..3 {
+            assert_eq!(base.sync(&mut session, &mut doc).unwrap_err(), first, "reported again");
+            assert!(!base.rendering(), "not tried again");
+        }
+        assert_eq!(base.started(), 1);
+        // new settings: one new attempt
+        let mut s = doc.develop.clone();
+        s.light.exposure = 1.0;
+        session.set_develop(id, s, "Exposure").unwrap();
+        base.sync(&mut session, &mut doc).unwrap();
+        assert!(base.rendering() && base.started() == 2);
+        session.close_library().unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
