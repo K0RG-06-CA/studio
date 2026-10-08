@@ -11,7 +11,7 @@ See [`PRD.md`](PRD.md) → *Milestones for Claude Code*.
   - [x] 4. Top bar (persona buttons left, document name right)
   - [x] 5. Per-persona layouts + docking (placeholder panels)
   - [x] 6. Layout persistence + `window.resetWorkspace`
-  - [ ] 7. App binary (eframe/wgpu, DX12 on Windows)
+  - [x] 7. App binary (eframe/wgpu, DX12 on Windows)
   - [ ] 8. Tests (egui_kittest)
   - [ ] 9. CI (Windows/Linux × x64/ARM64)
 - [ ] **2. Library + Develop** — embed LightCraft's library and develop views; Lightroom Classic panel positions and shortcuts (G, D, E, R, \\).
