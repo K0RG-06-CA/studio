@@ -1,0 +1,38 @@
+[workspace]
+resolver = "3"
+members = ["crates/*", "apps/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+rust-version = "1.95"
+
+[workspace.dependencies]
+# internal
+studio-shell = { path = "crates/studio-shell" }
+
+# external — egui/eframe match storytold's LightCraft and PhotoCraft (0.36); bump in lockstep
+egui = "0.36"
+eframe = { version = "0.36", default-features = false }
+egui_dock = { version = "0.21", features = ["serde"] }
+egui_kittest = "0.36"
+serde = { version = "1", features = ["derive"] }
+log = "0.4"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+dbg_macro = "warn"
+todo = "warn"
+
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.dev]
+opt-level = 1
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

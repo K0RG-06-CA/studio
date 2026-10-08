@@ -1,0 +1,18 @@
+[package]
+name = "studio-shell"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Studio shell: Affinity-style top bar, personas, dark theme and panel docking"
+
+[lints]
+workspace = true
+
+[dependencies]
+egui = { workspace = true }
+egui_dock = { workspace = true }
+serde = { workspace = true }
+
+[dev-dependencies]
+egui_kittest = { workspace = true }
