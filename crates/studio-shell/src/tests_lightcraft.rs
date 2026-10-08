@@ -206,3 +206,40 @@ fn library_shows_lightcraft_in_lightroom_classic_places() {
     h.run_steps(3);
     assert_eq!(h.state().lightroom.as_ref().unwrap().app.ui.right, RightPanel::Info);
 }
+
+#[test]
+fn develop_edits_the_photo_picked_in_library() {
+    let mut h = studio();
+    h.run_steps(10);
+    let lr = h.state().lightroom.as_ref().unwrap();
+    let last = lr.app.session.catalog.photos().filter_map(|p| lc_widget(&h, &format!("thumb:{}", p.id.0)).map(|r| (p.id, r))).last();
+    let (id, thumb) = last.expect("a thumbnail");
+    click_at(&mut h, thumb.center());
+    h.get_by_label("Develop").click();
+    h.run_steps(5);
+    for tab in ["Presets", "Loupe", "Edit", "History"] {
+        h.get_by_label(tab);
+    }
+    let lr = h.state().lightroom.as_ref().unwrap();
+    assert_eq!(lr.app.session.active(), Some(id), "Develop shows the photo picked in Library");
+    assert_eq!(lr.app.ui.right, RightPanel::Edit);
+    // the loupe in the middle, Edit on the right
+    let image = lc_widget(&h, "canvas:image").expect("loupe");
+    let edit = lc_widget(&h, "panel:right_panel").expect("Edit panel");
+    assert!(image.right() <= edit.left(), "{image:?} {edit:?}");
+    // a slider command edits that photo
+    let develop = |h: &Harness<'_, StudioShell>| h.state().lightroom.as_ref().unwrap().app.session.develop_of(id);
+    let before = develop(&h);
+    let lr = h.state_mut().lightroom.as_mut().unwrap();
+    lr.app.run("develop.set", serde_json::json!({"control": "light.exposure", "value": 0.7})).unwrap();
+    h.run_steps(2);
+    assert_ne!(before, develop(&h));
+    // History shows LightCraft's activity
+    h.get_by_label("History").click();
+    h.run_steps(3);
+    assert_eq!(h.state().lightroom.as_ref().unwrap().app.ui.right, RightPanel::Activity);
+    // back in Library: the grid it was showing
+    h.get_by_label("Library").click();
+    h.run_steps(3);
+    h.get_by_label("Grid");
+}

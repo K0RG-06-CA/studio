@@ -126,6 +126,16 @@ impl Lightroom {
             (Persona::Library, "Folders") => self.show(ui, Side::Left, panels::left::show),
             (Persona::Library, "Keywording") => self.right(ui, RightPanel::Keywords),
             (Persona::Library, "Metadata") => self.right(ui, RightPanel::Info),
+            (Persona::Develop, "Presets") => self.show(ui, Side::Right, panels::presets::show),
+            (Persona::Develop, "Edit") => {
+                // the Edit tab also shows the editing tools LightCraft opens in its right panel
+                let tool = matches!(
+                    self.app.ui.right,
+                    RightPanel::Crop | RightPanel::Remove | RightPanel::Masking | RightPanel::RedEye | RightPanel::Profiles
+                );
+                self.right(ui, if tool { self.app.ui.right } else { RightPanel::Edit });
+            }
+            (Persona::Develop, "History") => self.right(ui, RightPanel::Activity),
             _ => return false,
         }
         true

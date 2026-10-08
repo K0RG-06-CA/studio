@@ -32,10 +32,8 @@ fn spec(p: Persona) -> Spec {
         // and collections; its right panel shows one thing at a time, so those panels are tabs of
         // one group. (No Navigator, Quick Develop or Histogram of their own in LightCraft.)
         Persona::Library => Spec { left: (0.18, &[(1.0, &["Folders"])]), right: (0.2, &[(1.0, &["Keywording", "Metadata"])]) },
-        Persona::Develop => Spec {
-            left: (0.18, &[(0.3, &["Navigator"]), (0.25, &["Presets"]), (0.15, &["Snapshots"]), (0.3, &["History"])]),
-            right: (0.2, &[(0.2, &["Histogram"]), (0.8, &["Edit"])]),
-        },
+        // History sits with Edit (both are LightCraft's right panel), not in the left column.
+        Persona::Develop => Spec { left: (0.18, &[(1.0, &["Presets"])]), right: (0.2, &[(1.0, &["Edit", "History"])]) },
         Persona::Film => Spec {
             left: (0.18, &[(0.3, &["Navigator"]), (0.3, &["Film Stocks"]), (0.4, &["History"])]),
             right: (0.2, &[(0.2, &["Histogram"]), (0.8, &["Film Effects"])]),
