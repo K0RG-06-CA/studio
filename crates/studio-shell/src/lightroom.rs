@@ -84,6 +84,8 @@ impl Lightroom {
         if std::mem::take(&mut self.app.ui.quit) {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
+        // as its `ui` does: the preset or profile under the pointer sets it again this frame
+        self.app.hover_preview = None;
         if self.style.is_none() {
             // LightCraft replaced the global style (and the fonts, which Studio keeps: its panels
             // need its "semibold" family)

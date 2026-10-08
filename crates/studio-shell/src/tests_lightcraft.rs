@@ -530,3 +530,20 @@ fn closing_from_pixel_with_unsaved_changes_asks_first() {
     h.run_steps(1);
     assert_eq!(h.state().persona, Persona::Pixel);
 }
+
+#[test]
+fn hovering_a_preset_previews_it_only_while_hovered() {
+    let mut h = studio();
+    h.run_steps(10);
+    let lr = h.state_mut().lightroom.as_mut().unwrap();
+    lr.app.session.selection.active = lr.app.session.catalog.photos().next().map(|p| p.id);
+    h.state_mut().run("view.develop").unwrap();
+    h.run_steps(5);
+    let preset = lc(&h).widgets.iter().find(|(w, _)| w.starts_with("preset:")).map(|(_, r)| *r).expect("a preset row");
+    h.hover_at(preset.center());
+    h.run_steps(3);
+    assert!(lc(&h).hover_preview.is_some(), "the loupe previews the hovered preset");
+    h.hover_at(egui::pos2(700.0, 400.0));
+    h.run_steps(3);
+    assert!(lc(&h).hover_preview.is_none(), "and stops once the pointer leaves it");
+}
