@@ -39,7 +39,8 @@ const TOOLS: [(&str, &str); 19] = [
     ("Z", "Zoom"),
 ];
 
-/// The shell's state and entry points.
+/// The shell's state and entry points. Serialisable: the app saves it between launches.
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct StudioShell {
     pub persona: Persona,
     /// Each persona's dock layout, indexed by `Persona as usize`; kept while switching away.
@@ -53,10 +54,23 @@ impl Default for StudioShell {
 }
 
 impl StudioShell {
+    /// The shell from a saved state, or the default one if there is none or it can't be used
+    /// (e.g. saved by a version where a now-disabled persona was active).
+    pub fn restore(saved: Option<StudioShell>) -> StudioShell {
+        saved.filter(|s| s.persona.enabled()).unwrap_or_default()
+    }
+}
+
+impl StudioShell {
     /// Run a command by id. Every user action goes through here so the CLI and MCP can drive it.
     ///
     /// - `persona.<id>`: switch persona (v2/v3 personas are disabled and return an error).
+    /// - `window.resetWorkspace`: put the current persona's panels back where they started.
     pub fn run(&mut self, id: &str) -> Result<(), String> {
+        if id == "window.resetWorkspace" {
+            self.layouts[self.persona as usize] = dock::default_layout(self.persona);
+            return Ok(());
+        }
         if let Some(p) = id.strip_prefix("persona.") {
             let p = Persona::from_id(p).ok_or_else(|| format!("unknown persona `{p}`"))?;
             if !p.enabled() {
@@ -180,5 +194,52 @@ mod tests {
         assert!(s.run("persona.").is_err());
         assert!(s.run("file.open").is_err());
         assert_eq!(s.persona, Persona::Pixel, "failed commands change nothing");
+    }
+
+    fn has_panel(s: &StudioShell, p: Persona, name: &str) -> bool {
+        s.layouts[p as usize].find_tab(&Tab::Panel(name.to_owned())).is_some()
+    }
+
+    /// Close a panel the way a user rearranging the dock would change the layout.
+    fn remove_panel(s: &mut StudioShell, p: Persona, name: &str) {
+        let dock = &mut s.layouts[p as usize];
+        let path = dock.find_tab(&Tab::Panel(name.to_owned())).unwrap();
+        dock.remove_tab(path).unwrap();
+    }
+
+    #[test]
+    fn each_persona_keeps_its_own_layout_and_reset_restores_only_the_current_one() {
+        let mut s = StudioShell::default();
+        remove_panel(&mut s, Persona::Pixel, "History");
+        remove_panel(&mut s, Persona::Library, "Folders");
+        s.run("persona.pixel").unwrap();
+        s.run("persona.library").unwrap();
+        s.run("persona.pixel").unwrap();
+        assert!(!has_panel(&s, Persona::Pixel, "History"), "layout survives switching personas");
+        s.run("window.resetWorkspace").unwrap();
+        assert!(has_panel(&s, Persona::Pixel, "History"));
+        assert!(!has_panel(&s, Persona::Library, "Folders"), "other personas are untouched");
+    }
+
+    #[test]
+    fn shell_state_survives_save_and_restore() {
+        let mut s = StudioShell::default();
+        s.run("persona.develop").unwrap();
+        remove_panel(&mut s, Persona::Develop, "Presets");
+        let saved = ron::to_string(&s).unwrap();
+        let back = StudioShell::restore(Some(ron::from_str(&saved).unwrap()));
+        assert_eq!(back.persona, Persona::Develop);
+        assert!(!has_panel(&back, Persona::Develop, "Presets"));
+        assert!(has_panel(&back, Persona::Develop, "History"));
+    }
+
+    #[test]
+    fn restore_falls_back_to_defaults_for_unusable_state() {
+        assert_eq!(StudioShell::restore(None).persona, Persona::Library);
+        // Only reachable through a hand-edited or future save.
+        let s = StudioShell { persona: Persona::Vector, ..Default::default() };
+        assert_eq!(StudioShell::restore(Some(s)).persona, Persona::Library);
+        // A save with the wrong number of layouts doesn't parse, so the app falls back to defaults.
+        assert!(ron::from_str::<StudioShell>("(persona: pixel, layouts: [])").is_err());
     }
 }

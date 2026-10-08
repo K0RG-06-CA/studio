@@ -1,7 +1,8 @@
 //! Personas: the Affinity-style modes in the top bar. Each one looks like the Adobe app it replaces.
 
 /// One mode of the app, in top-bar order (Ctrl+1 … Ctrl+7).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Persona {
     /// Lightroom Classic Library.
     #[default]
