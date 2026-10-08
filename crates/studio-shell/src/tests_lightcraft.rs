@@ -347,3 +347,33 @@ fn lightroom_keys_type_into_text_fields() {
     press(&mut h, egui::Key::D);
     assert_eq!(h.state().persona, Persona::Develop);
 }
+
+#[test]
+fn leaving_develop_saves_its_edits() {
+    let dir = std::env::temp_dir().join(format!("studio-leave-save-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut session = lightcraft_engine::Session::new().with_fs();
+    session.open_library(&dir, true).unwrap();
+    let mut app = LightcraftApp::new(session, Services::default());
+    app.ui.settings.gpu = false;
+    let first = app.session.catalog.photos().next().map(|p| p.id);
+    app.session.selection.active = first;
+    let mut shell = StudioShell { lightroom: Some(Lightroom::new(app)), ..Default::default() };
+    shell.run("persona.develop").unwrap();
+    let log = dir.join("catalog.log");
+    let size = || std::fs::metadata(&log).map(|m| m.len()).unwrap_or(0);
+    let lr = shell.lightroom.as_mut().unwrap();
+    lr.app.session.persist_if_dirty();
+    let before = size();
+    // a slider drag still in progress (LightCraft commits it on release, which the Edit panel
+    // never sees once Pixel shows), then straight to Pixel
+    lr.app.session.begin_interaction("Exposure").unwrap();
+    lr.app.run("develop.set", serde_json::json!({"control": "light.exposure", "value": 0.7})).unwrap();
+    assert_eq!(size(), before, "not saved yet");
+    shell.run("persona.pixel").unwrap();
+    assert!(size() > before, "the edit is in the library's log on disk");
+    let lr = shell.lightroom.as_mut().unwrap();
+    lr.app.session.close_library().unwrap();
+    let _ = std::fs::remove_dir_all(&dir);
+}

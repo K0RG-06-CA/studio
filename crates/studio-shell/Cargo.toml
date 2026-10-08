@@ -19,6 +19,6 @@ lightcraft-engine = { workspace = true }
 
 [dev-dependencies]
 # same format eframe saves the app state in
-ron = "0.12"
+ron = { workspace = true }
 # wgpu + snapshot: only for the opt-in `render_personas` test (PNG renders for a visual check)
 egui_kittest = { workspace = true, features = ["wgpu", "snapshot"] }

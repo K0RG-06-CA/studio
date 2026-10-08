@@ -1,12 +1,21 @@
 #![forbid(unsafe_code)]
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+use std::ffi::OsString;
+use std::path::PathBuf;
+
 use eframe::egui_wgpu::{WgpuConfiguration, WgpuSetup};
 use eframe::wgpu::Backends;
+use lightcraft_engine::Session;
+use lightcraft_ui_egui::panels::library_problem::LibraryProblem;
+use lightcraft_ui_egui::{LightcraftApp, Services, UiState};
 use studio_shell::StudioShell;
+use studio_shell::lightroom::Lightroom;
 
 /// Storage key for the shell state (active persona and every persona's panel layout).
 const SHELL_KEY: &str = "studio.shell";
+/// Storage key for LightCraft's UI state (panel widths, open sections, settings…).
+const LIGHTCRAFT_KEY: &str = "studio.lightcraft";
 
 struct App(StudioShell);
 
@@ -17,6 +26,64 @@ impl eframe::App for App {
 
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         eframe::set_value(storage, SHELL_KEY, &self.0);
+        if let Some(lr) = &self.0.lightroom {
+            eframe::set_value(storage, LIGHTCRAFT_KEY, &lr.app.ui);
+        }
+    }
+
+    fn on_exit(&mut self) {
+        // flush the catalog and write its snapshot
+        if let Some(lr) = &mut self.0.lightroom
+            && let Err(e) = lr.app.session.close_library()
+        {
+            eprintln!("studio: closing the library failed: {e}");
+        }
+    }
+}
+
+/// Where the photo library lives: `STUDIO_LIBRARY` if set, else `Pictures\Studio Library` in the
+/// home folder. Its own library, not LightCraft's: a library is locked by one app at a time.
+fn library_dir(env: Option<OsString>, home: Option<OsString>) -> Option<PathBuf> {
+    if let Some(p) = env.filter(|p| !p.is_empty()) {
+        return Some(PathBuf::from(p));
+    }
+    Some(PathBuf::from(home?).join("Pictures").join("Studio Library"))
+}
+
+/// LightCraft on the library, with its saved UI state. A library that can't be opened leaves an
+/// empty in-memory one, and LightCraft's own window says why and offers the ways out.
+fn lightroom(saved: Option<UiState>) -> Lightroom {
+    let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" });
+    let unopened = || Session::new().with_fs().with_system_clock();
+    let (session, problem) = match library_dir(std::env::var_os("STUDIO_LIBRARY"), home) {
+        None => (unopened(), Some(LibraryProblem::new("", "There is no home folder to keep the library in. Choose a folder for it."))),
+        Some(dir) => {
+            let mut s = unopened();
+            match s.open_library(&dir, false) {
+                Ok(_) => (s, None),
+                Err(e) => (unopened(), Some(LibraryProblem::new(dir.to_string_lossy(), e.to_string()))),
+            }
+        }
+    };
+    let mut app = LightcraftApp::new(session, services());
+    if let Some(ui) = saved {
+        app.ui = ui.sanitized();
+    }
+    app.library_problem = problem;
+    Lightroom::new(app)
+}
+
+/// What LightCraft needs from the desktop: file and folder pickers, and writing exports.
+fn services() -> Services {
+    let paths = |p: Option<Vec<PathBuf>>| p.unwrap_or_default().into_iter().map(|p| p.to_string_lossy().to_string()).collect();
+    Services {
+        pick_files: Some(Box::new(move || paths(rfd::FileDialog::new().set_title("Import Photos").pick_files()))),
+        pick_preset_files: Some(Box::new(move || paths(rfd::FileDialog::new().set_title("Import Presets").pick_files()))),
+        pick_folder: Some(Box::new(|| rfd::FileDialog::new().set_title("Open Library").pick_folder().map(|p| p.to_string_lossy().to_string()))),
+        // atomic (temp file, then rename), as LightCraft writes
+        write: Some(Box::new(lightcraft_engine::export::write_file)),
+        write_shared: Some(std::sync::Arc::new(lightcraft_engine::export::write_file)),
+        ..Default::default()
     }
 }
 
@@ -53,7 +120,9 @@ fn main() -> eframe::Result {
             studio_shell::theme::apply(&cc.egui_ctx);
             // A missing or unreadable saved state falls back to the default layout.
             let saved = cc.storage.and_then(|s| eframe::get_value(s, SHELL_KEY));
-            Ok(Box::new(App(StudioShell::restore(saved))))
+            let mut shell = StudioShell::restore(saved);
+            shell.lightroom = Some(lightroom(cc.storage.and_then(|s| eframe::get_value(s, LIGHTCRAFT_KEY))));
+            Ok(Box::new(App(shell)))
         }),
     )
 }
@@ -61,6 +130,24 @@ fn main() -> eframe::Result {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn library_lives_in_pictures_unless_studio_library_is_set() {
+        let home = Some(OsString::from("C:/Users/me"));
+        assert_eq!(library_dir(None, home.clone()), Some(PathBuf::from("C:/Users/me/Pictures/Studio Library")));
+        assert_eq!(library_dir(Some("".into()), home.clone()), Some(PathBuf::from("C:/Users/me/Pictures/Studio Library")));
+        assert_eq!(library_dir(Some("D:/Photos".into()), home), Some(PathBuf::from("D:/Photos")));
+        assert_eq!(library_dir(None, None), None);
+    }
+
+    #[test]
+    fn lightcraft_ui_state_survives_eframe_storage() {
+        // eframe stores values as RON
+        let mut ui = UiState { right_width: 333.0, ..Default::default() };
+        ui.open_sections = vec!["color".into()];
+        let back: UiState = ron::from_str(&ron::to_string(&ui).unwrap()).unwrap();
+        assert_eq!((back.right_width, back.open_sections), (333.0, vec!["color".to_owned()]));
+    }
 
     #[test]
     fn windows_uses_dx12_only_unless_overridden() {

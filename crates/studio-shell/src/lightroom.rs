@@ -55,10 +55,17 @@ impl Lightroom {
         Lightroom { app, frames: 0, style: None, right_shown: false, library_view: ViewMode::PhotoGrid }
     }
 
-    /// The persona changes from `from` to `to`: Library gets its own view back, Develop the loupe.
+    /// The persona changes from `from` to `to`: Library gets its own view back, Develop the loupe,
+    /// and leaving LightCraft saves its changes.
     pub fn switch(&mut self, from: Persona, to: Persona) {
         if from == Persona::Library {
             self.library_view = self.app.ui.view;
+        }
+        // LightCraft saves from `logic`, which only runs in its personas: commit a slider drag
+        // still in progress (its release won't be seen) and save what's pending now
+        if from.lightroom() && !to.lightroom() {
+            let _ = self.app.session.end_interaction();
+            self.app.session.persist_if_dirty();
         }
         match to {
             Persona::Library => self.app.ui.view = self.library_view,

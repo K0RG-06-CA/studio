@@ -13,3 +13,9 @@ workspace = true
 studio-shell = { workspace = true }
 eframe = { workspace = true, features = ["default_fonts", "wgpu", "accesskit", "wayland", "x11", "persistence"] }
 egui = { workspace = true }
+lightcraft-ui-egui = { workspace = true }
+lightcraft-engine = { workspace = true }
+rfd = { workspace = true }
+
+[dev-dependencies]
+ron = { workspace = true }
