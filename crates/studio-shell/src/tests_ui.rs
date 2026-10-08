@@ -226,17 +226,26 @@ fn right_click_reset_workspace_puts_the_panels_back() {
 fn render_personas() {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/renders");
     std::fs::create_dir_all(&dir).unwrap();
-    let mut h = Harness::builder().with_size([1400.0, 900.0]).wgpu().build_ui_state(
-        |ui, shell: &mut StudioShell| {
-            crate::theme::apply(ui.ctx());
-            shell.ui(ui);
-        },
-        StudioShell::default(),
-    );
+    // Library and Develop on LightCraft's demo photos, one picked for Develop
+    let mut h = crate::tests_lightcraft::studio_with(Harness::builder().with_size([1400.0, 900.0]).wgpu());
+    let lr = h.state_mut().lightroom.as_mut().unwrap();
+    lr.app.session.selection.active = lr.app.session.catalog.photos().nth(3).map(|p| p.id);
     for p in Persona::ALL.into_iter().filter(|p| p.enabled()) {
         h.state_mut().run(&p.command()).unwrap();
-        h.run();
+        settle(&mut h);
         h.render().unwrap().save(dir.join(format!("{}.png", p.id()))).unwrap();
+    }
+}
+
+/// Run frames until LightCraft's background renders (thumbnails, the loupe) are done.
+fn settle(h: &mut Harness<'_, StudioShell>) {
+    let t0 = std::time::Instant::now();
+    let mut quiet = 0;
+    while quiet < 12 && t0.elapsed().as_secs() < 30 {
+        h.run_steps(1);
+        let busy = h.state().lightroom.as_ref().is_some_and(|lr| lr.app.renderer.in_flight() > 0);
+        quiet = if busy { 0 } else { quiet + 1 };
+        std::thread::sleep(std::time::Duration::from_millis(5));
     }
 }
 

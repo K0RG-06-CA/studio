@@ -14,14 +14,14 @@ See [`PRD.md`](PRD.md) → *Milestones for Claude Code*.
   - [x] 7. App binary (eframe/wgpu, DX12 on Windows)
   - [x] 8. Tests (egui_kittest)
   - [x] 9. CI (Windows/Linux × x64/ARM64) — `.github/workflows/ci.yml`; not run yet (no remote)
-- [ ] **2. Library + Develop** — embed LightCraft's library and develop views; Lightroom Classic panel positions and shortcuts (G, D, E, R, \\).
+- [x] **2. Library + Develop** — embed LightCraft's library and develop views; Lightroom Classic panel positions and shortcuts (G, D, E, R, \\).
   - [x] 1. Pin LightCraft (`eeb136b`) + spike: side panels fill dock tabs; the right panel can't be drawn twice per frame (id clash), so Develop's History shares Edit's group
   - [x] 2. `lightroom` module: one LightCraft instance in the shell, logic + font warm-up, Studio style restored
   - [x] 3. Library persona (Folders, grid/loupe, Keywording | Metadata, bottom bar)
   - [x] 4. Develop persona (Presets, loupe + filmstrip, Edit | History)
   - [x] 5. Shortcuts (G, E, D, R studio-side; `\` passed through; Ctrl+1..7 kept for personas)
   - [x] 6. App wiring (`Pictures\Studio Library` / `STUDIO_LIBRARY`, UI state saved, save on leaving Library/Develop and on exit, file pickers)
-  - [ ] 7. Render check, NOTICE, hand-check list
+  - [x] 7. Render check, NOTICE, hand-check list
 - [ ] **3. Shared document** — one document model (layer tree + develop settings) and save format; Develop edits as a non-destructive base layer.
 - [ ] **4. Pixel persona** — PhotoCraft tools with Photoshop layout (tool bar left, options bar top, Layers and Properties right).
 - [ ] **5. Round trip** — Library → Develop → Pixel and back on one document, one undo history across personas.
@@ -62,9 +62,34 @@ from PowerShell: `cargo run -p studio`. Reference renders of each persona:
 - [ ] Look: dark grey, small text, readable at your display scaling; tooltips on the tool-strip letters.
 - [ ] Right-click any panel tab → **Reset Workspace** puts the current persona's panels back (until a Window menu exists).
 
+## Milestone 2: check by hand
+
+Tested headless with LightCraft's in-memory demo library. Reference renders:
+`target/renders/{library,develop}.png` (same command as above). The real app opens the library in
+`Pictures\Studio Library` (new and empty at first; `STUDIO_LIBRARY` puts it elsewhere).
+
+- [ ] Library opens in the grid: My Photos sidebar left, grid with LightCraft's toolbar under it, Keywording | Metadata right.
+- [ ] Import photos (LightCraft's import: drag files onto the window, or its dialog) and they appear in the grid.
+- [ ] Click a photo, press D: Develop shows it in the loupe, filmstrip below, Edit (with histogram) right, Presets left.
+- [ ] G → Library grid, E → Library loupe, D → Develop, R → crop panel, `\` → before/after; none of them fire while typing in a text field (e.g. Add keyword).
+- [ ] Ctrl+1..4 switch personas only (LightCraft's Ctrl+1..5 Edit-section keys are off).
+- [ ] Drag an Exposure slider, switch to Pixel (Ctrl+4), quit: on relaunch the edit is there.
+- [ ] Panel widths, open Edit sections and LightCraft settings come back after a relaunch.
+- [ ] Hovering a preset previews it in the loupe; history steps show under History.
+
 ## Notes
 
 - Milestone 1 does not depend on storytold crates yet; egui/eframe pinned to 0.36 to match LightCraft and PhotoCraft.
 - egui 0.36 `Panel::show(ui)` always draws inside the given `Ui`, so LightCraft's and PhotoCraft's own panels should nest inside a persona area in milestones 2 and 4 without upstream patches.
 - egui_dock paints tab titles without accessibility info; `dock::Viewer::on_tab_button` adds it.
+- **Milestone 2 (LightCraft `eeb136b`):** LightCraft copies Lightroom *desktop*, not Classic, so Studio
+  draws its panels one by one into the dock in Classic's places (`crates/studio-shell/src/lightroom.rs`).
+  Differences from Classic, from what LightCraft offers: no Navigator, Quick Develop, Snapshots or
+  separate Histogram panel (the histogram heads Edit); History is a tab next to Edit (LightCraft's
+  right panel can be drawn once per frame, see `tests_lightcraft::spike_b_*`); no filmstrip under
+  the Library grid; LightCraft's in-window menus and search bar (`topbar`) are left out.
+- LightCraft's CJK fonts (craft-fonts) aren't embedded: the build warns, and Chinese/Japanese/Korean
+  text shows as boxes. Set `CRAFT_FONTS_DIR` to a craft-fonts checkout at build time to embed them.
+- LightCraft's library lives in `Pictures\Studio Library` (or `STUDIO_LIBRARY`); LightCraft's UI
+  state is saved in eframe's `app.ron` under `studio.lightcraft`.
 - Saved shell state lives in `%APPDATA%\Studio\data\app.ron` (delete it to get the default layouts back).

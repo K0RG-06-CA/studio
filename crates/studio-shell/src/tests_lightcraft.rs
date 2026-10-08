@@ -122,14 +122,22 @@ fn spike_b_right_panel_twice_in_one_frame_clashes() {
 use crate::lightroom::Lightroom;
 use crate::{Persona, StudioShell};
 
-/// The shell running LightCraft on its in-memory demo library (no disk, no GPU). Studio's theme is
-/// applied once, at the start, as the app does.
-pub(crate) fn studio() -> Harness<'static, StudioShell> {
+/// The shell running LightCraft on its in-memory demo library (no disk, no GPU work).
+pub(crate) fn demo_shell() -> StudioShell {
     let mut app = LightcraftApp::new(lightcraft_engine::Session::with_demo(), Services::default());
     app.ui.settings.gpu = false;
-    let shell = StudioShell { lightroom: Some(Lightroom::new(app)), ..Default::default() };
+    StudioShell { lightroom: Some(Lightroom::new(app)), ..Default::default() }
+}
+
+/// Studio's theme applied once, at the start, as the app does.
+pub(crate) fn studio() -> Harness<'static, StudioShell> {
+    studio_with(Harness::builder().with_size([1400.0, 900.0]))
+}
+
+pub(crate) fn studio_with(builder: egui_kittest::HarnessBuilder<StudioShell>) -> Harness<'static, StudioShell> {
+    let shell = demo_shell();
     let mut themed = false;
-    Harness::builder().with_size([1400.0, 900.0]).build_ui_state(
+    builder.build_ui_state(
         move |ui, shell: &mut StudioShell| {
             if !std::mem::replace(&mut themed, true) {
                 crate::theme::apply(ui.ctx());
@@ -318,9 +326,7 @@ fn lightroom_keys_do_nothing_in_pixel() {
 
 #[test]
 fn lightroom_keys_type_into_text_fields() {
-    let mut app = LightcraftApp::new(lightcraft_engine::Session::with_demo(), Services::default());
-    app.ui.settings.gpu = false;
-    let shell = StudioShell { lightroom: Some(Lightroom::new(app)), ..Default::default() };
+    let shell = demo_shell();
     let mut text = String::new();
     let mut h = Harness::builder().with_size([1400.0, 900.0]).build_ui_state(
         move |ui, shell: &mut StudioShell| {
