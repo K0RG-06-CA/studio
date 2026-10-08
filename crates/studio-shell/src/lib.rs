@@ -241,6 +241,10 @@ impl StudioShell {
     /// Draw the whole shell into `ui`.
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         self.document_tick();
+        // egui repaints only on input: keep polling for the render while one is in flight
+        if self.base.rendering() {
+            ui.ctx().request_repaint_after(std::time::Duration::from_millis(30));
+        }
         self.shortcuts(ui);
         // Closing from another persona with library changes that couldn't be saved: stop, and go
         // to Library, where LightCraft asks what to do (in its personas it checks this itself).

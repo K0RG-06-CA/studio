@@ -765,3 +765,20 @@ fn a_saved_document_comes_back_after_a_relaunch() {
     assert!(h.state_mut().reopen().unwrap_err().contains("trip.studio"));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn a_base_render_in_flight_keeps_the_app_repainting() {
+    let mut h = studio();
+    h.run_steps(3);
+    pick_first(&mut h);
+    h.state_mut().run("document.new").unwrap();
+    // Pixel: LightCraft's own logic (and its repaint requests) doesn't run here
+    h.state_mut().run("persona.pixel").unwrap();
+    h.run_steps(1);
+    assert!(h.state().base.rendering(), "the first render is in flight");
+    assert!(h.ctx.has_requested_repaint(), "the shell polls for the render");
+    settle_base(&mut h);
+    h.run_steps(3);
+    h.step();
+    assert!(!h.ctx.has_requested_repaint(), "idle once the base is rendered");
+}
