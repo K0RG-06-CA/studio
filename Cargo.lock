@@ -3894,6 +3894,7 @@ dependencies = [
  "egui",
  "lightcraft-engine",
  "lightcraft-ui-egui",
+ "log",
  "rfd",
  "ron",
  "studio-shell",

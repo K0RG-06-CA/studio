@@ -51,7 +51,8 @@ See [`PRD.md`](PRD.md) → *Milestones for Claude Code*.
 No hand checks: every milestone is checked by headless tests (egui_kittest), offscreen renders
 that Claude looks at, and the smoke test. Run everything with the validation commands in
 `CLAUDE.md`; renders with `$env:WGPU_BACKEND="dx12"; cargo test -p studio-shell -- --ignored render_personas`
-(`target/renders/*.png`).
+(`target/renders/*.png`). Smoke test (opens a real window for ~5 s, twice; not while the user is
+studying): `cargo test -p studio --test smoke -- --ignored`.
 
 Former hand checks and the tests that replaced them:
 

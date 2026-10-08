@@ -1,8 +1,11 @@
 #![forbid(unsafe_code)]
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+mod smoke;
+
 use std::ffi::OsString;
 use std::path::PathBuf;
+use std::process::ExitCode;
 
 use eframe::egui_wgpu::{WgpuConfiguration, WgpuSetup};
 use eframe::wgpu::Backends;
@@ -17,11 +20,15 @@ const SHELL_KEY: &str = "studio.shell";
 /// Storage key for LightCraft's UI state (panel widths, open sections, settings…).
 const LIGHTCRAFT_KEY: &str = "studio.lightcraft";
 
-struct App(StudioShell);
+/// The shell, and the smoke-test script when run with `--smoke`.
+struct App(StudioShell, Option<smoke::Script>);
 
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.0.ui(ui);
+        if let Some(script) = &mut self.1 {
+            script.tick(ui.ctx(), &mut self.0);
+        }
     }
 
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
@@ -50,16 +57,16 @@ fn library_dir(env: Option<OsString>, home: Option<OsString>) -> Option<PathBuf>
     Some(PathBuf::from(home?).join("Pictures").join("Studio Library"))
 }
 
-/// The library session. One that can't be opened leaves an empty in-memory session, and
-/// LightCraft's own window says why and offers the ways out.
-fn open_library() -> (Session, Option<LibraryProblem>) {
-    let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" });
+/// The library session (a new library starts with LightCraft's demo photos if `seed_demo`). One
+/// that can't be opened leaves an empty in-memory session, and LightCraft's own window says why
+/// and offers the ways out.
+fn open_library(dir: Option<PathBuf>, seed_demo: bool) -> (Session, Option<LibraryProblem>) {
     let unopened = || Session::new().with_fs().with_system_clock();
-    match library_dir(std::env::var_os("STUDIO_LIBRARY"), home) {
+    match dir {
         None => (unopened(), Some(LibraryProblem::new("", "There is no home folder to keep the library in. Choose a folder for it."))),
         Some(dir) => {
             let mut s = unopened();
-            match s.open_library(&dir, false) {
+            match s.open_library(&dir, seed_demo) {
                 Ok(_) => (s, None),
                 Err(e) => (unopened(), Some(LibraryProblem::new(dir.to_string_lossy(), e.to_string()))),
             }
@@ -107,7 +114,16 @@ fn wgpu_options() -> WgpuConfiguration {
     c
 }
 
-fn main() -> eframe::Result {
+fn main() -> ExitCode {
+    let smoke = std::env::args().any(|a| a == "--smoke");
+    let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" });
+    let (library, persistence_path) = if smoke {
+        smoke::install();
+        let dir = smoke::dir();
+        (Some(dir.join("library")), Some(dir.join("app.ron")))
+    } else {
+        (library_dir(std::env::var_os("STUDIO_LIBRARY"), home), None)
+    };
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("Studio")
@@ -115,9 +131,10 @@ fn main() -> eframe::Result {
             .with_min_inner_size([900.0, 560.0])
             .with_app_id("studio"),
         wgpu_options: wgpu_options(),
+        persistence_path,
         ..Default::default()
     };
-    eframe::run_native(
+    let result = eframe::run_native(
         "Studio",
         options,
         Box::new(|cc| {
@@ -125,10 +142,21 @@ fn main() -> eframe::Result {
             // A missing or unreadable saved state falls back to the default layout.
             let saved = cc.storage.and_then(|s| eframe::get_value(s, SHELL_KEY));
             let mut shell = StudioShell::restore(saved);
-            shell.lightroom = Some(lightroom(open_library(), cc.storage.and_then(|s| eframe::get_value(s, LIGHTCRAFT_KEY))));
-            Ok(Box::new(App(shell)))
+            shell.lightroom = Some(lightroom(open_library(library, smoke), cc.storage.and_then(|s| eframe::get_value(s, LIGHTCRAFT_KEY))));
+            let script = smoke.then(|| smoke::Script::new(&shell));
+            Ok(Box::new(App(shell, script)))
         }),
-    )
+    );
+    if smoke {
+        return smoke::finish(result);
+    }
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("studio: {e}");
+            ExitCode::FAILURE
+        }
+    }
 }
 
 #[cfg(test)]
@@ -171,7 +199,7 @@ mod tests {
         let mut shell = StudioShell { lightroom: Some(Lightroom::new(app)), ..Default::default() };
         shell.run("persona.develop").unwrap();
         let mut storage = Memory::default();
-        App(shell).save(&mut storage);
+        App(shell, None).save(&mut storage);
         // the next launch
         let shell = StudioShell::restore(eframe::get_value(&storage, SHELL_KEY));
         assert_eq!(shell.persona, studio_shell::Persona::Develop);
