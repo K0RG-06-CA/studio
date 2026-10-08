@@ -38,11 +38,12 @@ fn smoke() {
     // first launch: fresh state, Library; the script ends in Develop
     let (ok, out, err) = run(&dir, 1);
     assert!(ok && out.contains("smoke: ok"), "run 1 failed\n{out}\n{err}");
-    assert!(out.contains("smoke: restored persona library"), "{out}");
+    assert!(out.contains("smoke: restored persona library") && out.contains("smoke: restored document none"), "{out}");
     assert!(dir.join("app.ron").exists(), "the app saved its state");
+    assert!(dir.join("smoke.studio").is_file(), "the script saved the document");
     // relaunch: the saved persona comes back
     let (ok, out, err) = run(&dir, 2);
     assert!(ok && out.contains("smoke: ok"), "run 2 failed\n{out}\n{err}");
-    assert!(out.contains("smoke: restored persona develop"), "{out}");
+    assert!(out.contains("smoke: restored persona develop") && out.contains("smoke: restored document smoke.studio"), "{out}");
     let _ = std::fs::remove_dir_all(&dir);
 }

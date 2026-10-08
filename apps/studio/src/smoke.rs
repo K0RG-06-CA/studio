@@ -13,13 +13,19 @@ use lightcraft_engine::gpu;
 use studio_shell::StudioShell;
 
 /// The script: one command every [`STEP`] seconds. Ends in Develop, so the next run starts there.
+/// The document is saved as `smoke.studio` in the data folder, closed and opened again; the next
+/// run opens it at launch.
 const SCRIPT: &[&str] = &[
     "persona.develop",
     "window.resetWorkspace",
+    "document.new",
     "persona.film",
     "window.resetWorkspace",
     "persona.pixel",
     "window.resetWorkspace",
+    "document.saveAs",
+    "document.close",
+    "document.open",
     "persona.library",
     "window.resetWorkspace",
     "view.loupe",
@@ -28,6 +34,16 @@ const SCRIPT: &[&str] = &[
     "view.develop",
 ];
 const STEP: f64 = 0.4;
+/// The document file the script saves and opens.
+const DOCUMENT: &str = "smoke.studio";
+
+/// A script command's parameters.
+fn params(id: &str) -> serde_json::Value {
+    match id {
+        "document.saveAs" | "document.open" => serde_json::json!({"path": dir().join(DOCUMENT)}),
+        _ => serde_json::Value::Null,
+    }
+}
 /// How long the script waits at the end for LightCraft's renders and GPU before giving up.
 const SETTLE: f64 = 20.0;
 
@@ -86,8 +102,10 @@ pub struct Script {
 
 impl Script {
     pub fn new(shell: &StudioShell) -> Self {
-        // the persona the last run saved (the relaunch check)
+        // the persona and document the last run saved (the relaunch check)
         println!("smoke: restored persona {}", shell.persona.id());
+        let doc = shell.document_path.as_ref().and_then(|p| p.file_name()).map(|n| n.to_string_lossy().into_owned());
+        println!("smoke: restored document {}", doc.unwrap_or_else(|| "none".into()));
         Script { start: None, next: 0, closing: false }
     }
 
@@ -110,7 +128,7 @@ impl Script {
         while self.next < SCRIPT.len() && now - start >= STEP * (self.next + 1) as f64 {
             let id = SCRIPT[self.next];
             println!("smoke: {id}");
-            if let Err(e) = shell.run(id) {
+            if let Err(e) = shell.run_with(id, &params(id)) {
                 fail(format!("{id}: {e}"));
             }
             self.next += 1;
@@ -121,13 +139,20 @@ impl Script {
         let Some(lr) = &shell.lightroom else { return self.close(ctx) };
         let gpu_pending = gpu::enabled() && !gpu::ready() && gpu::unavailable_reason().is_none();
         let rendered = matches!(lr.app.loupe_shown, Some((_, "render")));
-        let busy = lr.app.renderer.in_flight() > 0 || gpu_pending || !rendered;
+        let base_rendered = shell.base_up_to_date();
+        let busy = lr.app.renderer.in_flight() > 0 || gpu_pending || !rendered || !base_rendered;
         let end = start + STEP * (SCRIPT.len() + 1) as f64;
         if busy && now < end + SETTLE {
             return;
         }
         if !rendered {
             fail(format!("Develop's loupe never showed a render (showed {:?})", lr.app.loupe_shown.map(|l| l.1)));
+        }
+        if !base_rendered {
+            fail(format!("the document's base layer never rendered ({:?})", shell.base_error));
+        }
+        if let Some(e) = &shell.base_error {
+            fail(format!("document base: {e}"));
         }
         if let Some(r) = gpu::unavailable_reason() {
             fail(format!("LightCraft GPU: {r}"));

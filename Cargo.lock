@@ -4135,6 +4135,7 @@ dependencies = [
  "log",
  "rfd",
  "ron",
+ "serde_json",
  "studio-shell",
 ]
 

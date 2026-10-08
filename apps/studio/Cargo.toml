@@ -16,6 +16,8 @@ egui = { workspace = true }
 lightcraft-ui-egui = { workspace = true }
 lightcraft-engine = { workspace = true }
 rfd = { workspace = true }
+# the smoke script's command parameters
+serde_json = { workspace = true }
 # the smoke test counts error logs (wgpu, egui-wgpu, LightCraft) as failures
 log = { workspace = true }
 

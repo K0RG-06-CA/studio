@@ -22,14 +22,14 @@ See [`PRD.md`](PRD.md) → *Milestones for Claude Code*.
   - [x] 5. Shortcuts (G, E, D, R studio-side; `\` passed through; Ctrl+1..7 kept for personas)
   - [x] 6. App wiring (`Pictures\Studio Library` / `STUDIO_LIBRARY`, UI state saved, save on leaving Library/Develop and on exit, file pickers)
   - [x] 7. Render check, NOTICE, hand-check list
-- [ ] **3. Shared document** — one document model (layer tree + develop settings) and save format; Develop edits as a non-destructive base layer.
+- [x] **3. Shared document** — one document model (layer tree + develop settings) and save format; Develop edits as a non-destructive base layer.
   - [x] 1. Pin PhotoCraft (`d836e34`; builds on ARM64) + `studio-doc` scaffold: `Document` (name, source photo, LightCraft `DevelopSettings`, reserved `Film`, PhotoCraft layer tree), `document.json` header
   - [x] 2. `Document::from_photo`: 16-bit RGB layer tree with the locked, marked "Develop" base layer
   - [x] 3. Live base: re-render (CPU, 16-bit) when the settings change and no drag is open; the document size follows the render
   - [x] 4. `.studio` save/load (one zip: `document.json` + `pixel.pcraft`, base pixels not stored)
   - [x] 5. Open into a session: find the photo by hash → path/scene → import (an id alone means nothing in another library); the file's settings win, as a History step
   - [x] 6. Shell wiring: `document.new/save/saveAs/open/close`, `run_with` (params), name in the top bar, reopen at launch
-  - [ ] 7. Smoke script + docs
+  - [x] 7. Smoke script (document.new → saveAs → close → open; reopened on the relaunch) + docs
 - [ ] **4. Pixel persona** — PhotoCraft tools with Photoshop layout (tool bar left, options bar top, Layers and Properties right).
 - [ ] **5. Round trip** — Library → Develop → Pixel and back on one document, one undo history across personas.
 - [ ] **6. MCP** — one MCP server exposing commands from every persona.
@@ -78,6 +78,7 @@ Former hand checks and the tests that replaced them:
 - Edit, switch to Pixel, relaunch: edit kept → `leaving_develop_saves_its_edits`.
 - Panel widths, Edit sections, settings after relaunch → `persona_panels_and_lightcraft_settings_come_back_after_a_relaunch`.
 - Preset hover preview; History steps → `hovering_a_preset_previews_it_only_while_hovered`, `history_lists_develop_steps`.
+- **Milestone 3** (`studio-doc` unit tests + shell tests): the base layer equals LightCraft's own render within 1/255 → `the_first_sync_renders_the_photo_into_the_base_as_lightcraft_renders_it`; a settings change re-renders it (and a drag renders once, at release; a crop resizes the document) → `changing_develop_settings_in_the_catalog_re_renders_the_base`, `a_slider_drag_renders_once_at_release`, `a_crop_resizes_the_document_with_the_base`, `editing_in_develop_re_renders_the_documents_base_layer`; save/open round trip, bad files → `save_and_open_keep_everything_but_the_base_pixels`, `bad_files_are_errors_not_crashes`; opening into a library (found by hash, imported, the file's settings as a History step) → `open::tests::*`; the commands, the top-bar name, relaunch → `document_new_needs_a_picked_photo_and_puts_its_name_in_the_top_bar`, `a_saved_document_comes_back_after_a_relaunch`, smoke test (document saved, reopened at the relaunch, base rendered on the real app).
 
 ## Open items
 
@@ -88,7 +89,7 @@ Former hand checks and the tests that replaced them:
 
 ## Known untested
 
-- Native file dialogs (Import Photos, Import Presets, Open Library): OS dialogs need a person to pick a file.
+- Native file dialogs (Import Photos, Import Presets, Open Library): OS dialogs need a person to pick a file. The document commands take paths; their dialogs and menu come with the Pixel persona (M4).
 - Dragging files in from Explorer: tests hand egui the dropped files; the OS → winit drag-and-drop path isn't exercised.
 - Real keyboard and mouse input through the OS: tests inject egui events and the smoke test runs commands, so OS key mapping (e.g. Ctrl as Cmd) isn't covered.
 - Readability at the real display's scaling: renders are at 1.0 points per pixel.
@@ -110,3 +111,18 @@ Former hand checks and the tests that replaced them:
 - LightCraft's library lives in `Pictures\Studio Library` (or `STUDIO_LIBRARY`); LightCraft's UI
   state is saved in eframe's `app.ron` under `studio.lightcraft`.
 - Saved shell state lives in `%APPDATA%\Studio\data\app.ron` (delete it to get the default layouts back).
+- **Milestone 3 (PhotoCraft `d836e34`): the document and the library photo.** A `.studio` document is
+  made from one library photo (`document.new` on the photo picked in Library) and records it: its
+  `PhotoId` (per library), LightCraft's content hash (finds the same file in any library) and its
+  source path or demo scene. While the document is open and its photo is in the library, the develop
+  settings have one home, the catalog (LightCraft edits them: History, versions, presets all keep
+  working); the document mirrors them every frame and re-renders its base layer (16-bit sRGB, on
+  LightCraft's CPU path since its GPU kernel is 8-bit; only when no slider drag is open, so a drag
+  renders once at release). The file carries a copy of the settings; on open the photo is found by
+  hash, then by path/scene, else its file is imported, and the file's settings win as the History
+  step "Open <name>.studio". The base layer is PhotoCraft's bottom layer "Develop" (locked, marked by
+  an opaque `stdv` block); its pixels are never stored, the document resizes with the render (crop,
+  straighten), and rendering isn't an edit (no `*`). The file is one STORE zip (`document.json` +
+  `pixel.pcraft`, PhotoCraft's own zip code); the default path is beside the source file.
+  Reserved, not built: `film` settings (PRD-halation order), one undo history (M5: `revision`),
+  the command bus (M6: `run_with(id, params)`).

@@ -37,4 +37,5 @@ Studio is an Affinity-style all-in-one photo app with Adobe-style personas, buil
 
 ## Layout
 - `crates/studio-shell` — top bar, personas, theme, docking (egui + egui_dock, no eframe; headless-testable with egui_kittest).
+- `crates/studio-doc` — the shared document (no egui): LightCraft develop settings as a live base layer under PhotoCraft's layer tree; the `.studio` file.
 - `apps/studio` — the binary (eframe, wgpu; DX12 only on Windows).
