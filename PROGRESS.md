@@ -17,7 +17,7 @@ See [`PRD.md`](PRD.md) → *Milestones for Claude Code*.
 - [ ] **2. Library + Develop** — embed LightCraft's library and develop views; Lightroom Classic panel positions and shortcuts (G, D, E, R, \\).
   - [x] 1. Pin LightCraft (`eeb136b`) + spike: side panels fill dock tabs; the right panel can't be drawn twice per frame (id clash), so Develop's History shares Edit's group
   - [x] 2. `lightroom` module: one LightCraft instance in the shell, logic + font warm-up, Studio style restored
-  - [ ] 3. Library persona (Folders, grid/loupe, Keywording | Metadata, bottom bar)
+  - [x] 3. Library persona (Folders, grid/loupe, Keywording | Metadata, bottom bar)
   - [ ] 4. Develop persona (Presets, loupe + filmstrip, Edit | History)
   - [ ] 5. Shortcuts (G, E, D, R studio-side; `\` passed through; Ctrl+1..7 kept for personas)
   - [ ] 6. App wiring (`Pictures\Studio Library` / `STUDIO_LIBRARY`, UI state saved, save on leaving Library/Develop and on exit, file pickers)

@@ -164,7 +164,7 @@ fn no_persona_panics_at_minimum_or_tiny_window_sizes() {
 fn corrupt_saves() -> Vec<(&'static str, String, bool)> {
     let good = ron::to_string(&StudioShell::default()).unwrap();
     // Replace the whole `Leaf((…))` node holding the Navigator tab.
-    let tab = good.find(r#"tabs:[Panel("Navigator")]"#).unwrap();
+    let tab = good.find(r#"tabs:[Panel("Folders")]"#).unwrap();
     let start = good[..tab].rfind("Leaf((").unwrap();
     let end = tab + good[tab..].find("tab_bar_hidden:false))").unwrap() + "tab_bar_hidden:false))".len();
     let leaf_to_empty = format!("{}Empty{}", &good[..start], &good[end..]);
@@ -178,10 +178,10 @@ fn corrupt_saves() -> Vec<(&'static str, String, bool)> {
         ("negative split fraction", good.replacen("fraction:0.18", "fraction:-1.0", 1), true),
         ("split fraction above 1", good.replacen("fraction:0.18", "fraction:7.0", 1), true),
         ("NaN rectangle", nan_rect, true),
-        ("canvas missing", good.replacen("tabs:[Canvas]", r#"tabs:[Panel("Navigator")]"#, 1), true),
+        ("canvas missing", good.replacen("tabs:[Canvas]", r#"tabs:[Panel("Folders")]"#, 1), true),
         // These parse into layouts egui_dock copes with, so they are kept as they are.
         ("active tab out of range", good.replacen("active:(0)", "active:(9)", 1), false),
-        ("leaf with no tabs", good.replacen(r#"tabs:[Panel("Navigator")]"#, "tabs:[]", 1), false),
+        ("leaf with no tabs", good.replacen(r#"tabs:[Panel("Folders")]"#, "tabs:[]", 1), false),
         ("split child missing", leaf_to_empty, false),
     ]
 }

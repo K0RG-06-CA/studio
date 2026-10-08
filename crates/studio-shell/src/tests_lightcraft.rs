@@ -9,6 +9,7 @@
 
 use egui::{Rect, Ui, UiBuilder, pos2};
 use egui_kittest::Harness;
+use egui_kittest::kittest::Queryable;
 use lightcraft_ui_egui::state::{MIN_PHOTO_WIDTH, RightPanel};
 use lightcraft_ui_egui::theme::Tokens;
 use lightcraft_ui_egui::{LightcraftApp, Services, panels};
@@ -162,4 +163,46 @@ fn studio_theme_survives_lightcraft_frames_and_persona_switches() {
     }
     assert!(h.state().lightroom.as_ref().is_some_and(Lightroom::ready));
     assert_eq!(h.state().persona, Persona::Library);
+}
+
+fn lc_widget(h: &Harness<'_, StudioShell>, id: &str) -> Option<Rect> {
+    let lr = h.state().lightroom.as_ref()?;
+    lr.app.widgets.iter().find(|(w, _)| w == id).map(|(_, r)| *r)
+}
+
+pub(crate) fn click_at(h: &mut Harness<'_, StudioShell>, pos: egui::Pos2) {
+    h.hover_at(pos);
+    h.run_steps(1);
+    for pressed in [true, false] {
+        h.event(egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE });
+        h.run_steps(1);
+    }
+    h.run_steps(2);
+}
+
+#[test]
+fn library_shows_lightcraft_in_lightroom_classic_places() {
+    let mut h = studio();
+    h.run_steps(10);
+    for tab in ["Folders", "Grid", "Keywording", "Metadata"] {
+        h.get_by_label(tab);
+    }
+    // sidebar in the left column, photo grid in the middle, keywords on the right
+    let left = lc_widget(&h, "panel:left_panel").expect("sidebar");
+    let right = lc_widget(&h, "panel:right_panel").expect("right panel");
+    let lr = h.state().lightroom.as_ref().unwrap();
+    let ids: Vec<_> = lr.app.session.catalog.photos().map(|p| p.id).collect();
+    let thumb = ids.iter().find_map(|id| lc_widget(&h, &format!("thumb:{}", id.0)).map(|r| (*id, r))).expect("a thumbnail");
+    assert!(left.right() <= thumb.1.left() && thumb.1.right() <= right.left(), "{left:?} {thumb:?} {right:?}");
+    // flush with their tabs, inside the dock's 8 pt gutter
+    assert!(left.left() <= 8.0 && right.right() >= 1392.0, "{left:?} {right:?}");
+    assert_eq!(h.state().lightroom.as_ref().unwrap().app.ui.right, RightPanel::Keywords);
+    // clicking a thumbnail selects that photo
+    let other = ids.iter().rev().find_map(|id| lc_widget(&h, &format!("thumb:{}", id.0)).map(|r| (*id, r))).unwrap();
+    click_at(&mut h, other.1.center());
+    assert_eq!(h.state().lightroom.as_ref().unwrap().app.session.active(), Some(other.0));
+    // the Metadata tab shows LightCraft's Info panel
+    h.get_by_label("Metadata").click();
+    h.run_steps(3);
+    assert_eq!(h.state().lightroom.as_ref().unwrap().app.ui.right, RightPanel::Info);
 }

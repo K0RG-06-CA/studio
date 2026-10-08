@@ -7,6 +7,7 @@ use egui_dock::{DockState, Node, NodeIndex, NodePath, Surface, TabStyle, TabView
 use serde::{Deserialize, Serialize};
 
 use crate::Persona;
+use crate::lightroom::Lightroom;
 use crate::theme::{self, TOKENS};
 
 /// A dock tab: the persona's canvas or a named panel.
@@ -27,11 +28,10 @@ struct Spec {
 
 fn spec(p: Persona) -> Spec {
     match p {
-        // Lightroom Classic: one panel per group, stacked like its collapsible side panels.
-        Persona::Library => Spec {
-            left: (0.18, &[(0.3, &["Navigator"]), (0.15, &["Catalog"]), (0.3, &["Folders"]), (0.25, &["Collections"])]),
-            right: (0.2, &[(0.2, &["Histogram"]), (0.3, &["Quick Develop"]), (0.2, &["Keywording"]), (0.3, &["Metadata"])]),
-        },
+        // Lightroom Classic's places, with LightCraft's panels: its sidebar holds the catalog, folders
+        // and collections; its right panel shows one thing at a time, so those panels are tabs of
+        // one group. (No Navigator, Quick Develop or Histogram of their own in LightCraft.)
+        Persona::Library => Spec { left: (0.18, &[(1.0, &["Folders"])]), right: (0.2, &[(1.0, &["Keywording", "Metadata"])]) },
         Persona::Develop => Spec {
             left: (0.18, &[(0.3, &["Navigator"]), (0.25, &["Presets"]), (0.15, &["Snapshots"]), (0.3, &["History"])]),
             right: (0.2, &[(0.2, &["Histogram"]), (0.8, &["Edit"])]),
@@ -120,14 +120,16 @@ pub fn layout_is_usable(dock: &DockState<Tab>) -> bool {
 }
 
 /// Draws the tabs of one persona's dock.
-pub struct Viewer {
+pub struct Viewer<'a> {
     pub persona: Persona,
+    /// LightCraft, when this persona runs on it; tabs it doesn't fill stay placeholders.
+    pub lightroom: Option<&'a mut Lightroom>,
     /// Set when the user picks Reset Workspace from a tab's right-click menu; the shell then runs
     /// `window.resetWorkspace` after the dock is drawn (the layout can't change while it is).
     pub reset_requested: bool,
 }
 
-impl TabViewer for Viewer {
+impl TabViewer for Viewer<'_> {
     type Tab = Tab;
 
     fn id(&mut self, tab: &mut Tab) -> Id {
@@ -139,12 +141,20 @@ impl TabViewer for Viewer {
 
     fn title(&mut self, tab: &mut Tab) -> WidgetText {
         match tab {
-            Tab::Canvas => self.canvas_title().into(),
+            Tab::Canvas => match &self.lightroom {
+                Some(lr) => lr.canvas_title(self.persona).into(),
+                None => self.canvas_title().into(),
+            },
             Tab::Panel(name) => name.as_str().into(),
         }
     }
 
     fn ui(&mut self, ui: &mut Ui, tab: &mut Tab) {
+        if let Some(lr) = self.lightroom.as_deref_mut()
+            && lr.tab(ui, self.persona, tab)
+        {
+            return;
+        }
         match tab {
             Tab::Canvas => {
                 ui.centered_and_justified(|ui| {
@@ -193,16 +203,20 @@ impl TabViewer for Viewer {
     }
 
     fn tab_style_override(&self, tab: &Tab, global: &TabStyle) -> Option<TabStyle> {
-        (*tab == Tab::Canvas).then(|| {
+        let canvas = *tab == Tab::Canvas;
+        // LightCraft's panels bring their own padding
+        (canvas || self.lightroom.is_some()).then(|| {
             let mut s = global.clone();
-            s.tab_body.bg_fill = TOKENS.canvas;
+            if canvas {
+                s.tab_body.bg_fill = TOKENS.canvas;
+            }
             s.tab_body.inner_margin = Margin::ZERO;
             s
         })
     }
 }
 
-impl Viewer {
+impl Viewer<'_> {
     fn canvas_title(&self) -> &'static str {
         match self.persona {
             Persona::Library => "Grid",
@@ -231,7 +245,9 @@ mod tests {
         for p in Persona::ALL {
             let n = names(&default_layout(p));
             assert_eq!(n.iter().filter(|t| *t == "Canvas").count(), 1, "{p:?}: {n:?}");
-            assert!(n.contains(&"Histogram".to_owned()), "{p:?}: {n:?}");
+            if !p.lightroom() {
+                assert!(n.contains(&"Histogram".to_owned()), "{p:?}: {n:?}");
+            }
         }
         assert!(names(&default_layout(Persona::Library)).contains(&"Folders".to_owned()));
         assert!(names(&default_layout(Persona::Develop)).contains(&"Edit".to_owned()));

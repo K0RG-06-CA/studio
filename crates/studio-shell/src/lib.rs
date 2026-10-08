@@ -90,6 +90,9 @@ impl StudioShell {
             if !p.enabled() {
                 return Err(format!("{} arrives in v{}", p.label(), p.version()));
             }
+            if let Some(lr) = &mut self.lightroom {
+                lr.switch(self.persona, p);
+            }
             self.persona = p;
             return Ok(());
         }
@@ -122,11 +125,15 @@ impl StudioShell {
                 .frame(chrome.inner_margin(egui::Margin::symmetric(8, 0)))
                 .show(ui, |ui| ui.horizontal_centered(|ui| ui.label(theme::placeholder("Tool options"))));
         }
-        egui::Panel::bottom("studio.filmstrip")
-            .exact_size(t.filmstrip_h)
-            .resizable(false)
-            .frame(egui::Frame::NONE.fill(t.canvas))
-            .show(ui, |ui| ui.centered_and_justified(|ui| ui.label(theme::placeholder("Filmstrip"))));
+        let lightroom = self.lightroom.as_mut().filter(|_| p.lightroom());
+        // LightCraft draws its own filmstrip under the loupe
+        if lightroom.is_none() {
+            egui::Panel::bottom("studio.filmstrip")
+                .exact_size(t.filmstrip_h)
+                .resizable(false)
+                .frame(egui::Frame::NONE.fill(t.canvas))
+                .show(ui, |ui| ui.centered_and_justified(|ui| ui.label(theme::placeholder("Filmstrip"))));
+        }
         if p.photoshop_layout() {
             egui::Panel::left("studio.tools")
                 .exact_size(t.tool_strip_w)
@@ -141,7 +148,7 @@ impl StudioShell {
                     });
                 });
         }
-        let mut viewer = dock::Viewer { persona: p, reset_requested: false };
+        let mut viewer = dock::Viewer { persona: p, lightroom, reset_requested: false };
         egui::CentralPanel::default().frame(egui::Frame::NONE.fill(t.divider)).show(ui, |ui| {
             DockArea::new(&mut self.layouts[p as usize])
                 .id(egui::Id::new(("studio.dock", p.id())))

@@ -5,9 +5,12 @@
 use std::sync::Arc;
 
 use egui::{Rect, Ui, UiBuilder};
-use lightcraft_ui_egui::LightcraftApp;
-use lightcraft_ui_egui::state::MIN_PHOTO_WIDTH;
+use lightcraft_ui_egui::state::{MIN_PHOTO_WIDTH, RightPanel, ViewMode};
 use lightcraft_ui_egui::theme::Tokens;
+use lightcraft_ui_egui::{LightcraftApp, panels};
+
+use crate::Persona;
+use crate::dock::Tab;
 
 /// Which edge of a dock tab a LightCraft panel hangs from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -27,17 +30,38 @@ pub struct Lightroom {
     /// LightCraft's own style, captured once it installed it. Its panels draw with it; the rest of
     /// Studio keeps Studio's theme, which is put back right after.
     style: Option<Arc<egui::Style>>,
+    /// LightCraft's right panel (Edit, History, Keywording, Metadata…) was drawn this frame. It can
+    /// only be drawn once per frame (fixed ids), so those tabs share one panel group.
+    right_shown: bool,
+    /// Library's own view (grid, loupe, compare…), kept while Develop shows the loupe, as
+    /// Lightroom Classic's modules each keep theirs.
+    library_view: ViewMode,
 }
 
 impl Lightroom {
-    pub fn new(app: LightcraftApp) -> Self {
-        Lightroom { app, frames: 0, style: None }
+    /// LightCraft opens in its loupe; Studio opens Library in the grid, as Lightroom Classic does.
+    pub fn new(mut app: LightcraftApp) -> Self {
+        app.ui.view = ViewMode::PhotoGrid;
+        Lightroom { app, frames: 0, style: None, right_shown: false, library_view: ViewMode::PhotoGrid }
+    }
+
+    /// The persona changes from `from` to `to`: Library gets its own view back, Develop the loupe.
+    pub fn switch(&mut self, from: Persona, to: Persona) {
+        if from == Persona::Library {
+            self.library_view = self.app.ui.view;
+        }
+        match to {
+            Persona::Library => self.app.ui.view = self.library_view,
+            Persona::Develop => self.app.ui.view = ViewMode::Detail,
+            _ => {}
+        }
     }
 
     /// LightCraft's per-frame work (renders, saving, its shortcuts, dropped files). Run it once per
     /// frame before drawing, and only while a LightCraft persona is showing.
     pub fn logic(&mut self, ctx: &egui::Context) {
         self.app.logic(ctx);
+        self.right_shown = false;
         if self.style.is_none() {
             // LightCraft replaced the global style (and the fonts, which Studio keeps: its panels
             // need its "semibold" family)
@@ -87,10 +111,52 @@ impl Lightroom {
         ui.allocate_rect(Rect::from_min_size(tab.min, tab.size()), egui::Sense::hover());
     }
 
+    /// Draw a LightCraft persona's dock tab. False when LightCraft has nothing for it (Studio then
+    /// shows its placeholder).
+    pub fn tab(&mut self, ui: &mut Ui, persona: Persona, tab: &Tab) -> bool {
+        let name = match tab {
+            Tab::Canvas => {
+                self.show(ui, Side::Fill, |app, ui| canvas(app, ui, persona));
+                return true;
+            }
+            Tab::Panel(name) => name.as_str(),
+        };
+        match (persona, name) {
+            // Lightroom Classic's Catalog, Folders and Collections: LightCraft's sidebar has them all
+            (Persona::Library, "Folders") => self.show(ui, Side::Left, panels::left::show),
+            (Persona::Library, "Keywording") => self.right(ui, RightPanel::Keywords),
+            (Persona::Library, "Metadata") => self.right(ui, RightPanel::Info),
+            _ => return false,
+        }
+        true
+    }
+
+    /// The canvas tab's title.
+    pub fn canvas_title(&self, persona: Persona) -> &'static str {
+        match (persona, self.app.ui.view) {
+            (Persona::Library, ViewMode::PhotoGrid | ViewMode::SquareGrid) => "Grid",
+            (Persona::Library, ViewMode::Compare) => "Compare",
+            (Persona::Library, ViewMode::Survey) => "Survey",
+            (Persona::Library, ViewMode::Reference) => "Reference",
+            (Persona::Library, ViewMode::People) => "People",
+            _ => "Loupe",
+        }
+    }
+
+    /// LightCraft's right panel showing `mode`, or a hint if another tab already shows it.
+    fn right(&mut self, ui: &mut Ui, mode: RightPanel) {
+        if std::mem::replace(&mut self.right_shown, true) {
+            ui.label(crate::theme::placeholder("Shown one at a time: keep these panels in one group"));
+            return;
+        }
+        self.app.ui.right = mode;
+        self.show(ui, Side::Right, panels::right::show);
+    }
+
     /// What LightCraft shows over the whole window (dialogs, notices, progress, toasts), after the
     /// panels are drawn.
     pub fn overlays(&mut self, ctx: &egui::Context) {
-        use lightcraft_ui_egui::{export_task, import, panels, widgets};
+        use lightcraft_ui_egui::{export_task, import, widgets};
         if !self.ready() {
             return;
         }
@@ -111,4 +177,22 @@ impl Lightroom {
         app.widgets = widgets::take_registry(ctx);
         ctx.set_global_style(studio);
     }
+}
+
+/// The photo area: LightCraft's toolbar (Lightroom Classic's, under the photo) and the current view.
+fn canvas(app: &mut LightcraftApp, ui: &mut Ui, persona: Persona) {
+    if persona == Persona::Develop {
+        app.ui.view = ViewMode::Detail;
+    }
+    panels::bottombar::show(app, ui);
+    let t = Tokens::get(ui.ctx());
+    let bg = if matches!(app.ui.view, ViewMode::PhotoGrid | ViewMode::SquareGrid | ViewMode::People) { t.grid_bg } else { t.canvas };
+    egui::CentralPanel::default().frame(egui::Frame::NONE.fill(bg)).show(ui, |ui| match app.ui.view {
+        ViewMode::PhotoGrid | ViewMode::SquareGrid => panels::grid::show(app, ui),
+        ViewMode::Detail => panels::detail::show(app, ui),
+        ViewMode::Compare => panels::compare::show_compare(app, ui),
+        ViewMode::Survey => panels::compare::show_survey(app, ui),
+        ViewMode::Reference => panels::compare::show_reference(app, ui),
+        ViewMode::People => panels::people::show(app, ui),
+    });
 }
