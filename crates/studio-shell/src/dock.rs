@@ -2,8 +2,8 @@
 //! groups around it, laid out like the Adobe app the persona replaces. Every panel is an empty
 //! placeholder until its milestone fills it.
 
-use egui::{Id, Margin, Ui, WidgetText};
-use egui_dock::{DockState, NodeIndex, TabStyle, TabViewer, Tree};
+use egui::{Id, Margin, Rect, Ui, WidgetText};
+use egui_dock::{DockState, Node, NodeIndex, NodePath, Surface, TabStyle, TabViewer, Tree};
 use serde::{Deserialize, Serialize};
 
 use crate::Persona;
@@ -98,9 +98,33 @@ fn stack(tree: &mut Tree<Tab>, mut node: NodeIndex, groups: Column) {
     }
 }
 
+/// Whether a layout loaded from disk is safe to show. A corrupt or hand-edited settings file can
+/// still parse while holding values egui panics on (a NaN split fraction crashes the first frame,
+/// and the layout is reloaded at every launch), so check before showing it:
+/// - every split fraction is a number in 0..=1;
+/// - no stored rectangle is NaN (±inf is fine: it's how egui_dock marks "not laid out yet");
+/// - the canvas is there exactly once.
+pub fn layout_is_usable(dock: &DockState<Tab>) -> bool {
+    let not_nan = |r: Rect| ![r.min.x, r.min.y, r.max.x, r.max.y].iter().any(|v| v.is_nan());
+    let nodes_ok = dock.iter_surfaces().flat_map(|s| s.iter_nodes()).all(|n| match n {
+        Node::Horizontal(s) | Node::Vertical(s) => (0.0..=1.0).contains(&s.fraction) && not_nan(s.rect),
+        Node::Leaf(l) => not_nan(l.rect),
+        Node::Empty => true,
+    });
+    let windows_ok = dock.iter_surfaces().all(|s| match s {
+        Surface::Window(_, w) => not_nan(w.rect()),
+        _ => true,
+    });
+    let canvases = dock.iter_all_tabs().filter(|(_, t)| **t == Tab::Canvas).count();
+    nodes_ok && windows_ok && canvases == 1
+}
+
 /// Draws the tabs of one persona's dock.
 pub struct Viewer {
     pub persona: Persona,
+    /// Set when the user picks Reset Workspace from a tab's right-click menu; the shell then runs
+    /// `window.resetWorkspace` after the dock is drawn (the layout can't change while it is).
+    pub reset_requested: bool,
 }
 
 impl TabViewer for Viewer {
@@ -147,7 +171,15 @@ impl TabViewer for Viewer {
         response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &title));
     }
 
-    // Panels come back with Window › Reset Workspace, so none can be closed for now.
+    // Right-click a tab: the way back to the default layout until there is a Window menu.
+    fn context_menu(&mut self, ui: &mut Ui, _tab: &mut Tab, _path: NodePath) {
+        if ui.button("Reset Workspace").clicked() {
+            self.reset_requested = true;
+            ui.close();
+        }
+    }
+
+    // Panels come back with Reset Workspace, so none can be closed for now.
     fn is_closeable(&self, _tab: &Tab) -> bool {
         false
     }

@@ -53,7 +53,7 @@ from PowerShell: `cargo run -p studio`. Reference renders of each persona:
 - [ ] Docking feels right: drag a tab into another group, to a group's edge (split) and out of the window (floating panel); drag the separators to resize; the ▼ buttons collapse a group. The canvas tab can't float.
 - [ ] Rearrange a persona, switch away and back: the layout is kept. Quit and relaunch: the active persona and all layouts come back.
 - [ ] Look: dark grey, small text, readable at your display scaling; tooltips on the tool-strip letters.
-- [ ] Note: `window.resetWorkspace` has no menu item yet (only the command; tested headless). A Window menu comes with a later milestone.
+- [ ] Right-click any panel tab → **Reset Workspace** puts the current persona's panels back (until a Window menu exists).
 
 ## Notes
 

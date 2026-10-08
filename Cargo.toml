@@ -18,7 +18,6 @@ eframe = { version = "0.36", default-features = false }
 egui_dock = { version = "0.21", features = ["serde"] }
 egui_kittest = "0.36"
 serde = { version = "1", features = ["derive"] }
-log = "0.4"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

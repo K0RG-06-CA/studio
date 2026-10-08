@@ -4,7 +4,7 @@ use egui::{Key, Modifiers, Pos2};
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT, Queryable};
 
-use crate::dock::Tab;
+use crate::dock::{self, Tab};
 use crate::{Persona, StudioShell};
 
 fn harness() -> Harness<'static, StudioShell> {
@@ -156,6 +156,66 @@ fn no_persona_panics_at_minimum_or_tiny_window_sizes() {
             h.run();
         }
     }
+}
+
+/// Saved states that still parse but are broken in ways a corrupt or hand-edited settings file
+/// could be. Every edit hits Library's layout (the first one, and the persona shown at start).
+/// (name, RON of a whole `StudioShell`, whether restore must reset Library's layout to default).
+fn corrupt_saves() -> Vec<(&'static str, String, bool)> {
+    let good = ron::to_string(&StudioShell::default()).unwrap();
+    // Replace the whole `Leaf((…))` node holding the Navigator tab.
+    let tab = good.find(r#"tabs:[Panel("Navigator")]"#).unwrap();
+    let start = good[..tab].rfind("Leaf((").unwrap();
+    let end = tab + good[tab..].find("tab_bar_hidden:false))").unwrap() + "tab_bar_hidden:false))".len();
+    let leaf_to_empty = format!("{}Empty{}", &good[..start], &good[end..]);
+    // Make the first stored rectangle coordinate NaN.
+    let x = good.find("rect:(min:(x:").unwrap() + "rect:(min:(x:".len();
+    let x_end = x + good[x..].find(',').unwrap();
+    let nan_rect = format!("{}NaN{}", &good[..x], &good[x_end..]);
+    vec![
+        ("NaN split fraction", good.replacen("fraction:0.18", "fraction:NaN", 1), true),
+        ("infinite split fraction", good.replacen("fraction:0.18", "fraction:inf", 1), true),
+        ("negative split fraction", good.replacen("fraction:0.18", "fraction:-1.0", 1), true),
+        ("split fraction above 1", good.replacen("fraction:0.18", "fraction:7.0", 1), true),
+        ("NaN rectangle", nan_rect, true),
+        ("canvas missing", good.replacen("tabs:[Canvas]", r#"tabs:[Panel("Navigator")]"#, 1), true),
+        // These parse into layouts egui_dock copes with, so they are kept as they are.
+        ("active tab out of range", good.replacen("active:(0)", "active:(9)", 1), false),
+        ("leaf with no tabs", good.replacen(r#"tabs:[Panel("Navigator")]"#, "tabs:[]", 1), false),
+        ("split child missing", leaf_to_empty, false),
+    ]
+}
+
+/// A corrupt settings file must never crash Studio (it would crash at every launch, since the
+/// layout is reloaded each time). Regression: a NaN split fraction panicked in egui.
+#[test]
+fn corrupt_saved_layouts_never_crash_and_unsafe_ones_reset_to_default() {
+    let default_library = ron::to_string(&dock::default_layout(Persona::Library)).unwrap();
+    for (name, ron_text, must_reset) in corrupt_saves() {
+        // A save that doesn't parse at all is never restored: the app starts from defaults.
+        let Ok(saved) = ron::from_str::<StudioShell>(&ron_text) else { continue };
+        let shell = StudioShell::restore(Some(saved));
+        let library = ron::to_string(&shell.layouts[Persona::Library as usize]).unwrap();
+        assert_eq!(library == default_library, must_reset, "{name}: reset expected = {must_reset}");
+        let mut h = Harness::builder().with_size([1400.0, 900.0]).build_ui_state(|ui, s: &mut StudioShell| s.ui(ui), shell);
+        h.run();
+    }
+}
+
+#[test]
+fn right_click_reset_workspace_puts_the_panels_back() {
+    let mut h = harness();
+    h.get_by_label("Pixel").click();
+    h.run();
+    let from = h.get_by_label("History").rect().center();
+    let to = h.get_by_label("Layers").rect().center() + egui::vec2(60.0, 120.0);
+    mouse_drag(&mut h, from, to);
+    assert_eq!(leaf_of(h.state(), Persona::Pixel, "History"), leaf_of(h.state(), Persona::Pixel, "Layers"));
+    h.get_by_label("Layers").click_secondary();
+    h.run();
+    h.get_by_label("Reset Workspace").click();
+    h.run();
+    assert_ne!(leaf_of(h.state(), Persona::Pixel, "History"), leaf_of(h.state(), Persona::Pixel, "Layers"));
 }
 
 /// Renders each v1 persona to `target/renders/<persona>.png` for a visual check. Needs a GPU, so

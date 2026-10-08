@@ -55,13 +55,19 @@ impl Default for StudioShell {
 
 impl StudioShell {
     /// The shell from a saved state, or the default one if there is none or it can't be used
-    /// (e.g. saved by a version where a now-disabled persona was active).
+    /// (e.g. saved by a version where a now-disabled persona was active). Each persona's layout is
+    /// checked on its own: one that isn't safe to show goes back to the default.
     pub fn restore(saved: Option<StudioShell>) -> StudioShell {
-        saved.filter(|s| s.persona.enabled()).unwrap_or_default()
+        let Some(mut shell) = saved.filter(|s| s.persona.enabled()) else { return StudioShell::default() };
+        for p in Persona::ALL {
+            let layout = &mut shell.layouts[p as usize];
+            if !dock::layout_is_usable(layout) {
+                *layout = dock::default_layout(p);
+            }
+        }
+        shell
     }
-}
 
-impl StudioShell {
     /// Run a command by id. Every user action goes through here so the CLI and MCP can drive it.
     ///
     /// - `persona.<id>`: switch persona (v2/v3 personas are disabled and return an error).
@@ -121,6 +127,7 @@ impl StudioShell {
                     });
                 });
         }
+        let mut viewer = dock::Viewer { persona: p, reset_requested: false };
         egui::CentralPanel::default().frame(egui::Frame::NONE.fill(t.divider)).show(ui, |ui| {
             DockArea::new(&mut self.layouts[p as usize])
                 .id(egui::Id::new(("studio.dock", p.id())))
@@ -128,8 +135,11 @@ impl StudioShell {
                 .show_close_buttons(false)
                 .show_add_buttons(false)
                 .show_leaf_close_all_buttons(false)
-                .show_inside(ui, &mut dock::Viewer { persona: p });
+                .show_inside(ui, &mut viewer);
         });
+        if viewer.reset_requested {
+            let _ = self.run("window.resetWorkspace");
+        }
     }
 
     /// Affinity's top bar: persona buttons on the left, the document name on the right. It never
