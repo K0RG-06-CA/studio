@@ -72,6 +72,14 @@ Former hand checks and the tests that replaced them:
 - Panel widths, Edit sections, settings after relaunch → `persona_panels_and_lightcraft_settings_come_back_after_a_relaunch`.
 - Preset hover preview; History steps → `hovering_a_preset_previews_it_only_while_hovered`, `history_lists_develop_steps`.
 
+## Known untested
+
+- Native file dialogs (Import Photos, Import Presets, Open Library): OS dialogs need a person to pick a file.
+- Dragging files in from Explorer: tests hand egui the dropped files; the OS → winit drag-and-drop path isn't exercised.
+- Real keyboard and mouse input through the OS: tests inject egui events and the smoke test runs commands, so OS key mapping (e.g. Ctrl as Cmd) isn't covered.
+- Readability at the real display's scaling: renders are at 1.0 points per pixel.
+- Windows x64 and Linux x64/ARM64: everything above runs only on this Windows ARM64 machine; CI has never run (no GitHub remote).
+
 ## Notes
 
 - Milestone 1 does not depend on storytold crates yet; egui/eframe pinned to 0.36 to match LightCraft and PhotoCraft.
