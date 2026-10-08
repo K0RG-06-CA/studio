@@ -5,6 +5,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 pub mod dock;
+pub mod lightroom;
 pub mod persona;
 pub mod theme;
 
@@ -48,11 +49,15 @@ pub struct StudioShell {
     pub persona: Persona,
     /// Each persona's dock layout, indexed by `Persona as usize`; kept while switching away.
     pub layouts: [DockState<Tab>; 7],
+    /// LightCraft, which runs Library and Develop. Set by the app after restoring the shell; none
+    /// in tests of the shell alone, which then shows placeholders.
+    #[serde(skip)]
+    pub lightroom: Option<lightroom::Lightroom>,
 }
 
 impl Default for StudioShell {
     fn default() -> Self {
-        StudioShell { persona: Persona::default(), layouts: Persona::ALL.map(dock::default_layout) }
+        StudioShell { persona: Persona::default(), layouts: Persona::ALL.map(dock::default_layout), lightroom: None }
     }
 }
 
@@ -94,8 +99,14 @@ impl StudioShell {
     /// Draw the whole shell into `ui`.
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         self.shortcuts(ui);
+        if let Some(lr) = self.lightroom.as_mut().filter(|_| self.persona.lightroom()) {
+            lr.logic(ui.ctx());
+        }
         self.top_bar(ui);
         self.persona_area(ui);
+        if let Some(lr) = self.lightroom.as_mut().filter(|_| self.persona.lightroom()) {
+            lr.overlays(ui.ctx());
+        }
     }
 
     /// Everything under the top bar. Fixed chrome (options bar, tool strip, filmstrip) is plain

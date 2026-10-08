@@ -77,6 +77,11 @@ impl Persona {
         matches!(self, Persona::Pixel | Persona::Vector | Persona::Layout)
     }
 
+    /// Runs on LightCraft (Lightroom Classic's Library and Develop modules).
+    pub fn lightroom(self) -> bool {
+        matches!(self, Persona::Library | Persona::Develop)
+    }
+
     /// Ctrl+1 … Ctrl+7 (Cmd on macOS), in top-bar order.
     pub fn shortcut(self) -> egui::KeyboardShortcut {
         const KEYS: [egui::Key; 7] =

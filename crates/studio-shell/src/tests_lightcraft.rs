@@ -115,3 +115,51 @@ fn spike_b_right_panel_twice_in_one_frame_clashes() {
     let text = painted_text(&h);
     assert!(text.contains("Second use of Panel ID"), "{text}");
 }
+
+// --- Studio with LightCraft in the shell ---
+
+use crate::lightroom::Lightroom;
+use crate::{Persona, StudioShell};
+
+/// The shell running LightCraft on its in-memory demo library (no disk, no GPU). Studio's theme is
+/// applied once, at the start, as the app does.
+pub(crate) fn studio() -> Harness<'static, StudioShell> {
+    let mut app = LightcraftApp::new(lightcraft_engine::Session::with_demo(), Services::default());
+    app.ui.settings.gpu = false;
+    let shell = StudioShell { lightroom: Some(Lightroom::new(app)), ..Default::default() };
+    let mut themed = false;
+    Harness::builder().with_size([1400.0, 900.0]).build_ui_state(
+        move |ui, shell: &mut StudioShell| {
+            if !std::mem::replace(&mut themed, true) {
+                crate::theme::apply(ui.ctx());
+            }
+            shell.ui(ui);
+        },
+        shell,
+    )
+}
+
+fn assert_studio_style(h: &Harness<'_, StudioShell>, when: &str) {
+    let s = h.ctx.global_style();
+    let body = s.text_styles.get(&egui::TextStyle::Body).map(|f| f.size);
+    assert_eq!(body, Some(crate::theme::TOKENS.font_size), "{when}: body text size");
+    assert_eq!(s.visuals.override_text_color, None, "{when}: LightCraft's text colour leaked");
+    assert_eq!(s.visuals.panel_fill, crate::theme::TOKENS.chrome, "{when}: panel fill");
+}
+
+#[test]
+fn studio_theme_survives_lightcraft_frames_and_persona_switches() {
+    let mut h = studio();
+    for n in [1, 2, 5, 10] {
+        h.run_steps(1);
+        assert_studio_style(&h, &format!("Library, {n} frames"));
+        h.run_steps(n - 1);
+    }
+    for (p, steps) in [("pixel", 5), ("develop", 5), ("film", 3), ("library", 5)] {
+        h.state_mut().run(&format!("persona.{p}")).unwrap();
+        h.run_steps(steps);
+        assert_studio_style(&h, &format!("after switching to {p}"));
+    }
+    assert!(h.state().lightroom.as_ref().is_some_and(Lightroom::ready));
+    assert_eq!(h.state().persona, Persona::Library);
+}
