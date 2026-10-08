@@ -39,6 +39,13 @@ impl eframe::App for App {
     }
 
     fn on_exit(&mut self) {
+        // a document with a file is saved; one never saved has nothing of its own yet (its
+        // develop edits live in the library)
+        if self.0.document.as_ref().is_some_and(|d| d.unsaved() && d.path.is_some())
+            && let Err(e) = self.0.run("document.save")
+        {
+            eprintln!("studio: saving the document failed: {e}");
+        }
         // flush the catalog and write its snapshot
         if let Some(lr) = &mut self.0.lightroom
             && let Err(e) = lr.app.session.close_library()
@@ -143,6 +150,11 @@ fn main() -> ExitCode {
             let saved = cc.storage.and_then(|s| eframe::get_value(s, SHELL_KEY));
             let mut shell = StudioShell::restore(saved);
             shell.lightroom = Some(lightroom(open_library(library, smoke), cc.storage.and_then(|s| eframe::get_value(s, LIGHTCRAFT_KEY))));
+            // the document of the last launch; one that can't be opened (moved, deleted) is dropped
+            if let Err(e) = shell.reopen() {
+                eprintln!("studio: reopening the document failed: {e}");
+                shell.document_path = None;
+            }
             let script = smoke.then(|| smoke::Script::new(&shell));
             Ok(Box::new(App(shell, script)))
         }),

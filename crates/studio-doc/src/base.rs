@@ -120,8 +120,8 @@ impl Base {
         }
         let base = doc.base_layer_mut().ok_or("the document has no base layer")?;
         base.content = LayerContent::Raster(surface);
+        // derived pixels, not an edit: the revision (and so "unsaved") doesn't move
         doc.pixel.size = Size { width, height };
-        doc.revision += 1;
         self.shown = Some(want);
         Ok(())
     }
@@ -175,7 +175,7 @@ mod tests {
             ours.px.iter().zip(&theirs.data).flat_map(|(o, t)| (0..3).map(move |c| (o[c] * 255.0 - f32::from(t[c])).abs())).fold(0.0, f32::max);
         assert!(worst <= 1.0, "base differs from LightCraft's render by {worst}/255");
         assert!(ours.px.iter().all(|p| p[3] == 1.0), "the base is opaque");
-        assert!(doc.revision > 0 && doc.unsaved());
+        assert!(!doc.unsaved(), "a render isn't an edit");
     }
 
     #[test]

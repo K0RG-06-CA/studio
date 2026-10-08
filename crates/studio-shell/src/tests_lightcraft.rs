@@ -631,3 +631,137 @@ fn history_lists_develop_steps() {
         .collect();
     assert!(painted.iter().any(|t| t.contains("Contrast")), "{painted:?}");
 }
+
+// --- Milestone 3: the shared document in the shell ---
+
+/// Pick the first demo photo (Library's selection) so `document.new` has one.
+fn pick_first(h: &mut Harness<'_, StudioShell>) {
+    let lr = h.state_mut().lightroom.as_mut().unwrap();
+    lr.app.session.selection.active = lr.app.session.catalog.photos().next().map(|p| p.id);
+}
+
+/// Run frames until the document's base layer is rendered for its current settings (one frame
+/// first: the document mirrors the catalog during a frame).
+fn settle_base(h: &mut Harness<'_, StudioShell>) {
+    let t0 = std::time::Instant::now();
+    h.run_steps(1);
+    while !h.state().base_up_to_date() {
+        assert!(t0.elapsed().as_secs() < 60, "the base never rendered: {:?}", h.state().base_error);
+        h.run_steps(1);
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+}
+
+/// Mean brightness of the document as PhotoCraft composites it.
+fn base_brightness(h: &Harness<'_, StudioShell>) -> f32 {
+    let b = photocraft_compose::flatten(&h.state().document.as_ref().unwrap().pixel);
+    b.px.iter().map(|p| (p[0] + p[1] + p[2]) / 3.0).sum::<f32>() / b.px.len() as f32
+}
+
+#[test]
+fn document_new_needs_a_picked_photo_and_puts_its_name_in_the_top_bar() {
+    let mut h = studio();
+    h.run_steps(3);
+    h.state_mut().lightroom.as_mut().unwrap().app.session.selection.active = None;
+    assert!(h.state_mut().run("document.new").unwrap_err().contains("no photo"));
+    h.get_by_label("Untitled");
+    pick_first(&mut h);
+    h.state_mut().run("document.new").unwrap();
+    settle_base(&mut h);
+    let doc = h.state().document.as_ref().unwrap();
+    let (name, size) = (doc.name.clone(), doc.pixel.size);
+    assert!(!doc.unsaved() && size.width > 0, "rendered; a render isn't an edit");
+    h.run_steps(1);
+    h.get_by_label(name.as_str());
+    assert!(h.state().base_error.is_none());
+    // an edit marks it unsaved
+    let lr = h.state_mut().lightroom.as_mut().unwrap();
+    lr.app.run("develop.set", serde_json::json!({"control": "light.contrast", "value": 20})).unwrap();
+    h.run_steps(1);
+    assert!(h.state().document.as_ref().unwrap().unsaved());
+    h.get_by_label(format!("{name}*").as_str());
+    // a second document while this one is unsaved
+    assert!(h.state_mut().run("document.new").unwrap_err().contains("unsaved"));
+    assert!(h.state_mut().run("document.close").unwrap_err().contains("unsaved"));
+    h.state_mut().run_with("document.close", &serde_json::json!({"discard": true})).unwrap();
+    h.run_steps(1);
+    h.get_by_label("Untitled");
+    assert!(h.state_mut().run("document.save").unwrap_err().contains("no document"));
+}
+
+#[test]
+fn editing_in_develop_re_renders_the_documents_base_layer() {
+    let mut h = studio();
+    h.run_steps(3);
+    pick_first(&mut h);
+    h.state_mut().run("document.new").unwrap();
+    settle_base(&mut h);
+    let before = base_brightness(&h);
+    h.state_mut().run("view.develop").unwrap();
+    h.run_steps(3);
+    let lr = h.state_mut().lightroom.as_mut().unwrap();
+    lr.app.run("develop.set", serde_json::json!({"control": "light.exposure", "value": 2.0})).unwrap();
+    h.run_steps(1);
+    assert_eq!(h.state().document.as_ref().unwrap().develop.light.exposure, 2.0, "the document mirrors the catalog");
+    assert!(!h.state().base_up_to_date(), "a render is due");
+    settle_base(&mut h);
+    let after = base_brightness(&h);
+    assert!(after > before + 0.05, "{before} → {after}");
+    // in Pixel too: the base keeps following (sync runs in every persona)
+    h.state_mut().run("persona.pixel").unwrap();
+    let lr = h.state_mut().lightroom.as_mut().unwrap();
+    let id = lr.app.session.active().unwrap();
+    let mut s = (*lr.app.session.develop_of(id).unwrap()).clone();
+    s.light.exposure = -2.0;
+    lr.app.session.set_develop(id, s, "Exposure").unwrap();
+    settle_base(&mut h);
+    assert!(base_brightness(&h) < before, "{before} → {}", base_brightness(&h));
+}
+
+#[test]
+fn a_saved_document_comes_back_after_a_relaunch() {
+    let dir = std::env::temp_dir().join(format!("studio-doc-relaunch-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut h = studio();
+    h.run_steps(3);
+    pick_first(&mut h);
+    h.state_mut().run("document.new").unwrap();
+    settle_base(&mut h);
+    let name = h.state().document.as_ref().unwrap().name.clone();
+    // a demo photo has no file to save beside
+    assert!(h.state_mut().run("document.save").unwrap_err().contains("saveAs"));
+    let path = dir.join("trip.studio");
+    h.state_mut().run_with("document.saveAs", &serde_json::json!({"path": path})).unwrap();
+    assert!(path.is_file());
+    assert_eq!(h.state().document_path.as_deref(), Some(path.as_path()));
+    h.run_steps(1);
+    h.get_by_label(name.as_str());
+    // a further edit, then plain save goes to the same file
+    let lr = h.state_mut().lightroom.as_mut().unwrap();
+    lr.app.run("develop.set", serde_json::json!({"control": "light.exposure", "value": 1.0})).unwrap();
+    settle_base(&mut h);
+    assert!(h.state().document.as_ref().unwrap().unsaved());
+    h.state_mut().run("document.save").unwrap();
+    assert!(!h.state().document.as_ref().unwrap().unsaved());
+    // relaunch: the shell state is restored, LightCraft set, the document reopened
+    let saved = ron::to_string(h.state()).unwrap();
+    drop(h);
+    let mut shell = StudioShell::restore(Some(ron::from_str(&saved).unwrap()));
+    assert!(shell.document.is_none() && shell.document_path.is_some());
+    shell.lightroom = demo_shell().lightroom;
+    shell.reopen().unwrap();
+    let doc = shell.document.as_ref().unwrap();
+    assert_eq!((doc.name.as_str(), doc.develop.light.exposure, doc.path.as_deref()), (name.as_str(), 1.0, Some(path.as_path())));
+    // and the file's settings reached the (fresh) library
+    let lr = shell.lightroom.as_ref().unwrap();
+    assert_eq!(lr.app.session.develop_of(doc.source.photo).unwrap().light.exposure, 1.0);
+    let mut h = studio_with(Harness::builder().with_size([1400.0, 900.0]));
+    *h.state_mut() = shell;
+    settle_base(&mut h);
+    h.get_by_label(name.as_str());
+    // a file that went missing is reported, not fatal
+    std::fs::remove_file(&path).unwrap();
+    assert!(h.state_mut().reopen().unwrap_err().contains("trip.studio"));
+    let _ = std::fs::remove_dir_all(&dir);
+}

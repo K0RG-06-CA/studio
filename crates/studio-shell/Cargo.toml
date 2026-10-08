@@ -16,8 +16,11 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 lightcraft-ui-egui = { workspace = true }
 lightcraft-engine = { workspace = true }
+studio-doc = { workspace = true }
 
 [dev-dependencies]
+# the reference compositor: checks what the document's base layer shows
+photocraft-compose = { workspace = true }
 # same format eframe saves the app state in
 ron = { workspace = true }
 # a library whose writes fail (test of quitting with unsaved changes)

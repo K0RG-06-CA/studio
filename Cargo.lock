@@ -4163,9 +4163,11 @@ dependencies = [
  "lightcraft-catalog",
  "lightcraft-engine",
  "lightcraft-ui-egui",
+ "photocraft-compose",
  "ron",
  "serde",
  "serde_json",
+ "studio-doc",
 ]
 
 [[package]]

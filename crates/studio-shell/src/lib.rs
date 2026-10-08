@@ -9,7 +9,12 @@ pub mod lightroom;
 pub mod persona;
 pub mod theme;
 
+use std::path::PathBuf;
+
 use egui_dock::{DockArea, DockState};
+use serde_json::Value;
+use studio_doc::Document;
+use studio_doc::base::Base;
 
 use dock::Tab;
 pub use persona::Persona;
@@ -61,11 +66,33 @@ pub struct StudioShell {
     /// in tests of the shell alone, which then shows placeholders.
     #[serde(skip)]
     pub lightroom: Option<lightroom::Lightroom>,
+    /// The open document (milestone 3): one library photo's develop settings as a live base layer
+    /// under PhotoCraft's layer tree. Reopened at launch from `document_path`.
+    #[serde(skip)]
+    pub document: Option<Document>,
+    /// Keeps the document's base layer rendered from its settings.
+    #[serde(skip)]
+    pub base: Base,
+    /// The last error of keeping the base rendered (e.g. its photo left the library); the base
+    /// keeps its last pixels.
+    #[serde(skip)]
+    pub base_error: Option<String>,
+    /// Where the open document was last saved, so the next launch opens it again.
+    #[serde(default)]
+    pub document_path: Option<PathBuf>,
 }
 
 impl Default for StudioShell {
     fn default() -> Self {
-        StudioShell { persona: Persona::default(), layouts: Persona::ALL.map(dock::default_layout), lightroom: None }
+        StudioShell {
+            persona: Persona::default(),
+            layouts: Persona::ALL.map(dock::default_layout),
+            lightroom: None,
+            document: None,
+            base: Base::new(),
+            base_error: None,
+            document_path: None,
+        }
     }
 }
 
@@ -84,13 +111,25 @@ impl StudioShell {
         shell
     }
 
+    /// Run a command by id, without parameters. See [`Self::run_with`].
+    pub fn run(&mut self, id: &str) -> Result<(), String> {
+        self.run_with(id, &Value::Null)
+    }
+
     /// Run a command by id. Every user action goes through here so the CLI and MCP can drive it.
     ///
     /// - `persona.<id>`: switch persona (v2/v3 personas are disabled and return an error).
     /// - `window.resetWorkspace`: put the current persona's panels back where they started.
     /// - Lightroom Classic's module keys: `view.grid` (G) and `view.loupe` (E) in Library,
     ///   `view.develop` (D), `tool.crop` (R) in Develop.
-    pub fn run(&mut self, id: &str) -> Result<(), String> {
+    /// - The document: `document.new` (from the photo picked in Library), `document.open {path}`,
+    ///   `document.save` (to its path, else beside its source file), `document.saveAs {path}`,
+    ///   `document.close {discard?}`. Unsaved changes stop `new`, `open` and `close` unless
+    ///   `discard` is true.
+    pub fn run_with(&mut self, id: &str, params: &Value) -> Result<(), String> {
+        if let Some(cmd) = id.strip_prefix("document.") {
+            return self.run_document(cmd, params);
+        }
         if let Some(&(_, _, persona, view)) = LIGHTROOM_KEYS.iter().find(|k| k.1 == id) {
             self.run(&persona.command())?;
             if let Some(lr) = &mut self.lightroom {
@@ -123,8 +162,85 @@ impl StudioShell {
         Err(format!("unknown command `{id}`"))
     }
 
+    fn run_document(&mut self, cmd: &str, params: &Value) -> Result<(), String> {
+        let path = |key: &str| params.get(key).and_then(Value::as_str).map(PathBuf::from);
+        let discard = params.get("discard").and_then(Value::as_bool).unwrap_or(false);
+        let unsaved = self.document.as_ref().is_some_and(Document::unsaved);
+        match cmd {
+            "new" | "open" | "close" if unsaved && !discard => Err("the open document has unsaved changes: save it, or close it with discard".into()),
+            "new" => {
+                let lr = self.lightroom.as_ref().ok_or("LightCraft isn't running")?;
+                let id = lr.app.session.active().ok_or("no photo is picked in Library")?;
+                self.replace(Document::from_photo(&lr.app.session, id)?)
+            }
+            "open" => {
+                let path = path("path").ok_or("document.open needs a `path`")?;
+                let lr = self.lightroom.as_mut().ok_or("LightCraft isn't running")?;
+                let mut doc = Document::open(&path)?;
+                doc.open_into(&mut lr.app.session)?;
+                self.replace(doc)
+            }
+            "save" | "saveAs" => {
+                let doc = self.document.as_mut().ok_or("no document is open")?;
+                let path = match cmd {
+                    "saveAs" => path("path").ok_or("document.saveAs needs a `path`")?,
+                    _ => doc.path.clone().or_else(|| doc.default_path()).ok_or("this document has no file yet: use document.saveAs")?,
+                };
+                doc.save(&path)?;
+                self.document_path = Some(path);
+                Ok(())
+            }
+            "close" => {
+                self.document.take().ok_or("no document is open")?;
+                self.document_path = None;
+                Ok(())
+            }
+            other => Err(format!("unknown command `document.{other}`")),
+        }
+    }
+
+    fn replace(&mut self, doc: Document) -> Result<(), String> {
+        self.document_path = doc.path.clone();
+        self.document = Some(doc);
+        self.base = Base::new();
+        self.base_error = None;
+        Ok(())
+    }
+
+    /// Open the document of the last launch again (`document_path`), once LightCraft is set.
+    pub fn reopen(&mut self) -> Result<(), String> {
+        match self.document_path.clone() {
+            Some(path) => self.run_with("document.open", &serde_json::json!({"path": path})),
+            None => Ok(()),
+        }
+    }
+
+    /// The document's base layer follows its photo's develop settings; once per frame.
+    fn document_tick(&mut self) {
+        if let (Some(doc), Some(lr)) = (&mut self.document, &mut self.lightroom)
+            && let Err(e) = self.base.sync(&mut lr.app.session, doc)
+        {
+            self.base_error = Some(e);
+        }
+    }
+
+    /// The base layer shows the document's current settings (nothing stale, nothing in flight).
+    pub fn base_up_to_date(&self) -> bool {
+        self.document.as_ref().is_some_and(|d| self.base.up_to_date(d))
+    }
+
+    /// The top bar's document name: `name*` while unsaved, "Untitled" without a document.
+    pub fn document_title(&self) -> String {
+        match &self.document {
+            Some(d) if d.unsaved() => format!("{}*", d.name),
+            Some(d) => d.name.clone(),
+            None => "Untitled".to_owned(),
+        }
+    }
+
     /// Draw the whole shell into `ui`.
     pub fn ui(&mut self, ui: &mut egui::Ui) {
+        self.document_tick();
         self.shortcuts(ui);
         // Closing from another persona with library changes that couldn't be saved: stop, and go
         // to Library, where LightCraft asks what to do (in its personas it checks this itself).
@@ -216,9 +332,9 @@ impl StudioShell {
                         let _ = self.run(&p.command());
                     }
                 }
+                let title = self.document_title();
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    // ponytail: fixed name until the shared document exists (milestone 3)
-                    ui.label(egui::RichText::new("Untitled").color(t.text_dim));
+                    ui.label(egui::RichText::new(title).color(t.text_dim));
                 });
             });
         });
