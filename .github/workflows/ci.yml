@@ -2,9 +2,12 @@
 # requirement, and milestone 7 says to check ARM64 + Linux from milestone 1 onward).
 name: ci
 
+# Docs-only changes (PRD, PROGRESS, CLAUDE.md…) don't need a 4-platform build.
 on:
   push:
+    paths-ignore: ["**.md"]
   pull_request:
+    paths-ignore: ["**.md"]
 
 jobs:
   test:
@@ -17,7 +20,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Same list as PhotoCraft's CI minus GTK (Studio has no rfd file dialogs yet).
+      # Same list as PhotoCraft's CI minus GTK (rfd's Linux dialogs use the XDG portal, pure Rust).
       - name: Install Linux system dependencies (egui/winit)
         if: runner.os == 'Linux'
         run: |
@@ -29,6 +32,7 @@ jobs:
         with:
           components: clippy, rustfmt
 
+      # target/ and the cargo registry/git checkouts (LightCraft) per OS and Cargo.lock
       - uses: Swatinem/rust-cache@v2
 
       - name: Format
