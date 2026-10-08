@@ -789,3 +789,25 @@ fn a_base_render_in_flight_keeps_the_app_repainting() {
     h.step();
     assert!(!h.ctx.has_requested_repaint(), "idle once the base is rendered");
 }
+
+#[test]
+fn saving_right_after_an_edit_writes_the_edit() {
+    let dir = std::env::temp_dir().join(format!("studio-doc-save-now-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut h = studio();
+    h.run_steps(3);
+    pick_first(&mut h);
+    h.state_mut().run("document.new").unwrap();
+    settle_base(&mut h);
+    let path = dir.join("now.studio");
+    // the edit and the save in the same frame, as a panel's slider release followed by Ctrl+S
+    // (or quitting) does: no sync in between
+    let lr = h.state_mut().lightroom.as_mut().unwrap();
+    lr.app.run("develop.set", serde_json::json!({"control": "light.exposure", "value": 1.25})).unwrap();
+    h.state_mut().run_with("document.saveAs", &serde_json::json!({"path": path})).unwrap();
+    let saved = studio_doc::Document::open(&path).unwrap();
+    assert_eq!(saved.develop.light.exposure, 1.25);
+    assert_eq!(h.state().document.as_ref().unwrap().develop.light.exposure, 1.25);
+    let _ = std::fs::remove_dir_all(&dir);
+}

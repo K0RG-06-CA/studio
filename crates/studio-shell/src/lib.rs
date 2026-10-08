@@ -182,6 +182,10 @@ impl StudioShell {
             }
             "save" | "saveAs" => {
                 let doc = self.document.as_mut().ok_or("no document is open")?;
+                // an edit made since this frame's sync (LightCraft's panels run after it)
+                if let Some(lr) = &self.lightroom {
+                    self.base.mirror(&lr.app.session, doc);
+                }
                 let path = match cmd {
                     "saveAs" => path("path").ok_or("document.saveAs needs a `path`")?,
                     _ => doc.path.clone().or_else(|| doc.default_path()).ok_or("this document has no file yet: use document.saveAs")?,

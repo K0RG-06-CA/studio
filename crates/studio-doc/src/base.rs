@@ -62,15 +62,7 @@ impl Base {
     /// decode that failed); the base keeps its last pixels, and a failed render is reported again
     /// every frame, not retried, until the settings change.
     pub fn sync(&mut self, session: &mut Session, doc: &mut Document) -> Result<(), String> {
-        if let Some(now) = session.develop_of(doc.source.photo)
-            && !self.mirrored.as_ref().is_some_and(|m| Arc::ptr_eq(m, &now))
-        {
-            if *now != doc.develop {
-                doc.develop = (*now).clone();
-                doc.revision += 1;
-            }
-            self.mirrored = Some(now);
-        }
+        self.mirror(session, doc);
         let want = doc.develop.hash64();
         if let Err(e) = self.take(session, doc) {
             self.failed = Some((want, e.clone()));
@@ -86,6 +78,20 @@ impl Base {
             self.start(session, doc, want)?;
         }
         Ok(())
+    }
+
+    /// Copy the catalog's settings into `doc` if they changed. `sync` does this at the start of a
+    /// frame; call it before saving, since LightCraft's panels edit later in the frame.
+    pub fn mirror(&mut self, session: &Session, doc: &mut Document) {
+        if let Some(now) = session.develop_of(doc.source.photo)
+            && !self.mirrored.as_ref().is_some_and(|m| Arc::ptr_eq(m, &now))
+        {
+            if *now != doc.develop {
+                doc.develop = (*now).clone();
+                doc.revision += 1;
+            }
+            self.mirrored = Some(now);
+        }
     }
 
     fn start(&mut self, session: &mut Session, doc: &Document, want: u64) -> Result<(), String> {
