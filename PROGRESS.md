@@ -8,7 +8,7 @@ See [`PRD.md`](PRD.md) → *Milestones for Claude Code*.
   - [x] 1. Workspace scaffold (Cargo workspace, lints, LICENSE, NOTICE, git)
   - [x] 2. Theme (dark grey tokens, egui + egui_dock styling)
   - [x] 3. Personas + commands (`persona.<id>`, Ctrl+1..7, disabled v2/v3 personas)
-  - [ ] 4. Top bar (persona buttons left, document name right)
+  - [x] 4. Top bar (persona buttons left, document name right)
   - [ ] 5. Per-persona layouts + docking (placeholder panels)
   - [ ] 6. Layout persistence + `window.resetWorkspace`
   - [ ] 7. App binary (eframe/wgpu, DX12 on Windows)

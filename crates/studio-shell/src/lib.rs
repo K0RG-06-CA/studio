@@ -9,6 +9,9 @@ pub mod theme;
 
 pub use persona::Persona;
 
+#[cfg(test)]
+mod tests_ui;
+
 /// The shell's state and entry points.
 #[derive(Default)]
 pub struct StudioShell {
@@ -34,7 +37,39 @@ impl StudioShell {
     /// Draw the whole shell into `ui`.
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         self.shortcuts(ui);
-        ui.label(self.persona.label());
+        self.top_bar(ui);
+        egui::CentralPanel::default().show(ui, |ui| ui.label(self.persona.label()));
+    }
+
+    /// Affinity's top bar: persona buttons on the left, the document name on the right. It never
+    /// changes with the persona.
+    fn top_bar(&mut self, ui: &mut egui::Ui) {
+        let t = theme::TOKENS;
+        let frame = egui::Frame::NONE.fill(t.chrome).inner_margin(egui::Margin::symmetric(8, 0));
+        egui::Panel::top("studio.top_bar").exact_size(t.top_bar_h).resizable(false).frame(frame).show(ui, |ui| {
+            ui.horizontal_centered(|ui| {
+                ui.spacing_mut().item_spacing.x = 2.0;
+                for p in Persona::ALL {
+                    let on = p == self.persona;
+                    let colour = if on { t.text } else { t.text_label };
+                    let button = egui::Button::new(egui::RichText::new(p.label()).color(colour))
+                        .fill(if on { t.active } else { egui::Color32::TRANSPARENT })
+                        .frame_when_inactive(on)
+                        .min_size(egui::vec2(64.0, t.top_bar_h - 10.0));
+                    let r = ui
+                        .add_enabled(p.enabled(), button)
+                        .on_hover_text(format!("{} ({})", p.label(), shortcut_text(ui, p)))
+                        .on_disabled_hover_text(format!("{} arrives in v{}", p.label(), p.version()));
+                    if r.clicked() {
+                        let _ = self.run(&p.command());
+                    }
+                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    // ponytail: fixed name until the shared document exists (milestone 3)
+                    ui.label(egui::RichText::new("Untitled").color(t.text_dim));
+                });
+            });
+        });
     }
 
     fn shortcuts(&mut self, ui: &mut egui::Ui) {
@@ -45,6 +80,10 @@ impl StudioShell {
             }
         }
     }
+}
+
+fn shortcut_text(ui: &egui::Ui, p: Persona) -> String {
+    ui.ctx().format_shortcut(&p.shortcut())
 }
 
 #[cfg(test)]
