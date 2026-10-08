@@ -50,12 +50,12 @@ fn library_dir(env: Option<OsString>, home: Option<OsString>) -> Option<PathBuf>
     Some(PathBuf::from(home?).join("Pictures").join("Studio Library"))
 }
 
-/// LightCraft on the library, with its saved UI state. A library that can't be opened leaves an
-/// empty in-memory one, and LightCraft's own window says why and offers the ways out.
-fn lightroom(saved: Option<UiState>) -> Lightroom {
+/// The library session. One that can't be opened leaves an empty in-memory session, and
+/// LightCraft's own window says why and offers the ways out.
+fn open_library() -> (Session, Option<LibraryProblem>) {
     let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" });
     let unopened = || Session::new().with_fs().with_system_clock();
-    let (session, problem) = match library_dir(std::env::var_os("STUDIO_LIBRARY"), home) {
+    match library_dir(std::env::var_os("STUDIO_LIBRARY"), home) {
         None => (unopened(), Some(LibraryProblem::new("", "There is no home folder to keep the library in. Choose a folder for it."))),
         Some(dir) => {
             let mut s = unopened();
@@ -64,7 +64,11 @@ fn lightroom(saved: Option<UiState>) -> Lightroom {
                 Err(e) => (unopened(), Some(LibraryProblem::new(dir.to_string_lossy(), e.to_string()))),
             }
         }
-    };
+    }
+}
+
+/// LightCraft on `session`, with its saved UI state.
+fn lightroom((session, problem): (Session, Option<LibraryProblem>), saved: Option<UiState>) -> Lightroom {
     let mut app = LightcraftApp::new(session, services());
     if let Some(ui) = saved {
         app.ui = ui.sanitized();
@@ -121,7 +125,7 @@ fn main() -> eframe::Result {
             // A missing or unreadable saved state falls back to the default layout.
             let saved = cc.storage.and_then(|s| eframe::get_value(s, SHELL_KEY));
             let mut shell = StudioShell::restore(saved);
-            shell.lightroom = Some(lightroom(cc.storage.and_then(|s| eframe::get_value(s, LIGHTCRAFT_KEY))));
+            shell.lightroom = Some(lightroom(open_library(), cc.storage.and_then(|s| eframe::get_value(s, LIGHTCRAFT_KEY))));
             Ok(Box::new(App(shell)))
         }),
     )
@@ -140,13 +144,40 @@ mod tests {
         assert_eq!(library_dir(None, None), None);
     }
 
+    /// eframe's storage, in memory.
+    #[derive(Default)]
+    struct Memory(std::collections::HashMap<String, String>);
+
+    impl eframe::Storage for Memory {
+        fn get_string(&self, key: &str) -> Option<String> {
+            self.0.get(key).cloned()
+        }
+        fn set_string(&mut self, key: &str, value: String) {
+            self.0.insert(key.to_owned(), value);
+        }
+        fn remove_string(&mut self, key: &str) {
+            self.0.remove(key);
+        }
+        fn flush(&mut self) {}
+    }
+
     #[test]
-    fn lightcraft_ui_state_survives_eframe_storage() {
-        // eframe stores values as RON
-        let mut ui = UiState { right_width: 333.0, ..Default::default() };
-        ui.open_sections = vec!["color".into()];
-        let back: UiState = ron::from_str(&ron::to_string(&ui).unwrap()).unwrap();
-        assert_eq!((back.right_width, back.open_sections), (333.0, vec!["color".to_owned()]));
+    fn persona_panels_and_lightcraft_settings_come_back_after_a_relaunch() {
+        use eframe::App as _;
+        let mut app = LightcraftApp::new(Session::with_demo(), Services::default());
+        app.ui.right_width = 333.0;
+        app.ui.open_sections = vec!["color".into()];
+        app.ui.settings.gpu = false;
+        let mut shell = StudioShell { lightroom: Some(Lightroom::new(app)), ..Default::default() };
+        shell.run("persona.develop").unwrap();
+        let mut storage = Memory::default();
+        App(shell).save(&mut storage);
+        // the next launch
+        let shell = StudioShell::restore(eframe::get_value(&storage, SHELL_KEY));
+        assert_eq!(shell.persona, studio_shell::Persona::Develop);
+        let lr = lightroom((Session::with_demo(), None), eframe::get_value(&storage, LIGHTCRAFT_KEY));
+        let ui = &lr.app.ui;
+        assert_eq!((ui.right_width, &ui.open_sections, ui.settings.gpu), (333.0, &vec!["color".to_owned()], false));
     }
 
     #[test]

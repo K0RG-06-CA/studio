@@ -46,36 +46,30 @@ See [`PRD.md`](PRD.md) → *Milestones for Claude Code*.
     - [ ] 6. Calibration (optional): fit presets to your own bracketed scans
   - [ ] Film stock builder
 
-## Milestone 1: check by hand
+## Automated checks
 
-Everything was tested headless (egui_kittest). Nothing was clicked through in a real window yet. Run
-from PowerShell: `cargo run -p studio`. Reference renders of each persona:
-`target/renders/{library,develop,film,pixel}.png` (refresh with
-`$env:WGPU_BACKEND="dx12"; cargo test -p studio-shell -- --ignored render_personas`).
+No hand checks: every milestone is checked by headless tests (egui_kittest), offscreen renders
+that Claude looks at, and the smoke test. Run everything with the validation commands in
+`CLAUDE.md`; renders with `$env:WGPU_BACKEND="dx12"; cargo test -p studio-shell -- --ignored render_personas`
+(`target/renders/*.png`).
 
-- [ ] The window opens and stays open (DX12 on Windows; it used to crash at startup with Vulkan in the backend set).
-- [ ] Top bar: Library, Develop, Film, Pixel clickable; Vector, Layout, Export greyed out with an "arrives in v2/v3" tooltip; "Untitled" on the right.
-- [ ] Ctrl+1 … Ctrl+4 switch personas; Ctrl+5 … Ctrl+7 do nothing.
-- [ ] Each persona matches its render: Lightroom-style left/right columns + filmstrip (Library, Develop, Film); tool strip, options bar and tabbed right dock (Pixel). Film Effects lists Halation first.
-- [ ] Docking feels right: drag a tab into another group, to a group's edge (split) and out of the window (floating panel); drag the separators to resize; the ▼ buttons collapse a group. The canvas tab can't float.
-- [ ] Rearrange a persona, switch away and back: the layout is kept. Quit and relaunch: the active persona and all layouts come back.
-- [ ] Look: dark grey, small text, readable at your display scaling; tooltips on the tool-strip letters.
-- [ ] Right-click any panel tab → **Reset Workspace** puts the current persona's panels back (until a Window menu exists).
+Former hand checks and the tests that replaced them:
 
-## Milestone 2: check by hand
-
-Tested headless with LightCraft's in-memory demo library. Reference renders:
-`target/renders/{library,develop}.png` (same command as above). The real app opens the library in
-`Pictures\Studio Library` (new and empty at first; `STUDIO_LIBRARY` puts it elsewhere).
-
-- [ ] Library opens in the grid: My Photos sidebar left, grid with LightCraft's toolbar under it, Keywording | Metadata right.
-- [ ] Import photos (LightCraft's import: drag files onto the window, or its dialog) and they appear in the grid.
-- [ ] Click a photo, press D: Develop shows it in the loupe, filmstrip below, Edit (with histogram) right, Presets left.
-- [ ] G → Library grid, E → Library loupe, D → Develop, R → crop panel, `\` → before/after; none of them fire while typing in a text field (e.g. Add keyword).
-- [ ] Ctrl+1..4 switch personas only (LightCraft's Ctrl+1..5 Edit-section keys are off).
-- [ ] Drag an Exposure slider, switch to Pixel (Ctrl+4), quit: on relaunch the edit is there.
-- [ ] Panel widths, open Edit sections and LightCraft settings come back after a relaunch.
-- [ ] Hovering a preset previews it in the loupe; history steps show under History.
+- Window opens and stays open on DX12 → smoke test (`studio --smoke`).
+- Top bar: personas clickable, v2/v3 greyed with "arrives in" tooltips, "Untitled" → `clicking_a_persona_*`, `disabled_personas_*`, `greyed_out_personas_and_tools_say_when_they_arrive`, `top_bar_shows_the_document_name`.
+- Ctrl+1..4 switch, Ctrl+5..7 don't → `ctrl_1_to_4_switch_personas_and_ctrl_5_to_7_do_nothing`, `ctrl_numbers_only_switch_personas`.
+- Each persona's layout; Film Effects with Halation first → `each_persona_shows_its_adobe_layout`, `film_sections_*`, renders (checked).
+- Docking: regroup, split, float (canvas never floats), resize, collapse → `dragging_a_panel_tab_regroups_*`, `dropping_a_tab_on_a_groups_edge_splits_it`, `a_panel_dropped_away_from_the_split_buttons_floats_but_the_canvas_never_does`, `dragging_a_column_separator_resizes_it`, `dock_columns_resize_by_their_separators_around_lightcraft_panels`, `the_collapse_button_folds_a_panel_group`.
+- Layouts kept across switches and relaunches → `each_persona_keeps_its_own_layout_*`, `shell_state_survives_save_and_restore`, `persona_panels_and_lightcraft_settings_come_back_after_a_relaunch`, smoke test (relaunch).
+- Look (dark grey, small text, tool-strip tooltips) → renders (checked), `studio_theme_survives_*`, `greyed_out_personas_and_tools_*`.
+- Right-click → Reset Workspace → `right_click_reset_workspace_puts_the_panels_back`.
+- Library in the grid with Classic's panels; click selects → `library_shows_lightcraft_in_lightroom_classic_places`.
+- Import by dropping files → `files_dropped_on_library_are_imported`.
+- Picked photo in Develop, loupe/filmstrip/Edit/Presets → `develop_edits_the_photo_picked_in_library`, renders (checked).
+- G/E/D/R, `\`, nothing while typing → `g_e_d_r_switch_modules_like_lightroom_classic`, `lightroom_keys_type_into_text_fields`, `lightroom_keys_do_nothing_in_pixel`.
+- Edit, switch to Pixel, relaunch: edit kept → `leaving_develop_saves_its_edits`.
+- Panel widths, Edit sections, settings after relaunch → `persona_panels_and_lightcraft_settings_come_back_after_a_relaunch`.
+- Preset hover preview; History steps → `hovering_a_preset_previews_it_only_while_hovered`, `history_lists_develop_steps`.
 
 ## Notes
 

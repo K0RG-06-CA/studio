@@ -380,7 +380,15 @@ fn leaving_develop_saves_its_edits() {
     shell.run("persona.pixel").unwrap();
     assert!(size() > before, "the edit is in the library's log on disk");
     let lr = shell.lightroom.as_mut().unwrap();
+    let id = lr.app.session.active().unwrap();
+    let edited = lr.app.session.develop_of(id);
     lr.app.session.close_library().unwrap();
+    // quit (the library's lock goes with the session) and relaunch: the edit is there
+    drop(shell);
+    let mut again = lightcraft_engine::Session::new().with_fs();
+    again.open_library(&dir, false).unwrap();
+    assert_eq!(again.develop_of(id), edited);
+    again.close_library().unwrap();
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -546,4 +554,80 @@ fn hovering_a_preset_previews_it_only_while_hovered() {
     h.hover_at(egui::pos2(700.0, 400.0));
     h.run_steps(3);
     assert!(lc(&h).hover_preview.is_none(), "and stops once the pointer leaves it");
+}
+
+/// A 1×1 PNG.
+const PNG: [u8; 67] = [
+    0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+    0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4, 0x89, 0x00, 0x00, 0x00, 0x0A, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x63, 0x00, 0x01, 0x00, 0x00,
+    0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
+];
+
+/// A file dropped on the window (what the windowing integration hands egui).
+#[derive(Debug)]
+struct Dropped(std::path::PathBuf);
+
+impl egui::DroppedFile for Dropped {
+    fn path(&self) -> &std::path::Path {
+        &self.0
+    }
+    fn bytes(&self) -> Result<Vec<u8>, String> {
+        std::fs::read(&self.0).map_err(|e| e.to_string())
+    }
+}
+
+#[test]
+fn files_dropped_on_library_are_imported() {
+    let dir = std::env::temp_dir().join(format!("studio-drop-import-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("lib")).unwrap();
+    let photo = dir.join("dropped.png");
+    std::fs::write(&photo, PNG).unwrap();
+    let mut session = lightcraft_engine::Session::new().with_fs();
+    session.open_library(dir.join("lib"), false).unwrap();
+    let mut app = LightcraftApp::new(session, Services::default());
+    app.ui.settings.gpu = false;
+    let shell = StudioShell { lightroom: Some(Lightroom::new(app)), ..Default::default() };
+    let mut h = Harness::builder().with_size([1400.0, 900.0]).build_ui_state(|ui, shell: &mut StudioShell| shell.ui(ui), shell);
+    h.run_steps(5);
+    assert!(lc(&h).session.catalog.is_empty());
+    h.input_mut().dropped_files.push(std::sync::Arc::new(Dropped(photo.clone())));
+    let t0 = std::time::Instant::now();
+    while lc(&h).session.catalog.is_empty() && t0.elapsed().as_secs() < 20 {
+        h.run_steps(1);
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert_eq!(lc(&h).session.catalog.len(), 1, "the dropped photo is in the library");
+    // and in the grid
+    h.run_steps(5);
+    let id = lc(&h).session.catalog.photos().next().unwrap().id;
+    assert!(lc_widget(&h, &format!("thumb:{}", id.0)).is_some());
+    let lr = h.state_mut().lightroom.as_mut().unwrap();
+    lr.app.session.close_library().unwrap();
+    drop(h);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn history_lists_develop_steps() {
+    let mut h = studio();
+    h.run_steps(10);
+    let lr = h.state_mut().lightroom.as_mut().unwrap();
+    lr.app.session.selection.active = lr.app.session.catalog.photos().nth(1).map(|p| p.id);
+    h.state_mut().run("view.develop").unwrap();
+    h.run_steps(3);
+    let lr = h.state_mut().lightroom.as_mut().unwrap();
+    lr.app.run("develop.set", serde_json::json!({"control": "light.contrast", "value": 25})).unwrap();
+    h.get_by_label("History").click();
+    h.run_steps(5);
+    let painted: Vec<String> = h
+        .output()
+        .shapes
+        .iter()
+        .filter_map(|c| match &c.shape {
+            egui::Shape::Text(t) => Some(t.galley.text().to_owned()),
+            _ => None,
+        })
+        .collect();
+    assert!(painted.iter().any(|t| t.contains("Contrast")), "{painted:?}");
 }

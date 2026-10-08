@@ -254,3 +254,142 @@ fn top_bar_shows_the_document_name() {
     let h = harness();
     h.get_by_label("Untitled");
 }
+
+// --- Milestone 1's former hand checks ---
+
+fn tooltip(h: &mut Harness<'_, StudioShell>, at: Pos2, text: &str) -> bool {
+    h.hover_at(at);
+    // egui shows tooltips after a short delay
+    for _ in 0..90 {
+        h.step();
+        // tooltips are painted but not in the accessibility tree
+        let painted = h.output().shapes.iter().any(|c| matches!(&c.shape, egui::Shape::Text(t) if t.galley.text().contains(text)));
+        if painted {
+            return true;
+        }
+    }
+    false
+}
+
+#[test]
+fn greyed_out_personas_and_tools_say_when_they_arrive() {
+    let mut h = harness();
+    for (label, text) in [("Vector", "Vector arrives in v2"), ("Layout", "Layout arrives in v3"), ("Export", "Export arrives in v2")] {
+        let at = h.get_by_label(label).rect().center();
+        assert!(tooltip(&mut h, at, text), "{label}: no tooltip `{text}`");
+    }
+    h.get_by_label("Pixel").click();
+    h.run();
+    for (key, name) in [("B", "Brush"), ("V", "Move"), ("Z", "Zoom")] {
+        let at = h.get_by_label(key).rect().center();
+        let text = format!("{name} ({key}) arrives in milestone 4");
+        assert!(tooltip(&mut h, at, &text), "tool {key}: no tooltip `{text}`");
+    }
+}
+
+#[test]
+fn ctrl_1_to_4_switch_personas_and_ctrl_5_to_7_do_nothing() {
+    let mut h = harness();
+    for (n, key) in [Key::Num1, Key::Num2, Key::Num3, Key::Num4].into_iter().enumerate() {
+        h.key_press_modifiers(Modifiers::COMMAND, key);
+        h.run();
+        assert_eq!(h.state().persona, Persona::ALL[n]);
+    }
+    for key in [Key::Num5, Key::Num6, Key::Num7] {
+        h.key_press_modifiers(Modifiers::COMMAND, key);
+        h.run();
+        assert_eq!(h.state().persona, Persona::Pixel, "{key:?}");
+    }
+}
+
+fn leaves(shell: &StudioShell, p: Persona) -> usize {
+    shell.layouts[p as usize].iter_surfaces().flat_map(|s| s.iter_nodes()).filter(|n| n.is_leaf()).count()
+}
+
+fn windows(shell: &StudioShell, p: Persona) -> usize {
+    shell.layouts[p as usize].iter_surfaces().filter(|s| matches!(s, egui_dock::Surface::Window(..))).count()
+}
+
+#[test]
+fn dropping_a_tab_on_a_groups_edge_splits_it() {
+    let mut h = harness();
+    h.get_by_label("Pixel").click();
+    h.run();
+    let before = leaves(h.state(), Persona::Pixel);
+    // History onto the bottom edge of the Layers group's body
+    let from = h.get_by_label("History").rect().center();
+    let layers = h.get_by_label("Layers").rect();
+    let to = egui::pos2(layers.center().x + 60.0, layers.bottom() + 200.0);
+    mouse_drag(&mut h, from, to);
+    assert_eq!(leaves(h.state(), Persona::Pixel), before + 1, "a new group");
+    assert_ne!(leaf_of(h.state(), Persona::Pixel, "History"), leaf_of(h.state(), Persona::Pixel, "Layers"));
+}
+
+#[test]
+fn a_panel_dropped_away_from_the_split_buttons_floats_but_the_canvas_never_does() {
+    let mut h = harness();
+    h.get_by_label("Pixel").click();
+    h.run();
+    // onto the canvas, away from its split buttons (in its middle)
+    let canvas = leaf_rect(h.state(), Persona::Pixel, "Layers");
+    let out = egui::pos2(canvas.left() - 500.0, 200.0);
+    let from = h.get_by_label("History").rect().center();
+    mouse_drag(&mut h, from, out);
+    assert_eq!(windows(h.state(), Persona::Pixel), 1, "History floats");
+    // the canvas tab's title (the top bar's document name is "Untitled" too)
+    let from = h.get_all_by_label("Untitled").map(|n| n.rect()).find(|r| r.top() > 40.0).unwrap().center();
+    mouse_drag(&mut h, from, egui::pos2(out.x, 600.0));
+    assert_eq!(windows(h.state(), Persona::Pixel), 1, "the canvas stays docked");
+    assert!(dock::layout_is_usable(&h.state().layouts[Persona::Pixel as usize]));
+}
+
+/// The rectangle egui_dock laid out for the group holding `panel` (its tab bar and body).
+fn leaf_rect(shell: &StudioShell, p: Persona, panel: &str) -> egui::Rect {
+    let dock = &shell.layouts[p as usize];
+    let path = dock.find_tab(&Tab::Panel(panel.to_owned())).unwrap();
+    match &dock[path.surface][path.node] {
+        egui_dock::Node::Leaf(l) => l.rect,
+        _ => panic!("{panel} isn't in a leaf"),
+    }
+}
+
+fn click_at(h: &mut Harness<'_, StudioShell>, at: Pos2) {
+    h.hover_at(at);
+    h.step();
+    for pressed in [true, false] {
+        h.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: Modifiers::NONE });
+        h.step();
+    }
+    h.run();
+}
+
+#[test]
+fn the_collapse_button_folds_a_panel_group() {
+    let mut h = harness();
+    h.get_by_label("Pixel").click();
+    h.run();
+    let collapsed = |s: &StudioShell| {
+        let dock = &s.layouts[Persona::Pixel as usize];
+        let path = dock.find_tab(&Tab::Panel("Layers".to_owned())).unwrap();
+        matches!(&dock[path.surface][path.node], egui_dock::Node::Leaf(l) if l.collapsed)
+    };
+    assert!(!collapsed(h.state()));
+    // the ▼ button is the left end of the group's tab bar
+    let group = leaf_rect(h.state(), Persona::Pixel, "Layers");
+    let layers = h.get_by_label("Layers").rect();
+    click_at(&mut h, egui::pos2(group.left() + 6.0, layers.center().y));
+    assert!(collapsed(h.state()), "Layers' group is folded");
+}
+
+#[test]
+fn dragging_a_column_separator_resizes_it() {
+    let mut h = harness();
+    h.get_by_label("Pixel").click();
+    h.run();
+    let column = |s: &StudioShell| leaf_rect(s, Persona::Pixel, "Layers").width();
+    let w = column(h.state());
+    // the separator runs just left of the right column
+    let x = leaf_rect(h.state(), Persona::Pixel, "Layers").left() - 1.0;
+    mouse_drag(&mut h, egui::pos2(x, 450.0), egui::pos2(x - 120.0, 450.0));
+    assert!(column(h.state()) > w + 60.0, "{w} → {}", column(h.state()));
+}
