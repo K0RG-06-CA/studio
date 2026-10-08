@@ -69,12 +69,17 @@ impl Document {
         Ok(())
     }
 
-    /// Where the document is saved by default: beside its source file, as `<name>.studio` (like
-    /// Lightroom's `-Edit` files, so the photo's document is found without an index). None for a
-    /// demo photo, which has no file.
+    /// Where the document is saved by default: beside its source file, as `<file>.studio` (like
+    /// Lightroom's `-Edit` files, so the photo's document is found without an index; the photo's
+    /// extension stays, so a RAW+JPEG pair gets two documents). None for a demo photo, which has
+    /// no file.
     pub fn default_path(&self) -> Option<PathBuf> {
         match &self.source.source {
-            PhotoSource::File { path } => Some(Path::new(path).with_extension(EXTENSION)),
+            PhotoSource::File { path } => {
+                let path = Path::new(path);
+                let name = path.file_name()?.to_string_lossy();
+                Some(path.with_file_name(format!("{name}.{EXTENSION}")))
+            }
             PhotoSource::Demo { .. } => None,
         }
     }
@@ -197,6 +202,9 @@ mod tests {
         let (_session, mut doc) = edited();
         assert_eq!(doc.default_path(), None, "demo photos have no file");
         doc.source.source = PhotoSource::File { path: "C:/Photos/trip.rw2".into() };
-        assert_eq!(doc.default_path(), Some(PathBuf::from("C:/Photos/trip.studio")));
+        assert_eq!(doc.default_path(), Some(PathBuf::from("C:/Photos/trip.rw2.studio")));
+        // the JPEG of a RAW+JPEG pair gets its own document
+        doc.source.source = PhotoSource::File { path: "C:/Photos/trip.jpg".into() };
+        assert_eq!(doc.default_path(), Some(PathBuf::from("C:/Photos/trip.jpg.studio")));
     }
 }

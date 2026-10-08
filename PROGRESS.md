@@ -123,6 +123,7 @@ Former hand checks and the tests that replaced them:
   step "Open <name>.studio". The base layer is PhotoCraft's bottom layer "Develop" (locked, marked by
   an opaque `stdv` block); its pixels are never stored, the document resizes with the render (crop,
   straighten), and rendering isn't an edit (no `*`). The file is one STORE zip (`document.json` +
-  `pixel.pcraft`, PhotoCraft's own zip code); the default path is beside the source file.
+  `pixel.pcraft`, PhotoCraft's own zip code); the default path is beside the source file
+  (`<file>.studio`, keeping the photo's extension so a RAW+JPEG pair gets two documents).
   Reserved, not built: `film` settings (PRD-halation order), one undo history (M5: `revision`),
   the command bus (M6: `run_with(id, params)`).
