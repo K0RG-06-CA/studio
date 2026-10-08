@@ -30,7 +30,7 @@ See [`PRD.md`](PRD.md) → *Milestones for Claude Code*.
   - [ ] Lazy Grain
   - [ ] Lazy Blur
   - [ ] Lazy Bleach
-  - [ ] Halation (from scratch) — follow [`PRD-halation.md`](PRD-halation.md), which overrides PRD.md on halation
+  - [ ] Halation (spektrafilm-based, GPL-3.0; credit in NOTICE when ported) — follow [`PRD-halation.md`](PRD-halation.md), which overrides PRD.md on halation
     - [ ] 1. Reference model on CPU (scatter + Mode A halation + highlight boost, unit tests; no UI)
     - [ ] 2. GPU port (WGSL separable blur + mip pyramid; CPU on the same algorithm; CPU/GPU parity test)
     - [ ] 3. Pipeline + UI (pipeline position, Film persona controls, presets, masks, history, MCP commands)

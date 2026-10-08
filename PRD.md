@@ -121,6 +121,8 @@ Port Nikita Petrovich's four open-source DaVinci Resolve DCTLs into Studio's Fil
 
 ## Feature: halation
 
+> **Superseded by [`PRD-halation.md`](PRD-halation.md)** (physically based, spektrafilm-based design). Where this section disagrees with it, `PRD-halation.md` wins.
+
 Add a film halation effect: the warm red-orange glow film gets around bright highlights. It is written from scratch, inspired by the approach of [hotgluebanjo/halation-dctl](https://github.com/hotgluebanjo/halation-dctl), whose code can't be copied because the repo has no license.
 
 - **Approach (from that README's description):** exponential falloff instead of a Gaussian or box blur, no edge detection or keying, and no heavy tinting of the highlights themselves.
@@ -135,6 +137,8 @@ Add a film halation effect: the warm red-orange glow film gets around bright hig
 The film effects (halation, blur, bleach, Saturation RGB, grain) are part of the develop pipeline, not plug-ins bolted on top. They behave exactly like LightCraft's own sliders everywhere in the app. You add and tune them in the Film persona on the top bar, which sits between Develop and Pixel.
 
 **Fixed pipeline order**, so effects stack the way film does:
+
+> **Superseded by [`PRD-halation.md`](PRD-halation.md) › "Where it sits in the pipeline"** for every film effect: chromatic-aberration correction, highlight boost and Lazy Blur now come before halation. The list below is kept for history.
 
 1. Raw decode, white balance, exposure (scene-linear)
 2. Halation (needs scene-linear light)
@@ -224,7 +228,7 @@ Studio is licensed **GPL-3.0-or-later** and will be published on GitHub once it'
 
 - **Why GPL:** it lets the RW2 decoder borrow from GPL-licensed open-source decoders. Storytold's MIT/Apache code and the NP DCTLs (MIT) can be included in a GPL-3.0 app.
 - **Credits:** keep storytold's and Nikita Petrovich's license texts in `NOTICE` and on the credits screen.
-- **Halation** is written from scratch, so no license issue.
+- **Halation** follows `PRD-halation.md` and ports code from spektrafilm (GPL-3.0, compatible with Studio's GPL). Its licence notice and credit (Andrea Volpato) go in `NOTICE` and the credits screen when the code is ported.
 - **Giving back:** Studio's GPL code can't go into storytold's MIT/Apache repos. Small hooks written fresh for upstream (no borrowed code) can still be offered as pull requests.
 
 ## Milestones for Claude Code
@@ -243,7 +247,7 @@ Each milestone ends with something you can open and click. Give Claude Code one 
 
 - **RW2 decoding:** in a LightCraft fork. Good first Claude Code task: "Open these S9 RW2 files, report exactly why LightCraft marks them preview only, and propose a decoding plan."
 - **Real Time LUT:** run the first Claude Code task in that section using your RAW+JPEG pairs.
-- **Film effects:** port Saturation RGB first (simplest), then Grain, Blur, Bleach, and Halation (written from scratch), then the film stock builder. Each one ships as its own small change.
+- **Film effects:** port Saturation RGB first (simplest), then Grain, Blur, Bleach, and Halation (see `PRD-halation.md`), then the film stock builder. Each one ships as its own small change.
 
 **Recommended models (Claude Code):**
 
