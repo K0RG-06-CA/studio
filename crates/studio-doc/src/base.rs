@@ -98,7 +98,11 @@ impl Base {
         let id = doc.source.photo;
         let (w, h) =
             session.catalog.photo(id).map(|p| (p.width as usize, p.height as usize)).ok_or_else(|| format!("photo {} isn't in the library", id.0))?;
-        let mut job = session.preview_job(id, w.max(1), h.max(1), true, &doc.develop).ok_or_else(|| format!("photo {} can't be rendered", id.0))?;
+        // the size the crop has at the source's own resolution (rotation swaps the sides; a fit
+        // into the photo's box would scale a crop up and a rotated photo down)
+        let (nw, nh) = lightcraft_engine::pipeline::native_output_size(w, h, &doc.develop);
+        let (nw, nh) = (nw.round().max(1.0) as usize, nh.round().max(1.0) as usize);
+        let mut job = session.preview_job(id, nw, nh, true, &doc.develop).ok_or_else(|| format!("photo {} can't be rendered", id.0))?;
         // 16 bits: LightCraft renders deep output on the CPU (its GPU kernel writes 8-bit)
         job.request.depth = OutputDepth::U16;
         let (tx, rx) = channel();
@@ -310,13 +314,24 @@ mod tests {
         let id = doc.source.photo;
         let mut s = (*session.develop_of(id).unwrap()).clone();
         s.crop.geometry.rect.x1 = 0.5;
-        session.set_develop(id, s, "Crop").unwrap();
+        s.crop.geometry.rect.y1 = 0.5;
+        session.set_develop(id, s.clone(), "Crop").unwrap();
         settle(&mut base, &mut session, &mut doc);
         let half = doc.pixel.size;
-        assert!(half.height == full.height && half.width.abs_diff(full.width / 2) <= 1, "{full:?} → {half:?}");
+        assert!(
+            half.width.abs_diff(full.width / 2) <= 1 && half.height.abs_diff(full.height / 2) <= 1,
+            "native size, not scaled up: {full:?} → {half:?}"
+        );
         let b = photocraft_compose::flatten(&doc.pixel);
         assert_eq!(b.px.len(), (half.width * half.height) as usize);
         assert!(b.px.iter().all(|p| p[3] == 1.0), "no stale pixels outside the crop");
+        // rotated: the sides swap, nothing is scaled down
+        s.crop = Default::default();
+        session.set_develop(id, s, "Uncrop").unwrap();
+        session.execute("photo.rotateLeft", &serde_json::json!({"ids": [id.0]})).unwrap();
+        settle(&mut base, &mut session, &mut doc);
+        let turned = doc.pixel.size;
+        assert!(turned.width.abs_diff(full.height) <= 1 && turned.height.abs_diff(full.width) <= 1, "{full:?} → {turned:?}");
     }
 
     #[test]
