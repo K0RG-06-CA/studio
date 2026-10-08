@@ -433,3 +433,30 @@ fn dock_columns_resize_by_their_separators_around_lightcraft_panels() {
         }
     }
 }
+
+/// Run `steps` frames; whether any of them asked the window to close.
+fn closes(h: &mut Harness<'_, StudioShell>, steps: usize) -> bool {
+    (0..steps).any(|_| {
+        h.run_steps(1);
+        h.output().viewport_output.values().any(|v| v.commands.contains(&egui::ViewportCommand::Close))
+    })
+}
+
+#[test]
+fn lightcraft_quit_closes_the_window() {
+    // LightCraft's Quit buttons (library-problem window, quit prompt) set its quit flag, which
+    // only its own `ui` acts on. (Ctrl+Q is egui's own quit shortcut.)
+    let mut h = studio();
+    h.state_mut().lightroom.as_mut().unwrap().app.library_problem =
+        Some(lightcraft_ui_egui::panels::library_problem::LibraryProblem::new("D:/gone", "The drive isn't connected"));
+    h.run_steps(10);
+    assert!(!closes(&mut h, 3));
+    let quit = lc_widget(&h, "button:libraryQuit").expect("the library-problem window's Quit button");
+    h.hover_at(quit.center());
+    h.run_steps(1);
+    for pressed in [true, false] {
+        let button = egui::PointerButton::Primary;
+        h.event(egui::Event::PointerButton { pos: quit.center(), button, pressed, modifiers: egui::Modifiers::NONE });
+    }
+    assert!(closes(&mut h, 4), "Quit closes Studio");
+}

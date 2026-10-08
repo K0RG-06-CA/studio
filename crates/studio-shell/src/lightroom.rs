@@ -79,6 +79,11 @@ impl Lightroom {
     pub fn logic(&mut self, ctx: &egui::Context) {
         self.app.logic(ctx);
         self.right_shown = false;
+        // LightCraft's Quit (Ctrl+Q, its quit prompt, its library-problem window): its own `ui`,
+        // which Studio doesn't call, closes the window for it
+        if std::mem::take(&mut self.app.ui.quit) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        }
         if self.style.is_none() {
             // LightCraft replaced the global style (and the fonts, which Studio keeps: its panels
             // need its "semibold" family)
