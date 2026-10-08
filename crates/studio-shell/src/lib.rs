@@ -207,12 +207,16 @@ impl StudioShell {
         Ok(())
     }
 
-    /// Open the document of the last launch again (`document_path`), once LightCraft is set.
+    /// Open the document of the last launch again (`document_path`), once LightCraft is set. A
+    /// file that is gone is forgotten; one that exists but can't be opened now (a drive offline,
+    /// a library problem) is kept for the next launch.
     pub fn reopen(&mut self) -> Result<(), String> {
-        match self.document_path.clone() {
-            Some(path) => self.run_with("document.open", &serde_json::json!({"path": path})),
-            None => Ok(()),
+        let Some(path) = self.document_path.clone() else { return Ok(()) };
+        let r = self.run_with("document.open", &serde_json::json!({"path": path}));
+        if r.is_err() && !path.exists() {
+            self.document_path = None;
         }
+        r
     }
 
     /// The document's base layer follows its photo's develop settings; once per frame.

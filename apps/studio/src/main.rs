@@ -150,10 +150,9 @@ fn main() -> ExitCode {
             let saved = cc.storage.and_then(|s| eframe::get_value(s, SHELL_KEY));
             let mut shell = StudioShell::restore(saved);
             shell.lightroom = Some(lightroom(open_library(library, smoke), cc.storage.and_then(|s| eframe::get_value(s, LIGHTCRAFT_KEY))));
-            // the document of the last launch; one that can't be opened (moved, deleted) is dropped
+            // the document of the last launch (a deleted one is forgotten, see `reopen`)
             if let Err(e) = shell.reopen() {
                 eprintln!("studio: reopening the document failed: {e}");
-                shell.document_path = None;
             }
             let script = smoke.then(|| smoke::Script::new(&shell));
             Ok(Box::new(App(shell, script)))

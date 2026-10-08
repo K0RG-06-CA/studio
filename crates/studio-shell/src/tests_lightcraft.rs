@@ -760,9 +760,16 @@ fn a_saved_document_comes_back_after_a_relaunch() {
     *h.state_mut() = shell;
     settle_base(&mut h);
     h.get_by_label(name.as_str());
-    // a file that went missing is reported, not fatal
+    // a file that can't be opened right now (here: corrupt) is reported and kept for next time
+    h.state_mut().run_with("document.close", &serde_json::json!({"discard": true})).unwrap();
+    h.state_mut().document_path = Some(path.clone());
+    std::fs::write(&path, b"not a document").unwrap();
+    assert!(h.state_mut().reopen().unwrap_err().contains("not a .studio file"));
+    assert_eq!(h.state().document_path.as_deref(), Some(path.as_path()), "kept: the file is there");
+    // one that is gone is forgotten
     std::fs::remove_file(&path).unwrap();
     assert!(h.state_mut().reopen().unwrap_err().contains("trip.studio"));
+    assert_eq!(h.state().document_path, None);
     let _ = std::fs::remove_dir_all(&dir);
 }
 
