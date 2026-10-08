@@ -25,7 +25,7 @@ See [`PRD.md`](PRD.md) → *Milestones for Claude Code*.
 - [ ] **3. Shared document** — one document model (layer tree + develop settings) and save format; Develop edits as a non-destructive base layer.
   - [x] 1. Pin PhotoCraft (`d836e34`; builds on ARM64) + `studio-doc` scaffold: `Document` (name, source photo, LightCraft `DevelopSettings`, reserved `Film`, PhotoCraft layer tree), `document.json` header
   - [x] 2. `Document::from_photo`: 16-bit RGB layer tree with the locked, marked "Develop" base layer
-  - [ ] 3. Live base: re-render (CPU, 16-bit) when the settings change and no drag is open; the document size follows the render
+  - [x] 3. Live base: re-render (CPU, 16-bit) when the settings change and no drag is open; the document size follows the render
   - [ ] 4. `.studio` save/load (one zip: `document.json` + `pixel.pcraft`, base pixels not stored)
   - [ ] 5. Open into a session: find the photo by hash → id → import; the file's settings win, as a History step
   - [ ] 6. Shell wiring: `document.new/save/saveAs/open/close`, `run_with` (params), name in the top bar, reopen at launch
