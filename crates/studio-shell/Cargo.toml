@@ -15,4 +15,5 @@ egui_dock = { workspace = true }
 serde = { workspace = true }
 
 [dev-dependencies]
-egui_kittest = { workspace = true }
+# wgpu + snapshot: only for the opt-in `render_personas` test (PNG renders for a visual check)
+egui_kittest = { workspace = true, features = ["wgpu", "snapshot"] }

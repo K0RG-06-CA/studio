@@ -4,18 +4,52 @@
 #![forbid(unsafe_code)]
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+pub mod dock;
 pub mod persona;
 pub mod theme;
 
+use egui_dock::{DockArea, DockState};
+
+use dock::Tab;
 pub use persona::Persona;
 
 #[cfg(test)]
 mod tests_ui;
 
+/// Photoshop's tool bar, top to bottom: (shortcut, tool). Placeholders until milestone 4.
+const TOOLS: [(&str, &str); 19] = [
+    ("V", "Move"),
+    ("M", "Rectangular Marquee"),
+    ("L", "Lasso"),
+    ("W", "Object Selection"),
+    ("C", "Crop"),
+    ("I", "Eyedropper"),
+    ("J", "Spot Healing Brush"),
+    ("B", "Brush"),
+    ("S", "Clone Stamp"),
+    ("Y", "History Brush"),
+    ("E", "Eraser"),
+    ("G", "Gradient"),
+    ("O", "Dodge"),
+    ("P", "Pen"),
+    ("T", "Type"),
+    ("A", "Path Selection"),
+    ("U", "Rectangle"),
+    ("H", "Hand"),
+    ("Z", "Zoom"),
+];
+
 /// The shell's state and entry points.
-#[derive(Default)]
 pub struct StudioShell {
     pub persona: Persona,
+    /// Each persona's dock layout, indexed by `Persona as usize`; kept while switching away.
+    pub layouts: [DockState<Tab>; 7],
+}
+
+impl Default for StudioShell {
+    fn default() -> Self {
+        StudioShell { persona: Persona::default(), layouts: Persona::ALL.map(dock::default_layout) }
+    }
 }
 
 impl StudioShell {
@@ -38,7 +72,50 @@ impl StudioShell {
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         self.shortcuts(ui);
         self.top_bar(ui);
-        egui::CentralPanel::default().show(ui, |ui| ui.label(self.persona.label()));
+        self.persona_area(ui);
+    }
+
+    /// Everything under the top bar. Fixed chrome (options bar, tool strip, filmstrip) is plain
+    /// panels, as in Adobe's apps; the canvas and panel groups are the persona's dock.
+    fn persona_area(&mut self, ui: &mut egui::Ui) {
+        let t = theme::TOKENS;
+        let p = self.persona;
+        let chrome = egui::Frame::NONE.fill(t.chrome);
+        if p.photoshop_layout() {
+            egui::Panel::top("studio.options_bar")
+                .exact_size(t.options_bar_h)
+                .resizable(false)
+                .frame(chrome.inner_margin(egui::Margin::symmetric(8, 0)))
+                .show(ui, |ui| ui.horizontal_centered(|ui| ui.label(theme::placeholder("Tool options"))));
+        }
+        egui::Panel::bottom("studio.filmstrip")
+            .exact_size(t.filmstrip_h)
+            .resizable(false)
+            .frame(egui::Frame::NONE.fill(t.canvas))
+            .show(ui, |ui| ui.centered_and_justified(|ui| ui.label(theme::placeholder("Filmstrip"))));
+        if p.photoshop_layout() {
+            egui::Panel::left("studio.tools")
+                .exact_size(t.tool_strip_w)
+                .resizable(false)
+                .frame(chrome.inner_margin(egui::Margin::symmetric(3, 6)))
+                .show(ui, |ui| {
+                    ui.vertical_centered_justified(|ui| {
+                        for (key, name) in TOOLS {
+                            ui.add_enabled(false, egui::Button::new(key).frame_when_inactive(false))
+                                .on_disabled_hover_text(format!("{name} ({key}) arrives in milestone 4"));
+                        }
+                    });
+                });
+        }
+        egui::CentralPanel::default().frame(egui::Frame::NONE.fill(t.divider)).show(ui, |ui| {
+            DockArea::new(&mut self.layouts[p as usize])
+                .id(egui::Id::new(("studio.dock", p.id())))
+                .style(theme::dock_style(ui.style()))
+                .show_close_buttons(false)
+                .show_add_buttons(false)
+                .show_leaf_close_all_buttons(false)
+                .show_inside(ui, &mut dock::Viewer { persona: p });
+        });
     }
 
     /// Affinity's top bar: persona buttons on the left, the document name on the right. It never

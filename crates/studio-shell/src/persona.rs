@@ -71,6 +71,11 @@ impl Persona {
         self.version() == 1
     }
 
+    /// Photoshop's layout (tool strip and options bar) rather than Lightroom's side panels.
+    pub fn photoshop_layout(self) -> bool {
+        matches!(self, Persona::Pixel | Persona::Vector | Persona::Layout)
+    }
+
     /// Ctrl+1 … Ctrl+7 (Cmd on macOS), in top-bar order.
     pub fn shortcut(self) -> egui::KeyboardShortcut {
         const KEYS: [egui::Key; 7] =

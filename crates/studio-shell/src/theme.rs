@@ -111,6 +111,11 @@ fn visuals(t: &Tokens) -> Visuals {
     v
 }
 
+/// Dim text for areas a later milestone fills.
+pub fn placeholder(text: impl Into<String>) -> egui::RichText {
+    egui::RichText::new(text).color(TOKENS.text_disabled)
+}
+
 /// egui_dock's look: flat chrome-grey tab strips like Photoshop's panel groups.
 pub fn dock_style(style: &egui::Style) -> egui_dock::Style {
     let t = TOKENS;
