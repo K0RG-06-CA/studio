@@ -93,6 +93,13 @@ impl Lightroom {
         self.frames = self.frames.saturating_add(1);
     }
 
+    /// Whether the window may close now. LightCraft asks this in its `logic`, which only runs in its
+    /// personas; from another one Studio asks. False: changes couldn't be saved, and LightCraft's
+    /// prompt (Try Again / Quit Anyway / Cancel) shows next time Library or Develop is drawn.
+    pub fn may_close(&mut self) -> bool {
+        panels::notices::may_close(&mut self.app)
+    }
+
     /// LightCraft's fonts are installed, so its panels can be drawn.
     pub fn ready(&self) -> bool {
         self.frames >= 2

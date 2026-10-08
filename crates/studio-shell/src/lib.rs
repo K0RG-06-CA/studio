@@ -126,6 +126,12 @@ impl StudioShell {
     /// Draw the whole shell into `ui`.
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         self.shortcuts(ui);
+        // Closing from another persona with library changes that couldn't be saved: stop, and go
+        // to Library, where LightCraft asks what to do (in its personas it checks this itself).
+        if !self.persona.lightroom() && ui.input(|i| i.viewport().close_requested()) && self.lightroom.as_mut().is_some_and(|lr| !lr.may_close()) {
+            ui.ctx().send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            let _ = self.run(&Persona::Library.command());
+        }
         if let Some(lr) = self.lightroom.as_mut().filter(|_| self.persona.lightroom()) {
             lr.logic(ui.ctx());
         }

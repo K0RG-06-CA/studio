@@ -3906,6 +3906,7 @@ dependencies = [
  "egui",
  "egui_dock",
  "egui_kittest",
+ "lightcraft-catalog",
  "lightcraft-engine",
  "lightcraft-ui-egui",
  "ron",

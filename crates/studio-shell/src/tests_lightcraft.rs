@@ -460,3 +460,73 @@ fn lightcraft_quit_closes_the_window() {
     }
     assert!(closes(&mut h, 4), "Quit closes Studio");
 }
+
+/// A library store whose writes fail while `fail` is set (an unplugged drive).
+#[derive(Clone, Default)]
+struct Unplugged {
+    files: lightcraft_catalog::MemStore,
+    fail: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl Unplugged {
+    fn check(&self) -> std::io::Result<()> {
+        if self.fail.load(std::sync::atomic::Ordering::SeqCst) { Err(std::io::Error::other("drive unplugged")) } else { Ok(()) }
+    }
+}
+
+impl lightcraft_catalog::Store for Unplugged {
+    fn read(&mut self, name: &str) -> std::io::Result<Option<Vec<u8>>> {
+        self.files.read(name)
+    }
+    fn write_atomic(&mut self, name: &str, data: &[u8]) -> std::io::Result<()> {
+        self.check()?;
+        self.files.write_atomic(name, data)
+    }
+    fn append(&mut self, name: &str, data: &[u8]) -> std::io::Result<()> {
+        self.check()?;
+        self.files.append(name, data)
+    }
+    fn truncate(&mut self, name: &str, len: u64) -> std::io::Result<()> {
+        self.files.truncate(name, len)
+    }
+    fn describe(&self) -> String {
+        "unplugged".into()
+    }
+}
+
+#[test]
+fn closing_from_pixel_with_unsaved_changes_asks_first() {
+    let store = Unplugged::default();
+    let mut session = lightcraft_engine::Session::new();
+    let catalog = Box::new(store.clone());
+    let files = Box::new(lightcraft_catalog::MemStore::new());
+    let stores = lightcraft_engine::library::LibraryStores { dir: "unplugged".into(), catalog, files, on_disk: false };
+    session.open_library_in(stores, false).unwrap();
+    let mut app = LightcraftApp::new(session, Services::default());
+    app.ui.settings.gpu = false;
+    let shell = StudioShell { lightroom: Some(Lightroom::new(app)), ..Default::default() };
+    let mut h = Harness::builder().with_size([1400.0, 900.0]).build_ui_state(|ui, shell: &mut StudioShell| shell.ui(ui), shell);
+    h.run_steps(5);
+    // a change that can't be written, then off to Pixel and close the window
+    store.fail.store(true, std::sync::atomic::Ordering::SeqCst);
+    let lr = h.state_mut().lightroom.as_mut().unwrap();
+    assert!(lr.app.run("album.create", serde_json::json!({"name": "Kept"})).is_err());
+    h.state_mut().run("persona.pixel").unwrap();
+    h.run_steps(2);
+    h.input_mut().viewports.entry(egui::ViewportId::ROOT).or_default().events.push(egui::ViewportEvent::Close);
+    h.run_steps(1);
+    let cancelled = h.output().viewport_output.values().any(|v| v.commands.contains(&egui::ViewportCommand::CancelClose));
+    assert!(cancelled, "the close is stopped");
+    assert_eq!(h.state().persona, Persona::Library, "where LightCraft's prompt shows");
+    assert!(lc(&h).quit_prompt.as_deref().is_some_and(|p| p.contains("drive unplugged")));
+    // nothing unsaved: closing from Pixel goes ahead
+    store.fail.store(false, std::sync::atomic::Ordering::SeqCst);
+    let lr = h.state_mut().lightroom.as_mut().unwrap();
+    lr.app.quit_prompt = None;
+    let _ = lr.app.session.persist();
+    h.state_mut().run("persona.pixel").unwrap();
+    h.run_steps(2);
+    h.input_mut().viewports.entry(egui::ViewportId::ROOT).or_default().events.push(egui::ViewportEvent::Close);
+    h.run_steps(1);
+    assert_eq!(h.state().persona, Persona::Pixel);
+}
