@@ -1,0 +1,43 @@
+# Format, lint and test on every platform Studio must run on (PRD › Goals: ARM64 is a hard
+# requirement, and milestone 7 says to check ARM64 + Linux from milestone 1 onward).
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, windows-11-arm, ubuntu-latest, ubuntu-24.04-arm]
+    steps:
+      - uses: actions/checkout@v4
+
+      # Same list as PhotoCraft's CI minus GTK (Studio has no rfd file dialogs yet).
+      - name: Install Linux system dependencies (egui/winit)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libxkbcommon-dev libwayland-dev libx11-dev libxrandr-dev libxi-dev libgl1-mesa-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Format
+        if: runner.os == 'Linux'
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      # Headless egui_kittest tests; the GPU `render_personas` test is #[ignore]d (no GPU on runners).
+      - name: Test
+        run: cargo test --workspace --locked
