@@ -383,3 +383,53 @@ fn leaving_develop_saves_its_edits() {
     lr.app.session.close_library().unwrap();
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+fn mouse_drag(h: &mut Harness<'_, StudioShell>, from: egui::Pos2, to: egui::Pos2) {
+    h.hover_at(from);
+    h.run_steps(1);
+    h.drag_at(from);
+    h.run_steps(1);
+    for i in 1..=12 {
+        h.hover_at(from + (to - from) * (i as f32 / 12.0));
+        h.run_steps(1);
+    }
+    h.drop_at(to);
+    h.run_steps(3);
+}
+
+/// Screen x of the dock's two column separators (left column | canvas | right column).
+fn separators(h: &Harness<'_, StudioShell>, p: Persona) -> [f32; 2] {
+    let f: Vec<f32> = h.state().layouts[p as usize]
+        .main_surface()
+        .iter()
+        .filter_map(|n| match n {
+            egui_dock::Node::Horizontal(s) => Some(s.fraction),
+            _ => None,
+        })
+        .collect();
+    // inside the dock's 8 pt gutter; the right split divides what the left column leaves
+    let left = 8.0 + 1384.0 * f[0];
+    [left, left + (1392.0 - left) * f[1]]
+}
+
+#[test]
+fn dock_columns_resize_by_their_separators_around_lightcraft_panels() {
+    let mut h = studio();
+    h.run_steps(10);
+    for p in [Persona::Library, Persona::Develop] {
+        h.state_mut().run(&p.command()).unwrap();
+        h.run_steps(5);
+        // on the separator and just inside the side panel next to it (just inside the canvas is the
+        // grid's scroll bar, as in Lightroom)
+        for (edge, into_panel) in [(0, -2.0), (1, 2.0)] {
+            for dx in [0.0, into_panel] {
+                let x = separators(&h, p)[edge];
+                mouse_drag(&mut h, egui::pos2(x + dx, 450.0), egui::pos2(x + dx + 60.0, 450.0));
+                let moved = separators(&h, p)[edge] - x;
+                assert!(moved > 30.0, "{p:?}: separator {edge} grabbed at {dx:+}: moved {moved}");
+                h.state_mut().run("window.resetWorkspace").unwrap();
+                h.run_steps(3);
+            }
+        }
+    }
+}

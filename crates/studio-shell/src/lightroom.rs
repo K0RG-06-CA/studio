@@ -135,10 +135,19 @@ impl Lightroom {
         // the presets column is a fixed-width panel of `panel_w`
         ui.ctx().data_mut(|d| d.insert_temp(egui::Id::NULL, Tokens { panel_w: tab.width(), ..tokens }));
         let mut child = ui.new_child(UiBuilder::new().max_rect(rect));
-        child.set_clip_rect(tab.intersect(ui.clip_rect()));
         if let Some(style) = &self.style {
             child.set_style(style.clone());
         }
+        // A side panel's own resize handle sits on its inner edge, over the dock's separator, and
+        // would take its drags (the dock sets the width): clip the handle away, a few points of
+        // border with it.
+        let grab = child.style().interaction.resize_grab_radius_side;
+        let clip = match side {
+            Side::Left => tab.with_max_x(tab.max.x - grab),
+            Side::Right => tab.with_min_x(tab.min.x + grab),
+            Side::Fill => tab,
+        };
+        child.set_clip_rect(clip.intersect(ui.clip_rect()));
         add(app, &mut child);
         ui.ctx().data_mut(|d| d.insert_temp(egui::Id::NULL, tokens));
         ui.allocate_rect(Rect::from_min_size(tab.min, tab.size()), egui::Sense::hover());
