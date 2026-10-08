@@ -11,11 +11,21 @@ rust-version = "1.95"
 [workspace.dependencies]
 # internal
 studio-shell = { path = "crates/studio-shell" }
+studio-doc = { path = "crates/studio-doc" }
 
 # storytold LightCraft, pinned (PRD: Staying in sync with storytold). Update = change both revs.
 lightcraft-ui-egui = { git = "https://github.com/storytold/lightcraft", rev = "eeb136b9eec179805307c4626596f0ccc074368b" }
 lightcraft-engine = { git = "https://github.com/storytold/lightcraft", rev = "eeb136b9eec179805307c4626596f0ccc074368b" }
 lightcraft-catalog = { git = "https://github.com/storytold/lightcraft", rev = "eeb136b9eec179805307c4626596f0ccc074368b" }
+
+# storytold PhotoCraft, pinned (milestone 3: its layer tree and .pcraft bundle are the pixel half
+# of Studio's document). Update = change every rev.
+photocraft-doc = { git = "https://github.com/storytold/photocraft", rev = "d836e3458d77c316b48604fb54525b1dc9217408" }
+photocraft-raster = { git = "https://github.com/storytold/photocraft", rev = "d836e3458d77c316b48604fb54525b1dc9217408" }
+photocraft-color = { git = "https://github.com/storytold/photocraft", rev = "d836e3458d77c316b48604fb54525b1dc9217408" }
+photocraft-geom = { git = "https://github.com/storytold/photocraft", rev = "d836e3458d77c316b48604fb54525b1dc9217408" }
+photocraft-format = { git = "https://github.com/storytold/photocraft", rev = "d836e3458d77c316b48604fb54525b1dc9217408" }
+photocraft-compose = { git = "https://github.com/storytold/photocraft", rev = "d836e3458d77c316b48604fb54525b1dc9217408" }
 
 # external — egui/eframe match storytold's LightCraft and PhotoCraft (0.36); bump in lockstep
 egui = "0.36"

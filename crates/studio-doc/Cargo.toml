@@ -1,0 +1,24 @@
+[package]
+name = "studio-doc"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Studio's shared document: LightCraft's develop settings as a live base layer under PhotoCraft's layer tree, in one file"
+
+[lints]
+workspace = true
+
+[dependencies]
+lightcraft-engine = { workspace = true }
+photocraft-doc = { workspace = true }
+photocraft-raster = { workspace = true }
+photocraft-color = { workspace = true }
+photocraft-geom = { workspace = true }
+photocraft-format = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+# the reference compositor: proves the base layer composites as PhotoCraft sees it
+photocraft-compose = { workspace = true }

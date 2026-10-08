@@ -538,6 +538,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b71798fca2c1fe1086445a7258a4bc81e6e49dcd24c8d0dd9a1e57395b603f51"
 
 [[package]]
+name = "bit_field"
+version = "0.10.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1e4b40c7323adcfc0a41c4b88143ed58346ff65a288fc144329c5c45e05d70c6"
+
+[[package]]
 name = "bitflags"
 version = "1.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -559,6 +565,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7eff00be299a18769011411c9def0d827e8f2d7bf0c3dbf53633147a8867fd1f"
 dependencies = [
  "no_std_io2",
+]
+
+[[package]]
+name = "blake3"
+version = "1.8.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6d9e454fc11f76977dc803893aff6304ed33d6a26efae8696573bea74baa27ae"
+dependencies = [
+ "arrayvec",
+ "cc",
+ "cfg-if",
+ "constant_time_eq",
+ "cpufeatures",
 ]
 
 [[package]]
@@ -794,6 +813,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "constant_time_eq"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3d52eff69cd5e647efe296129160853a42795992097e8af39800e1060caeea9b"
+
+[[package]]
 name = "core-foundation"
 version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -830,6 +855,15 @@ checksum = "45390e6114f68f718cc7a830514a96f903cccd70d02a8f6d9f643ac4ba45afaf"
 dependencies = [
  "bitflags 1.3.2",
  "core-foundation",
+ "libc",
+]
+
+[[package]]
+name = "cpufeatures"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5ca28b0ae3115b884660db4118d803791fd6756b6e88f39c0f3f7859060d7566"
+dependencies = [
  "libc",
 ]
 
@@ -1269,6 +1303,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "exr"
+version = "1.74.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "711fe42c9964295e01ee3fba3f9fe0e1d24b98886950d68efe81b1c76e21adf3"
+dependencies = [
+ "bit_field",
+ "half",
+ "lebe",
+ "miniz_oxide 0.8.9",
+ "num-complex",
+ "pulp",
+ "smallvec",
+ "zune-inflate",
+]
+
+[[package]]
 name = "fastrand"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1666,6 +1716,7 @@ dependencies = [
  "moxcms 0.8.1",
  "num-traits",
  "png",
+ "qoi",
  "tiff",
  "zune-core",
  "zune-jpeg",
@@ -1827,6 +1878,12 @@ checksum = "00810f1d8b74be64b13dbf3db89ac67740615d6c891f0e7b6179326533011a07"
 dependencies = [
  "rayon",
 ]
+
+[[package]]
+name = "jpeg-encoder"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b454d911ac55068f53495488d8ccd0646eaa540c033a28ee15b07838afafb01f"
 
 [[package]]
 name = "jpeg-encoder"
@@ -2067,6 +2124,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "20870f649af7073d53e38067b2a84312175d56ea15217e1b15bc83506ec50afb"
 
 [[package]]
+name = "lebe"
+version = "0.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7a79a3332a6609480d7d0c9eab957bca6b455b91bb84e66d19f5ff66294b85b8"
+
+[[package]]
 name = "libc"
 version = "0.2.190"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2134,7 +2197,7 @@ dependencies = [
  "image",
  "image-webp",
  "jpeg-decoder",
- "jpeg-encoder",
+ "jpeg-encoder 0.7.1",
  "jxl-oxide",
  "lightcraft-color",
  "lightcraft-geom",
@@ -2270,7 +2333,7 @@ name = "lightcraft-preview"
 version = "0.4.0"
 source = "git+https://github.com/storytold/lightcraft?rev=eeb136b9eec179805307c4626596f0ccc074368b#eeb136b9eec179805307c4626596f0ccc074368b"
 dependencies = [
- "jpeg-encoder",
+ "jpeg-encoder 0.7.1",
  "lightcraft-raster",
  "log",
  "siphasher",
@@ -2582,6 +2645,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c89e69e7e0f03bea5ef08013795c25018e101932225a656383bd384495ecc367"
 dependencies = [
  "num-integer",
+ "num-traits",
+]
+
+[[package]]
+name = "num-complex"
+version = "0.4.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "73f88a1307638156682bada9d7604135552957b7818057dcef22705b4d509495"
+dependencies = [
+ "bytemuck",
  "num-traits",
 ]
 
@@ -3117,6 +3190,115 @@ dependencies = [
 ]
 
 [[package]]
+name = "photocraft-cms"
+version = "0.5.0"
+source = "git+https://github.com/storytold/photocraft?rev=d836e3458d77c316b48604fb54525b1dc9217408#d836e3458d77c316b48604fb54525b1dc9217408"
+dependencies = [
+ "rayon",
+]
+
+[[package]]
+name = "photocraft-codecs"
+version = "0.5.0"
+source = "git+https://github.com/storytold/photocraft?rev=d836e3458d77c316b48604fb54525b1dc9217408#d836e3458d77c316b48604fb54525b1dc9217408"
+dependencies = [
+ "exr",
+ "flate2",
+ "half",
+ "image",
+ "image-webp",
+ "jpeg-encoder 0.6.1",
+ "png",
+ "rayon",
+ "thiserror 2.0.21",
+ "tiff",
+ "zune-core",
+ "zune-jpeg",
+]
+
+[[package]]
+name = "photocraft-color"
+version = "0.5.0"
+source = "git+https://github.com/storytold/photocraft?rev=d836e3458d77c316b48604fb54525b1dc9217408#d836e3458d77c316b48604fb54525b1dc9217408"
+dependencies = [
+ "photocraft-cms",
+ "serde",
+]
+
+[[package]]
+name = "photocraft-compose"
+version = "0.5.0"
+source = "git+https://github.com/storytold/photocraft?rev=d836e3458d77c316b48604fb54525b1dc9217408#d836e3458d77c316b48604fb54525b1dc9217408"
+dependencies = [
+ "photocraft-color",
+ "photocraft-doc",
+ "photocraft-geom",
+ "photocraft-raster",
+ "photocraft-vector",
+ "rayon",
+]
+
+[[package]]
+name = "photocraft-doc"
+version = "0.5.0"
+source = "git+https://github.com/storytold/photocraft?rev=d836e3458d77c316b48604fb54525b1dc9217408#d836e3458d77c316b48604fb54525b1dc9217408"
+dependencies = [
+ "photocraft-color",
+ "photocraft-geom",
+ "photocraft-raster",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "photocraft-format"
+version = "0.5.0"
+source = "git+https://github.com/storytold/photocraft?rev=d836e3458d77c316b48604fb54525b1dc9217408#d836e3458d77c316b48604fb54525b1dc9217408"
+dependencies = [
+ "blake3",
+ "flate2",
+ "photocraft-codecs",
+ "photocraft-color",
+ "photocraft-doc",
+ "photocraft-geom",
+ "photocraft-raster",
+ "ruzstd",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "photocraft-geom"
+version = "0.5.0"
+source = "git+https://github.com/storytold/photocraft?rev=d836e3458d77c316b48604fb54525b1dc9217408#d836e3458d77c316b48604fb54525b1dc9217408"
+dependencies = [
+ "serde",
+]
+
+[[package]]
+name = "photocraft-raster"
+version = "0.5.0"
+source = "git+https://github.com/storytold/photocraft?rev=d836e3458d77c316b48604fb54525b1dc9217408#d836e3458d77c316b48604fb54525b1dc9217408"
+dependencies = [
+ "photocraft-color",
+ "photocraft-geom",
+ "serde",
+]
+
+[[package]]
+name = "photocraft-vector"
+version = "0.5.0"
+source = "git+https://github.com/storytold/photocraft?rev=d836e3458d77c316b48604fb54525b1dc9217408#d836e3458d77c316b48604fb54525b1dc9217408"
+dependencies = [
+ "photocraft-color",
+ "photocraft-doc",
+ "photocraft-geom",
+ "photocraft-raster",
+ "rayon",
+]
+
+[[package]]
 name = "pin-project"
 version = "1.1.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3293,10 +3475,42 @@ dependencies = [
 ]
 
 [[package]]
+name = "pulp"
+version = "0.22.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "046aa45b989642ec2e4717c8e72d677b13edd831a4d3b6cf37d9a3e54912496a"
+dependencies = [
+ "bytemuck",
+ "cfg-if",
+ "libm",
+ "num-complex",
+ "paste",
+ "pulp-wasm-simd-flag",
+ "raw-cpuid",
+ "reborrow",
+ "version_check",
+]
+
+[[package]]
+name = "pulp-wasm-simd-flag"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1d8f70e07b9c3962945a74e59ca1c511bba65b6419468acc217c457d93f3c740"
+
+[[package]]
 name = "pxfm"
 version = "0.1.30"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d55d956fa96f5ec02be2e13af0e20391a5aa83d6a074e3ad368959d0fab299ea"
+
+[[package]]
+name = "qoi"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7f6d64c71eb498fe9eae14ce4ec935c555749aef511cca85b5568910d6e48001"
+dependencies = [
+ "bytemuck",
+]
 
 [[package]]
 name = "quick-error"
@@ -3429,6 +3643,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "raw-cpuid"
+version = "11.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "498cd0dc59d73224351ee52a95fee0f1a617a2eae0e7d9d720cc622c73a54186"
+dependencies = [
+ "bitflags 2.13.2",
+]
+
+[[package]]
 name = "raw-window-handle"
 version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3476,6 +3699,12 @@ dependencies = [
  "font-types",
  "once_cell",
 ]
+
+[[package]]
+name = "reborrow"
+version = "0.5.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "03251193000f4bd3b042892be858ee50e8b3719f2b08e5833ac4353724632430"
 
 [[package]]
 name = "redox_syscall"
@@ -3609,6 +3838,15 @@ name = "rustversion"
 version = "1.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf54715a573b99ac80df0bc206da022bcd442c974952c7b9720069370852e21f"
+
+[[package]]
+name = "ruzstd"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a252f5e20f038fe7b4ea53e073e65398d652c864cc162fc77c56c2f13717b888"
+dependencies = [
+ "twox-hash",
+]
 
 [[package]]
 name = "same-file"
@@ -3901,6 +4139,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "studio-doc"
+version = "0.1.0"
+dependencies = [
+ "lightcraft-engine",
+ "photocraft-color",
+ "photocraft-compose",
+ "photocraft-doc",
+ "photocraft-format",
+ "photocraft-geom",
+ "photocraft-raster",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "studio-shell"
 version = "0.1.0"
 dependencies = [
@@ -4110,6 +4363,12 @@ name = "ttf-parser"
 version = "0.25.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d2df906b07856748fa3f6e0ad0cbaa047052d4a7dd609e231c4f72cee8c36f31"
+
+[[package]]
+name = "twox-hash"
+version = "2.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "86a801b3cea342a06d468c8710662aa29e5e05e4f5c0d62f00bbb7f2ad7941c2"
 
 [[package]]
 name = "type-map"
@@ -5197,6 +5456,15 @@ name = "zune-core"
 version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d56377fd46368984a170bc5aac5567e52ca5da874caa60bea39fcbca78fb658b"
+
+[[package]]
+name = "zune-inflate"
+version = "0.2.54"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "73ab332fe2f6680068f3582b16a24f90ad7096d5d39b974d1c0aff0125116f02"
+dependencies = [
+ "simd-adler32",
+]
 
 [[package]]
 name = "zune-jpeg"

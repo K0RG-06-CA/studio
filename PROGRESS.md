@@ -23,6 +23,13 @@ See [`PRD.md`](PRD.md) → *Milestones for Claude Code*.
   - [x] 6. App wiring (`Pictures\Studio Library` / `STUDIO_LIBRARY`, UI state saved, save on leaving Library/Develop and on exit, file pickers)
   - [x] 7. Render check, NOTICE, hand-check list
 - [ ] **3. Shared document** — one document model (layer tree + develop settings) and save format; Develop edits as a non-destructive base layer.
+  - [x] 1. Pin PhotoCraft (`d836e34`; builds on ARM64) + `studio-doc` scaffold: `Document` (name, source photo, LightCraft `DevelopSettings`, reserved `Film`, PhotoCraft layer tree), `document.json` header
+  - [ ] 2. `Document::from_photo`: 16-bit RGB layer tree with the locked, marked "Develop" base layer
+  - [ ] 3. Live base: re-render (CPU, 16-bit) when the settings change and no drag is open; the document size follows the render
+  - [ ] 4. `.studio` save/load (one zip: `document.json` + `pixel.pcraft`, base pixels not stored)
+  - [ ] 5. Open into a session: find the photo by hash → id → import; the file's settings win, as a History step
+  - [ ] 6. Shell wiring: `document.new/save/saveAs/open/close`, `run_with` (params), name in the top bar, reopen at launch
+  - [ ] 7. Smoke script + docs
 - [ ] **4. Pixel persona** — PhotoCraft tools with Photoshop layout (tool bar left, options bar top, Layers and Properties right).
 - [ ] **5. Round trip** — Library → Develop → Pixel and back on one document, one undo history across personas.
 - [ ] **6. MCP** — one MCP server exposing commands from every persona.
@@ -71,6 +78,13 @@ Former hand checks and the tests that replaced them:
 - Edit, switch to Pixel, relaunch: edit kept → `leaving_develop_saves_its_edits`.
 - Panel widths, Edit sections, settings after relaunch → `persona_panels_and_lightcraft_settings_come_back_after_a_relaunch`.
 - Preset hover preview; History steps → `hovering_a_preset_previews_it_only_while_hovered`, `history_lists_develop_steps`.
+
+## Open items
+
+- **Film track needs a pipeline hook in LightCraft** (smallest possible, offered upstream per PRD › Staying
+  in sync): LightCraft `eeb136b` has no way to register an extra develop step, and `PRD-halation.md` needs
+  halation on scene-linear light before the tone curve, which its render API doesn't expose (its
+  `F32Linear` output is after the curve and clamped). The document only reserves `Film` settings.
 
 ## Known untested
 
