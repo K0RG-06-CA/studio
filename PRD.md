@@ -76,18 +76,17 @@ Version 1 ships Library, Develop, Film and Pixel, which covers the Lightroom-to-
 
 **The key v1 flow:** pick a photo in Library, develop it, click Pixel in the top bar, add layers and retouch, click Develop again and the edits are still there. No "Edit in Photoshop" export step. Pixel can also open a PNG or PSD directly.
 
-## Feature: newer-format RW2 decoding (S9 first)
+## Feature: S9 colour profile (newer-format RW2)
 
-Studio must develop Lumix S9 RW2 files from the real raw data, not the embedded JPEG. Today LightCraft decodes older RW2 files but opens newer RW2 v4 files as preview only, and the S9 (2024) is likely on that newer format.
+LightCraft (pinned `eeb136b`, 2026-10-08) decodes Panasonic raw format 8 (GH6 and later, including the S9) from the sensor data; on the author's S9 files its decode is bit-identical to Adobe DNG Converter's (see `docs/rw2-investigation.md`). The remaining gap is colour: RW2 files carry no colour matrix, so LightCraft fits a per-file look to the embedded JPEG with relative white balance, while a DNG of the same file carries calibrated matrices and absolute Kelvin.
 
-- **Done means:** an S9 RW2 opens without the preview-only badge, and highlights, shadows and white balance recover like a DNG converted from the same file.
-- **Test files:** your own S9 shots, at several ISOs, in every raw quality setting the camera offers. Keep a few as fixtures in the repo's tests.
+- **Done means:** an S9 RW2 renders through the same colour path as its DNG (matrices from a per-camera table, absolute WB), and a golden test keeps RW2-vs-DNG decode bit-exact across LightCraft updates.
+- **Two looks:** *Camera* (LightCraft's current fit to the embedded JPEG, relative WB) and *Neutral* (the table's DNG matrices, absolute Kelvin). Both selectable per photo; Neutral is the one checked against the DNG.
+- **Test files:** your own S9 shots at several ISOs, clipped and dark frames, every aspect ratio and crop mode (the S9 has one raw mode: 12-bit, electronic shutter only). Keep one RW2 + DNG pair as a fixture.
 - **Reference to check against:** the same files converted with Adobe DNG Converter, which LightCraft already decodes fully.
-- **Where it lives:** the `studio-raw-rw2` crate in Studio's fork, plugged into LightCraft's raw decoding.
+- **Where it lives:** the `studio-raw-rw2` crate holds the per-camera colour table (matrix pairs with illuminants, forward matrices, black, white, baseline exposure) and the decode-parity tests, plugged in through the engine's public `file_loader` / `file_probe` hook. No decoder.
 
-**Decision: personal fork, newer RW2 format.** Studio keeps its own fork of LightCraft and never sends this decoder back to storytold. The decoder targets Panasonic's newer RW2 format plus a small per-camera table (colour matrix, black and white levels, sensor size and crop). The S9 is the first entry, tested against your own shots. Another Lumix model is added with one table entry plus its test files (free samples on raw.pixls.us); which models share the S9's format is checked during testing. Claude Code may study existing open-source raw decoders to learn how newer Lumix files work. Studio is GPL (see License and publishing), so borrowing from GPL-licensed decoders is allowed. Anything borrowed is rewritten in Rust to keep ARM64 builds simple.
-
-**Fallback until it ships:** convert S9 files to DNG first.
+**Decision: Studio's fork ships camera matrices recorded from the author's own DNGs.** The S9 entry's values are read from Adobe DNG Converter's output of the author's files (the same numbers rawspeed and rawler redistribute under LGPL); they are credited in `NOTICE`. LightCraft upstream refuses Adobe-derived data by policy, so the table stays in Studio and the hook stays generic. Another Lumix body is added with one table entry plus its test files (free samples on raw.pixls.us). If a future body is preview-only in LightCraft, the smallest upstream fallback hook (about ten lines in `lightcraft-raw`) is proposed in the investigation doc.
 
 ## Feature: Lumix Real Time LUT on RAW
 
@@ -217,7 +216,7 @@ Studio must pull in storytold's updates in minutes, not days. The rule: **add ar
 - **Their code stays untouched.** LightCraft, PhotoCraft, VectorCraft and DesignCraft come in as Git dependencies pinned to a commit, not copied files. Updating is changing one commit hash.
 - **Pinned commits** (in the workspace `Cargo.toml`): LightCraft `eeb136b` (Oct 8, 2026; milestone 2), PhotoCraft `d836e34` (Oct 9, 2026; milestone 3).
 - **Studio's code lives in its own crates:** `studio-shell`, `studio-doc`, `studio-film`, `studio-raw-rw2`. They use storytold's public APIs and command registry instead of changing their files.
-- **Plug in, don't patch.** The RW2 decoder registers as an extra raw decoder, and film effects register as extra pipeline steps. If storytold has no hook for that yet, add the smallest possible hook in their code. A generic hook like that can be offered back to storytold as a pull request, so the patch disappears once they merge it.
+- **Plug in, don't patch.** The S9 colour table plugs in through the engine's public `file_loader` / `file_probe` hook, and film effects register as extra pipeline steps. If storytold has no hook for that yet, add the smallest possible hook in their code. A generic hook like that can be offered back to storytold as a pull request, so the patch disappears once they merge it.
 - **Unavoidable patches** live on one branch of the fork, each listed in `PATCHES.md` with why it exists. Keep this list as short as possible.
 - **Weekly update check (automated):** a CI job pulls storytold's latest main into a test branch, builds on all four platforms, runs every test, and opens a pull request. Green means click merge; red shows exactly which patch or API broke.
 - **Golden-image tests** catch look changes: a set of your S9 photos with fixed settings is rendered and compared to saved results, so an upstream colour-science change can't silently alter your edits.
@@ -227,7 +226,7 @@ Studio must pull in storytold's updates in minutes, not days. The rule: **add ar
 
 Studio is licensed **GPL-3.0-or-later** and will be published on GitHub once it's polished.
 
-- **Why GPL:** it lets the RW2 decoder borrow from GPL-licensed open-source decoders. Storytold's MIT/Apache code and the NP DCTLs (MIT) can be included in a GPL-3.0 app.
+- **Why GPL:** it lets Studio borrow from GPL- and LGPL-licensed open-source raw code (camera tables, a decoder if one is ever needed). Storytold's MIT/Apache code and the NP DCTLs (MIT) can be included in a GPL-3.0 app.
 - **Credits:** keep storytold's and Nikita Petrovich's license texts in `NOTICE` and on the credits screen.
 - **Halation** follows `PRD-halation.md` and ports code from spektrafilm (GPL-3.0, compatible with Studio's GPL). Its licence notice and credit (Andrea Volpato) go in `NOTICE` and the credits screen when the code is ported.
 - **Giving back:** Studio's GPL code can't go into storytold's MIT/Apache repos. Small hooks written fresh for upstream (no borrowed code) can still be offered as pull requests.
@@ -246,7 +245,7 @@ Each milestone ends with something you can open and click. Give Claude Code one 
 
 **Side tracks (start any time, neither needs the shared document):**
 
-- **RW2 decoding:** in a LightCraft fork. Good first Claude Code task: "Open these S9 RW2 files, report exactly why LightCraft marks them preview only, and propose a decoding plan."
+- **S9 colour profile:** investigated (`docs/rw2-investigation.md`): LightCraft already decodes the S9, so the track is the per-camera colour table, the two looks and the RW2-vs-DNG golden test. Blocked on shooting the sample list in that doc's section 6.
 - **Real Time LUT:** run the first Claude Code task in that section using your RAW+JPEG pairs.
 - **Film effects:** port Saturation RGB first (simplest), then Grain, Blur, Bleach, and Halation (see `PRD-halation.md`), then the film stock builder. Each one ships as its own small change.
 
@@ -256,7 +255,7 @@ Each milestone ends with something you can open and click. Give Claude Code one 
 | --- | --- | --- |
 | Shell, personas, UI, film effects | Opus 5.5 | medium |
 | Shared document model (milestone 3) | Fable 5.1 | high |
-| RW2 decoder and Real Time LUT investigation | Fable 5.1 | high |
+| S9 colour profile and Real Time LUT investigation | Fable 5.1 | high |
 | Bug fixes in existing code | Opus 5.5 | high |
 | Small tweaks | Sonnet 5.5 | low |
 

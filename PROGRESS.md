@@ -37,8 +37,13 @@ See [`PRD.md`](PRD.md) → *Milestones for Claude Code*.
 
 ## Side tracks
 
-- [ ] **RW2 decoding** — report why LightCraft marks S9 RW2 files preview-only, propose and build the `studio-raw-rw2` decoder.
-  - [x] Investigation (`docs/rw2-investigation.md`, 2026-10-08): LightCraft `eeb136b` already decodes the S9 (format 8, landed upstream 2026-10-07); all 5 samples decode bit-identical to Adobe DNG Converter 18.3, and Studio's import path marks none preview-only. No decoder to build; the remaining gap is colour (RW2 carries no matrix: per-file JPEG fit with relative WB vs the DNG's calibrated matrices). Proposes a per-camera colour table + decode-parity golden test instead, an engine `file_loader` wrap (no patch) and a ~10-line upstream fallback hook if ever needed, and a PRD rewording (not applied).
+- [x] **RW2 decoding** — investigated (`docs/rw2-investigation.md`, 2026-10-08): LightCraft `eeb136b` already decodes the S9 (raw format 8, landed upstream 2026-10-07); all 5 samples decode bit-identical to Adobe DNG Converter 18.3, and Studio's import path marks none preview-only. **No decoder crate is needed.** PRD.md reworded accordingly (2026-10-08); replaced by the track below.
+- [ ] **S9 colour profile** — the gap the investigation found: RW2 files carry no colour matrix, so LightCraft fits a per-file look to the embedded JPEG with relative WB, while a DNG of the same file has calibrated matrices and absolute Kelvin. Decision: Studio's fork ships matrices recorded from the author's own DNGs (credited in `NOTICE`).
+  - [ ] **Blocked on samples:** shoot the section 6 list of the investigation doc (ISO ladder, clipped and dark frames, every aspect ratio and crop mode, high-res mode, each LUT) into `samples/rw2/` and convert each with Adobe DNG Converter (installed, 18.3) into `samples/rw2/dng/`.
+  - [ ] `studio-raw-rw2` crate: per-camera colour table (S9 first: ColorMatrix1/2 with illuminants A/D65, ForwardMatrix1/2, black 128, white 4095, baseline exposure −0.05) with values read from the DNGs; no decoder.
+  - [ ] Plug in through the engine's public `Session.media.file_loader` / `file_probe` hook (wrap `with_fs()`'s defaults; no LightCraft patch). Upstream ask if needed: split `files::load_bytes_now` so a patched `RawImage` can enter the DNG colour path (doc section 5b).
+  - [ ] Two looks per photo, as a command: **Camera** (LightCraft's current JPEG fit, relative WB) and **Neutral** (the table's DNG matrices, absolute Kelvin).
+  - [ ] Golden tests: bit-exact RW2-vs-DNG decode on one fixture pair (`lightcraft_raw::decode` data, CFA, black, active/crop, WB within 1e-5) plus `probe_bytes(..).preview_only == None`; Neutral render vs the DNG render at 600 px within ΔE 1 / |ΔL*| 0.2 on the scripted edits (doc section 5c).
 - [ ] **Real Time LUT** — inspect S9 RAW+JPEG pairs for LUT / Photo Style metadata; .vlt import; apply detected LUT as an editable profile.
   - [ ] Before starting, shoot labelled RAW+JPEG pairs (one per LUT plus one without) into `samples/lut/` (gitignored).
 - [ ] **Film effects**
