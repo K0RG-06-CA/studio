@@ -421,6 +421,9 @@ impl StudioShell {
         if let Some(lr) = self.lightroom.as_mut().filter(|_| self.persona.lightroom()) {
             lr.overlays(ui.ctx());
         }
+        if let Some(px) = self.pixel.as_mut().filter(|_| self.persona == Persona::Pixel) {
+            px.overlays(ui.ctx());
+        }
         self.document_prompt(ui.ctx());
         self.error_notice(ui.ctx());
     }

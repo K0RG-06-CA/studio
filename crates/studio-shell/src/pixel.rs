@@ -19,6 +19,22 @@
 //!     photocraft_ui_egui::panels::toolbar(app, ui);
 //! }
 //! ```
+//!
+//! Its Timeline windows (Window › Timeline) are in a private module, so Studio can't show them;
+//! the first example compiles (and its doctest fails) once upstream makes it public. The second
+//! is the same call to a public module's windows.
+//!
+//! ```compile_fail
+//! fn timeline(app: &mut photocraft_ui_egui::PhotocraftApp, ctx: &egui::Context) {
+//!     photocraft_ui_egui::timeline_ui::windows(app, ctx);
+//! }
+//! ```
+//!
+//! ```
+//! fn workspace(app: &mut photocraft_ui_egui::PhotocraftApp, ctx: &egui::Context) {
+//!     photocraft_ui_egui::workspace_ui::windows(app, ctx);
+//! }
+//! ```
 
 use std::sync::Arc;
 
@@ -134,6 +150,42 @@ impl Pixel {
         child.set_clip_rect(tab.with_min_x(tab.min.x + grab).intersect(ui.clip_rect()));
         self.show(&mut child, panels::right_dock);
         ui.allocate_rect(tab, egui::Sense::hover());
+    }
+}
+
+impl Pixel {
+    /// What PhotoCraft shows over the whole window (its dialogs: adjustments, filters, Liquify,
+    /// Camera Raw…; floating panels, the command palette, notices, job progress), after the
+    /// dock is drawn, in its style. Left out: its unsaved-changes prompt and TIFF save options
+    /// (saving is Studio's), and the Timeline (its module is private: see the module docs).
+    pub fn overlays(&mut self, ctx: &egui::Context) {
+        use photocraft_ui_egui::{
+            analysis_ui, brush_panel, camera_raw_ui, dialogs, distort_ui, gpu_status, jobs_ui, notices, palette, preset_panels, type_panels_ui,
+            wide_angle_ui, workspace_ui,
+        };
+        if !self.ready() {
+            return;
+        }
+        let studio = ctx.global_style();
+        if let Some(style) = &self.style {
+            ctx.set_global_style(style.clone());
+        }
+        let app = &mut self.app;
+        brush_panel::window(app, ctx);
+        preset_panels::windows(app, ctx);
+        type_panels_ui::windows(app, ctx);
+        analysis_ui::windows(app, ctx);
+        workspace_ui::windows(app, ctx);
+        palette::show(app, ctx);
+        dialogs::show(app, ctx);
+        jobs_ui::dialog(app, ctx);
+        distort_ui::show(app, ctx);
+        camera_raw_ui::show(app, ctx);
+        wide_angle_ui::show(app, ctx);
+        canvas::extra_windows(app, ctx);
+        notices::show(app, ctx);
+        gpu_status::show_fallback(app, ctx);
+        ctx.set_global_style(studio);
     }
 }
 

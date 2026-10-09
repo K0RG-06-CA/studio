@@ -91,7 +91,12 @@ See [`PRD.md`](PRD.md) → *Milestones for Claude Code*.
     before close, replace, the window's close button and Ctrl+Q, and Save writes it; Ctrl+S
     saves the `.studio`; files dropped on Pixel open nothing (PhotoCraft as Studio sets it up
     has no import service), so no guard was needed.
-  - [ ] 8. Overlays, History panel (L4)
+  - [x] 8. PhotoCraft's overlays drawn after Pixel's dock in its style (dialogs: adjustments,
+    filters, Liquify, Camera Raw, wide angle; floating panels, palette, notices, job progress;
+    test: Ctrl+L opens Levels over Pixel). Left out: its unsaved prompt and TIFF options (saving is
+    Studio's) and Timeline windows (private module: L7 doctest). L4 test: the History footer's
+    Delete state / New snapshot / New document buttons do nothing (found as the one row of three
+    24-pt buttons; their tooltips don't show headless; the same clicks on a History row do act).
   - [ ] 9. App wiring, smoke script, renders, NOTICE
 - [ ] **5. Round trip** — Library → Develop → Pixel and back on one document, one undo history across personas.
 - [ ] **6. MCP** — one MCP server exposing commands from every persona.

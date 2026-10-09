@@ -461,6 +461,63 @@ fn files_dropped_on_pixel_dont_open_in_photocraft() {
     assert_eq!(layer_names(h.state().document.as_ref().unwrap()), [studio_doc::BASE_LAYER]);
 }
 
+// --- Task 8: PhotoCraft's overlays, its History panel ---
+
+#[test]
+fn photocrafts_dialogs_show_over_pixel_ctrl_l_opens_levels() {
+    let dir = temp_dir("pixel-levels");
+    let mut h = studio();
+    pixel_edited(&mut h, &dir.join("trip.studio"));
+    assert!(!painted_text(h.output()).contains("Levels"));
+    press(&mut h, egui::Modifiers::COMMAND, egui::Key::L);
+    h.run_steps(3);
+    let text = painted_text(h.output());
+    assert!(text.contains("Levels"), "{text}");
+    // in Studio's frame: its theme around the dialog stays Studio's
+    assert_eq!(h.ctx.global_style().visuals.panel_fill, crate::theme::TOKENS.chrome);
+}
+
+/// L4: the History panel's "Delete current state", "Create new snapshot" and "Create new
+/// document from current state" buttons do nothing (`d836e34`: their clicks are dropped). Fails
+/// once upstream wires one of them up.
+#[test]
+fn l4_photocrafts_history_footer_buttons_do_nothing() {
+    let dir = temp_dir("pixel-history");
+    let mut h = studio();
+    pixel_edited(&mut h, &dir.join("trip.studio"));
+    let state = |h: &Harness<'_, crate::StudioShell>| {
+        let pc = &h.state().pixel.as_ref().unwrap().app.session;
+        (pc.documents().len(), pc.active().unwrap().history.entries(), layer_names(h.state().document.as_ref().unwrap()))
+    };
+    let before = state(&h);
+    // icon buttons without an accessible name (their tooltips don't show headless): the History
+    // footer is the one row of exactly three 24-point buttons in Pixel's panels tab, right to
+    // left: delete, snapshot, new document
+    let column = pixel_leaf(&h, &crate::dock::Tab::Panel("Layers".to_owned()));
+    let small = |n: &egui_kittest::kittest::AccessKitNode<'_>| {
+        n.bounding_box().is_some_and(|b| (b.width() - 24.0).abs() < 0.5 && (b.height() - 24.0).abs() < 0.5)
+    };
+    let buttons: Vec<Rect> =
+        h.query_all(egui_kittest::kittest::By::new().predicate(small)).map(|n| n.rect()).filter(|r| column.contains(r.center())).collect();
+    let row = |r: &Rect| buttons.iter().filter(|b| (b.top() - r.top()).abs() < 0.5).count();
+    let mut footer: Vec<Rect> = buttons.iter().copied().filter(|r| row(r) == 3).collect();
+    footer.sort_by(|a, b| b.left().total_cmp(&a.left()));
+    assert_eq!(footer.len(), 3, "the History footer's three buttons: {buttons:?}");
+    let mut clicked = 0;
+    for (at, label) in footer.into_iter().zip(["Delete current state", "Create new snapshot", "Create new document from current state"]) {
+        h.hover_at(at.center());
+        h.run_steps(1);
+        for pressed in [true, false] {
+            h.event(egui::Event::PointerButton { pos: at.center(), button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE });
+            h.run_steps(1);
+        }
+        h.run_steps(2);
+        assert_eq!(state(&h), before, "upstream now does something for {label}");
+        clicked += 1;
+    }
+    assert_eq!(clicked, 3, "all three buttons found");
+}
+
 fn harness_app() -> PhotocraftApp {
     let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Services::default());
     app.session.add_document(pixel_doc(), None);
