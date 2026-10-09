@@ -102,7 +102,8 @@ Former hand checks and the tests that replaced them:
   with a close/quit prompt (save, discard, cancel) for an unsaved document, and a visible error when
   saving fails.
   - [x] Prompt on `document.new` / `open` / `close` (`document.prompt.save|discard|cancel`)
-  - [ ] Window close and Ctrl+Q (every persona) go through the prompt
+  - [x] Window close and Ctrl+Q (every persona) go through the prompt (`app.quit`; LightCraft's own
+    Cmd+Q in Library/Develop, Studio's elsewhere; one Close, one prompt)
   - [ ] Save of a document with no file picks one (save dialog)
   - [ ] Visible save error; `on_exit` recovers a never-saved document
   - [ ] Smoke script and offscreen renders of the prompt and the error

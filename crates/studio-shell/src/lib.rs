@@ -83,11 +83,16 @@ pub struct StudioShell {
     /// What waits on the "save changes?" prompt, which shows while this is set.
     #[serde(skip)]
     pub prompt: Option<Pending>,
+    /// Close the window on the next frame (`app.quit`, or the prompt's answer to a close).
+    #[serde(skip)]
+    pub close_window: bool,
 }
 
 /// An action that would drop the open document's unsaved changes, held while the prompt asks.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Pending {
+    /// Closing the window (its close button, Ctrl+Q, LightCraft's Quit).
+    Quit,
     New,
     Open(PathBuf),
     Close,
@@ -104,6 +109,7 @@ impl Default for StudioShell {
             base_error: None,
             document_path: None,
             prompt: None,
+            close_window: false,
         }
     }
 }
@@ -132,6 +138,7 @@ impl StudioShell {
     ///
     /// - `persona.<id>`: switch persona (v2/v3 personas are disabled and return an error).
     /// - `window.resetWorkspace`: put the current persona's panels back where they started.
+    /// - `app.quit` (Ctrl+Q): close the window; an unsaved document asks first.
     /// - Lightroom Classic's module keys: `view.grid` (G) and `view.loupe` (E) in Library,
     ///   `view.develop` (D), `tool.crop` (R) in Develop.
     /// - The document: `document.new` (from the photo picked in Library), `document.open {path}`,
@@ -156,6 +163,10 @@ impl StudioShell {
                     let _ = dock.set_active_tab(path);
                 }
             }
+            return Ok(());
+        }
+        if id == "app.quit" {
+            self.close_window = true;
             return Ok(());
         }
         if id == "window.resetWorkspace" {
@@ -198,6 +209,14 @@ impl StudioShell {
                 self.prompt = None;
                 let discard = serde_json::json!({"discard": true});
                 match pending {
+                    Pending::Quit => {
+                        // discarded: the next launch opens the file as it was saved, if it has one
+                        if let Some(doc) = self.document.take_if(|d| d.unsaved()) {
+                            self.document_path = doc.path;
+                        }
+                        self.close_window = true;
+                        Ok(())
+                    }
                     Pending::New => self.run_with("document.new", &discard),
                     Pending::Open(path) => self.run_with("document.open", &serde_json::json!({"path": path, "discard": true})),
                     Pending::Close => self.run_with("document.close", &discard),
@@ -287,6 +306,15 @@ impl StudioShell {
 
     /// Draw the whole shell into `ui`.
     pub fn ui(&mut self, ui: &mut egui::Ui) {
+        if std::mem::take(&mut self.close_window) {
+            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+        }
+        // Every way of closing the window (its close button, Ctrl+Q, LightCraft's Quit) arrives
+        // here: an unsaved document stops it and asks.
+        if ui.input(|i| i.viewport().close_requested()) && self.document.as_ref().is_some_and(Document::unsaved) {
+            ui.ctx().send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            self.prompt = Some(Pending::Quit);
+        }
         self.document_tick();
         // egui repaints only on input: keep polling for the render while one is in flight
         if self.base.rendering() {
@@ -429,6 +457,11 @@ impl StudioShell {
                 // A disabled persona's shortcut does nothing, like its greyed-out button.
                 let _ = self.run(&p.command());
             }
+        }
+        // Quit: LightCraft's own Cmd+Q in its personas, Studio's in the others
+        let quit = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Q);
+        if !self.persona.lightroom() && ui.input_mut(|i| i.consume_shortcut(&quit)) {
+            let _ = self.run("app.quit");
         }
         // Lightroom's single keys belong to the Lightroom personas (in Pixel, G and E are Photoshop
         // tools), never while typing, and only bare: Shift+E and the like stay LightCraft's.

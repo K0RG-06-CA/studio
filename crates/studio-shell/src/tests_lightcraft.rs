@@ -560,7 +560,7 @@ fn hovering_a_preset_previews_it_only_while_hovered() {
     assert!(lc(&h).hover_preview.is_none(), "and stops once the pointer leaves it");
 }
 
-/// A 1Ã—1 PNG.
+/// A 1ÃƒÆ’Ã¢â‚¬â€1 PNG.
 const PNG: [u8; 67] = [
     0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
     0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4, 0x89, 0x00, 0x00, 0x00, 0x0A, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x63, 0x00, 0x01, 0x00, 0x00,
@@ -710,7 +710,7 @@ fn editing_in_develop_re_renders_the_documents_base_layer() {
     assert!(!h.state().base_up_to_date(), "a render is due");
     settle_base(&mut h);
     let after = base_brightness(&h);
-    assert!(after > before + 0.05, "{before} â†’ {after}");
+    assert!(after > before + 0.05, "{before} ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ {after}");
     // in Pixel too: the base keeps following (sync runs in every persona)
     h.state_mut().run("persona.pixel").unwrap();
     let lr = h.state_mut().lightroom.as_mut().unwrap();
@@ -719,7 +719,7 @@ fn editing_in_develop_re_renders_the_documents_base_layer() {
     s.light.exposure = -2.0;
     lr.app.session.set_develop(id, s, "Exposure").unwrap();
     settle_base(&mut h);
-    assert!(base_brightness(&h) < before, "{before} â†’ {}", base_brightness(&h));
+    assert!(base_brightness(&h) < before, "{before} ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ {}", base_brightness(&h));
 }
 
 #[test]
@@ -872,6 +872,114 @@ fn replacing_an_unsaved_document_asks_save_dont_save_or_cancel() {
     h.run_steps(1);
     assert!(!prompt_shown(&h) && h.state().prompt.is_none());
     assert!(h.state_mut().run("document.prompt.save").unwrap_err().contains("nothing is waiting"));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// What happened while running frames as a window does: a `Close` command makes the next frame's
+/// close request, which closes the window unless that frame sends `CancelClose`.
+#[derive(Debug, Default, PartialEq)]
+struct Window {
+    /// `Close` commands sent.
+    closes: usize,
+    /// Close requests stopped.
+    cancels: usize,
+    closed: bool,
+}
+
+/// Press Ctrl+Q (Cmd+Q on macOS) for the next frame. Straight into the input, not kittest's
+/// queue: that runs one pass per event and keeps only the last pass's output, so the `Close` sent
+/// on the press would never be seen.
+fn ctrl_q(h: &mut Harness<'_, StudioShell>) {
+    let (key, modifiers) = (egui::Key::Q, egui::Modifiers::COMMAND);
+    h.input_mut().events.push(egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers });
+}
+
+fn run_window(h: &mut Harness<'_, StudioShell>, frames: usize, mut requested: bool) -> Window {
+    let mut w = Window::default();
+    for _ in 0..frames {
+        if requested {
+            h.input_mut().viewports.entry(egui::ViewportId::ROOT).or_default().events.push(egui::ViewportEvent::Close);
+        }
+        h.run_steps(1);
+        let sent = |c: &egui::ViewportCommand| h.output().viewport_output.values().any(|v| v.commands.contains(c));
+        let (close, cancel) = (sent(&egui::ViewportCommand::Close), sent(&egui::ViewportCommand::CancelClose));
+        if requested && !cancel {
+            w.closed = true;
+            return w;
+        }
+        w.cancels += usize::from(requested && cancel);
+        w.closes += usize::from(close);
+        requested = close;
+    }
+    w
+}
+
+/// Click a prompt button; its effect shows from the next frame.
+fn answer(h: &mut Harness<'_, StudioShell>, label: &str) {
+    h.get_by_label(label).click();
+}
+
+#[test]
+fn closing_the_window_with_an_unsaved_document_asks_first_in_every_persona() {
+    let dir = temp_dir("prompt-close");
+    let path = dir.join("trip.studio");
+    for p in [Persona::Develop, Persona::Pixel] {
+        let mut h = studio();
+        edited_document(&mut h, &path);
+        h.state_mut().run(&p.command()).unwrap();
+        h.run_steps(2);
+        // the window's close button: stopped, and the prompt shows
+        assert_eq!(run_window(&mut h, 3, true), Window { closes: 0, cancels: 1, closed: false }, "{p:?}");
+        assert_eq!(h.state().prompt, Some(crate::Pending::Quit));
+        answer(&mut h, "Cancel");
+        assert_eq!(run_window(&mut h, 5, false), Window::default(), "{p:?}: Cancel keeps the window");
+        assert!(h.state().document.as_ref().unwrap().unsaved(), "and the edit");
+        // Don't Save: the window closes, and the next launch opens the file as saved
+        // the prompt's first frame is its sizing pass: it takes clicks from the next
+        run_window(&mut h, 2, true);
+        answer(&mut h, "Don't Save");
+        let w = run_window(&mut h, 5, false);
+        assert!(w.closed && w.closes == 1, "{p:?}: {w:?}");
+        assert!(h.state().document.is_none());
+        assert_eq!(h.state().document_path.as_deref(), Some(path.as_path()));
+    }
+    // Save: written, then closed
+    let mut h = studio();
+    edited_document(&mut h, &path);
+    run_window(&mut h, 2, true);
+    answer(&mut h, "Save");
+    assert!(run_window(&mut h, 5, false).closed);
+    assert_eq!(studio_doc::Document::open(&path).unwrap().develop.light.exposure, 1.5);
+    // nothing unsaved: closes straight away
+    let mut h = studio();
+    edited_document(&mut h, &path);
+    h.state_mut().run("document.save").unwrap();
+    assert!(run_window(&mut h, 2, true).closed);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn ctrl_q_asks_exactly_once_in_every_persona() {
+    let dir = temp_dir("prompt-quit");
+    let path = dir.join("trip.studio");
+    let mut h = studio();
+    edited_document(&mut h, &path);
+    for p in [Persona::Library, Persona::Develop, Persona::Film, Persona::Pixel] {
+        h.state_mut().run(&p.command()).unwrap();
+        h.run_steps(3);
+        ctrl_q(&mut h);
+        // one Close, stopped once; one prompt (a second "Don't Save" would fail the lookup)
+        assert_eq!(run_window(&mut h, 6, false), Window { closes: 1, cancels: 1, closed: false }, "{p:?}");
+        assert_eq!(h.state().prompt, Some(crate::Pending::Quit));
+        h.get_by_label("Don't Save");
+        assert!(lc(&h).quit_prompt.is_none(), "{p:?}: LightCraft's own prompt stays away (its library is saved)");
+        answer(&mut h, "Cancel");
+        assert_eq!(run_window(&mut h, 5, false), Window::default(), "{p:?}: nothing more");
+    }
+    // nothing unsaved: Ctrl+Q quits
+    h.state_mut().run("document.save").unwrap();
+    ctrl_q(&mut h);
+    assert!(run_window(&mut h, 6, false).closed);
     let _ = std::fs::remove_dir_all(&dir);
 }
 
