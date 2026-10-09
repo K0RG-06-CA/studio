@@ -101,6 +101,11 @@ Former hand checks and the tests that replaced them:
   and those live in the library, but the moment M4 adds pixel layers it is data loss: M4 must start
   with a close/quit prompt (save, discard, cancel) for an unsaved document, and a visible error when
   saving fails.
+  - [x] Prompt on `document.new` / `open` / `close` (`document.prompt.save|discard|cancel`)
+  - [ ] Window close and Ctrl+Q (every persona) go through the prompt
+  - [ ] Save of a document with no file picks one (save dialog)
+  - [ ] Visible save error; `on_exit` recovers a never-saved document
+  - [ ] Smoke script and offscreen renders of the prompt and the error
 - **Full-size 16-bit base render is CPU-only and slow** (CI runners took over 60 s for 24 MP). Measure
   it on this machine with a real S9 file and fix before Pixel ships (draft size while editing, GPU
   16-bit, or render in bands).

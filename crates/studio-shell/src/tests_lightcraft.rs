@@ -560,7 +560,7 @@ fn hovering_a_preset_previews_it_only_while_hovered() {
     assert!(lc(&h).hover_preview.is_none(), "and stops once the pointer leaves it");
 }
 
-/// A 1×1 PNG.
+/// A 1Ã—1 PNG.
 const PNG: [u8; 67] = [
     0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
     0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4, 0x89, 0x00, 0x00, 0x00, 0x0A, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x63, 0x00, 0x01, 0x00, 0x00,
@@ -710,7 +710,7 @@ fn editing_in_develop_re_renders_the_documents_base_layer() {
     assert!(!h.state().base_up_to_date(), "a render is due");
     settle_base(&mut h);
     let after = base_brightness(&h);
-    assert!(after > before + 0.05, "{before} → {after}");
+    assert!(after > before + 0.05, "{before} â†’ {after}");
     // in Pixel too: the base keeps following (sync runs in every persona)
     h.state_mut().run("persona.pixel").unwrap();
     let lr = h.state_mut().lightroom.as_mut().unwrap();
@@ -719,7 +719,7 @@ fn editing_in_develop_re_renders_the_documents_base_layer() {
     s.light.exposure = -2.0;
     lr.app.session.set_develop(id, s, "Exposure").unwrap();
     settle_base(&mut h);
-    assert!(base_brightness(&h) < before, "{before} → {}", base_brightness(&h));
+    assert!(base_brightness(&h) < before, "{before} â†’ {}", base_brightness(&h));
 }
 
 #[test]
@@ -793,6 +793,86 @@ fn a_base_render_in_flight_keeps_the_app_repainting() {
     h.run_steps(3);
     h.step();
     assert!(!h.ctx.has_requested_repaint(), "idle once the base is rendered");
+}
+
+/// An edit in Develop's settings for the document's photo (the catalog is their home).
+fn edit(h: &mut Harness<'_, StudioShell>, exposure: f64) {
+    let lr = h.state_mut().lightroom.as_mut().unwrap();
+    lr.app.run("develop.set", serde_json::json!({"control": "light.exposure", "value": exposure})).unwrap();
+    h.run_steps(1);
+    assert!(h.state().document.as_ref().unwrap().unsaved());
+}
+
+/// A new, rendered document on the first demo photo, saved to `path`, then edited.
+fn edited_document(h: &mut Harness<'_, StudioShell>, path: &std::path::Path) {
+    h.run_steps(3);
+    pick_first(h);
+    h.state_mut().run("document.new").unwrap();
+    settle_base(h);
+    h.state_mut().run_with("document.saveAs", &serde_json::json!({"path": path})).unwrap();
+    edit(h, 1.5);
+}
+
+fn prompt_shown(h: &Harness<'_, StudioShell>) -> bool {
+    h.query_by_label("Don't Save").is_some()
+}
+
+/// Click a button of the prompt (or any button) by its label.
+fn click_button(h: &mut Harness<'_, StudioShell>, label: &str) {
+    h.get_by_label(label).click();
+    h.run_steps(2);
+}
+
+fn temp_dir(name: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("studio-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+#[test]
+fn replacing_an_unsaved_document_asks_save_dont_save_or_cancel() {
+    let dir = temp_dir("prompt-replace");
+    let path = dir.join("trip.studio");
+    let mut h = studio();
+    edited_document(&mut h, &path);
+    // Cancel: nothing happens
+    assert!(h.state_mut().run("document.new").unwrap_err().contains("unsaved"));
+    h.run_steps(1);
+    assert!(prompt_shown(&h), "new asks");
+    h.get_by_label(format!("Save changes to \u{201c}{}\u{201d} before closing?", h.state().document.as_ref().unwrap().name).as_str());
+    click_button(&mut h, "Cancel");
+    assert!(!prompt_shown(&h) && h.state().prompt.is_none());
+    assert!(h.state().document.as_ref().unwrap().unsaved(), "kept, edit and all");
+    // Save: the edit is written, then the new document replaces it
+    assert!(h.state_mut().run("document.new").is_err());
+    h.run_steps(1);
+    click_button(&mut h, "Save");
+    assert_eq!(studio_doc::Document::open(&path).unwrap().develop.light.exposure, 1.5, "saved first");
+    let doc = h.state().document.as_ref().unwrap();
+    assert!(doc.path.is_none() && !doc.unsaved(), "then replaced by the new one");
+    // open: Don't Save drops the edit and opens the file
+    settle_base(&mut h);
+    h.state_mut().run_with("document.saveAs", &serde_json::json!({"path": path})).unwrap();
+    edit(&mut h, -1.0);
+    assert!(h.state_mut().run_with("document.open", &serde_json::json!({"path": path})).is_err());
+    assert_eq!(h.state().prompt, Some(crate::Pending::Open(path.clone())));
+    h.run_steps(1);
+    click_button(&mut h, "Don't Save");
+    let doc = h.state().document.as_ref().unwrap();
+    assert_eq!((doc.develop.light.exposure, doc.unsaved()), (1.5, false), "the file as saved");
+    // close: Don't Save closes it; a clean document closes without asking
+    edit(&mut h, 0.5);
+    assert!(h.state_mut().run("document.close").is_err());
+    h.run_steps(1);
+    click_button(&mut h, "Don't Save");
+    assert!(h.state().document.is_none() && !prompt_shown(&h));
+    h.state_mut().run_with("document.open", &serde_json::json!({"path": path})).unwrap();
+    h.state_mut().run("document.close").unwrap();
+    h.run_steps(1);
+    assert!(!prompt_shown(&h) && h.state().prompt.is_none());
+    assert!(h.state_mut().run("document.prompt.save").unwrap_err().contains("nothing is waiting"));
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]

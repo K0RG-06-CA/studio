@@ -80,6 +80,17 @@ pub struct StudioShell {
     /// Where the open document was last saved, so the next launch opens it again.
     #[serde(default)]
     pub document_path: Option<PathBuf>,
+    /// What waits on the "save changes?" prompt, which shows while this is set.
+    #[serde(skip)]
+    pub prompt: Option<Pending>,
+}
+
+/// An action that would drop the open document's unsaved changes, held while the prompt asks.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Pending {
+    New,
+    Open(PathBuf),
+    Close,
 }
 
 impl Default for StudioShell {
@@ -92,6 +103,7 @@ impl Default for StudioShell {
             base: Base::new(),
             base_error: None,
             document_path: None,
+            prompt: None,
         }
     }
 }
@@ -125,7 +137,9 @@ impl StudioShell {
     /// - The document: `document.new` (from the photo picked in Library), `document.open {path}`,
     ///   `document.save` (to its path, else beside its source file), `document.saveAs {path}`,
     ///   `document.close {discard?}`. Unsaved changes stop `new`, `open` and `close` unless
-    ///   `discard` is true.
+    ///   `discard` is true: they return an error and show the "save changes?" prompt, which
+    ///   `document.prompt.save` (save, then go ahead), `document.prompt.discard` (go ahead) and
+    ///   `document.prompt.cancel` answer.
     pub fn run_with(&mut self, id: &str, params: &Value) -> Result<(), String> {
         if let Some(cmd) = id.strip_prefix("document.") {
             return self.run_document(cmd, params);
@@ -167,7 +181,32 @@ impl StudioShell {
         let discard = params.get("discard").and_then(Value::as_bool).unwrap_or(false);
         let unsaved = self.document.as_ref().is_some_and(Document::unsaved);
         match cmd {
-            "new" | "open" | "close" if unsaved && !discard => Err("the open document has unsaved changes: save it, or close it with discard".into()),
+            "new" | "open" | "close" if unsaved && !discard => {
+                self.prompt = Some(match cmd {
+                    "new" => Pending::New,
+                    "open" => Pending::Open(path("path").ok_or("document.open needs a `path`")?),
+                    _ => Pending::Close,
+                });
+                Err("the open document has unsaved changes: save it, or close it with discard".into())
+            }
+            "prompt.save" | "prompt.discard" => {
+                let pending = self.prompt.clone().ok_or("nothing is waiting on the prompt")?;
+                if cmd == "prompt.save" {
+                    // a save that fails keeps the prompt (and the document)
+                    self.run("document.save")?;
+                }
+                self.prompt = None;
+                let discard = serde_json::json!({"discard": true});
+                match pending {
+                    Pending::New => self.run_with("document.new", &discard),
+                    Pending::Open(path) => self.run_with("document.open", &serde_json::json!({"path": path, "discard": true})),
+                    Pending::Close => self.run_with("document.close", &discard),
+                }
+            }
+            "prompt.cancel" => {
+                self.prompt = None;
+                Ok(())
+            }
             "new" => {
                 let lr = self.lightroom.as_ref().ok_or("LightCraft isn't running")?;
                 let id = lr.app.session.active().ok_or("no photo is picked in Library")?;
@@ -267,6 +306,37 @@ impl StudioShell {
         self.persona_area(ui);
         if let Some(lr) = self.lightroom.as_mut().filter(|_| self.persona.lightroom()) {
             lr.overlays(ui.ctx());
+        }
+        self.document_prompt(ui.ctx());
+    }
+
+    /// Photoshop's "save changes?" prompt, over everything. Each button is a command; Escape
+    /// cancels.
+    fn document_prompt(&mut self, ctx: &egui::Context) {
+        if self.prompt.is_none() {
+            return;
+        }
+        let name = self.document.as_ref().map_or("Untitled", |d| d.name.as_str());
+        let text = format!("Save changes to \u{201c}{name}\u{201d} before closing?");
+        let mut answer = None;
+        let r = egui::Modal::new(egui::Id::new("studio.document_prompt")).show(ctx, |ui| {
+            ui.label(text);
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                for (label, cmd) in
+                    [("Save", "document.prompt.save"), ("Don't Save", "document.prompt.discard"), ("Cancel", "document.prompt.cancel")]
+                {
+                    if ui.button(label).clicked() {
+                        answer = Some(cmd);
+                    }
+                }
+            });
+        });
+        if r.should_close() && answer.is_none() {
+            answer = Some("document.prompt.cancel");
+        }
+        if let Some(cmd) = answer {
+            let _ = self.run(cmd);
         }
     }
 
