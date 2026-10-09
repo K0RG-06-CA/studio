@@ -96,6 +96,9 @@ pub struct StudioShell {
     pub error: Option<(String, String)>,
 }
 
+/// What a save returns when its dialog was cancelled: not a failure, nothing to show.
+const SAVE_CANCELLED: &str = "the save was cancelled";
+
 /// See [`StudioShell::pick_save_path`].
 pub type PickSavePath = Box<dyn FnMut(&str) -> Option<PathBuf>>;
 
@@ -258,28 +261,14 @@ impl StudioShell {
                 self.replace(doc)
             }
             "save" | "saveAs" => {
-                let doc = self.document.as_mut().ok_or("no document is open")?;
-                // an edit made since this frame's sync (LightCraft's panels run after it)
-                if let Some(lr) = &self.lightroom {
-                    self.base.mirror(&lr.app.session, doc);
+                let r = self.save(cmd == "saveAs", path("path"));
+                // every way a save of an open document fails is shown; a cancelled dialog isn't one
+                if let (Err(why), Some(doc)) = (&r, &self.document)
+                    && why != SAVE_CANCELLED
+                {
+                    self.error = Some((format!("Couldn\u{2019}t save \u{201c}{}\u{201d}", doc.name), why.clone()));
                 }
-                let known = match cmd {
-                    "saveAs" => Some(path("path").ok_or("document.saveAs needs a `path`")?),
-                    _ => doc.path.clone().or_else(|| doc.default_path()),
-                };
-                let file = format!("{}.{}", doc.name, studio_doc::file::EXTENSION);
-                let path = match known {
-                    Some(p) => p,
-                    // no file yet: ask where (the dialog may be cancelled)
-                    None => self.pick_save_path.as_mut().and_then(|pick| pick(&file)).ok_or("this document has no file yet: use document.saveAs")?,
-                };
-                let doc = self.document.as_mut().ok_or("no document is open")?;
-                if let Err(e) = doc.save(&path) {
-                    self.error = Some((format!("Couldn\u{2019}t save \u{201c}{}\u{201d}", doc.name), e.clone()));
-                    return Err(e);
-                }
-                self.document_path = Some(path);
-                Ok(())
+                r
             }
             "close" => {
                 self.document.take().ok_or("no document is open")?;
@@ -288,6 +277,29 @@ impl StudioShell {
             }
             other => Err(format!("unknown command `document.{other}`")),
         }
+    }
+
+    /// `document.save` / `document.saveAs {path}` (`to`).
+    fn save(&mut self, save_as: bool, to: Option<PathBuf>) -> Result<(), String> {
+        let doc = self.document.as_mut().ok_or("no document is open")?;
+        // an edit made since this frame's sync (LightCraft's panels run after it)
+        if let Some(lr) = &self.lightroom {
+            self.base.mirror(&lr.app.session, doc);
+        }
+        let known = match save_as {
+            true => Some(to.ok_or("document.saveAs needs a `path`")?),
+            false => doc.path.clone().or_else(|| doc.default_path()),
+        };
+        let file = format!("{}.{}", doc.name, studio_doc::file::EXTENSION);
+        let path = match (known, self.pick_save_path.as_mut()) {
+            (Some(p), _) => p,
+            // no file yet: ask where (the dialog may be cancelled)
+            (None, Some(pick)) => pick(&file).ok_or(SAVE_CANCELLED)?,
+            (None, None) => return Err("this document has no file yet: use document.saveAs".into()),
+        };
+        self.document.as_mut().ok_or("no document is open")?.save(&path)?;
+        self.document_path = Some(path);
+        Ok(())
     }
 
     fn replace(&mut self, doc: Document) -> Result<(), String> {
@@ -421,10 +433,11 @@ impl StudioShell {
     /// Photoshop's "save changes?" prompt, over everything. Each button is a command; Escape
     /// cancels.
     fn document_prompt(&mut self, ctx: &egui::Context) {
-        if self.prompt.is_none() {
-            return;
+        // the document it asks about was closed meanwhile (another caller, e.g. MCP): nothing to ask
+        if self.document.is_none() {
+            self.prompt = None;
         }
-        let name = self.document.as_ref().map_or("Untitled", |d| d.name.as_str());
+        let Some(name) = self.prompt.as_ref().and(self.document.as_ref()).map(|d| d.name.as_str()) else { return };
         let text = format!("Save changes to \u{201c}{name}\u{201d} before closing?");
         let mut answer = None;
         let r = egui::Modal::new(egui::Id::new("studio.document_prompt")).show(ctx, |ui| {

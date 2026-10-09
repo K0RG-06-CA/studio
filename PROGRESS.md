@@ -135,8 +135,9 @@ test that fails without the fix):
 - The exit save runs after eframe has already persisted the shell state (`save` before `on_exit`), so
   a document recovered into `Recovered/` isn't reopened at the next launch; it's only in the folder.
   Reachable only by exiting past the prompt.
-- A prompt left showing after another command closed or saved the document (MCP) stays up; its Save
-  then fails without a word. Drop the prompt once nothing is unsaved.
+- ~~A prompt left showing after another command closed the document (MCP) stays up; its Save then
+  fails without a word.~~ Fixed: the prompt goes with its document, and every failed save of an open
+  document is shown (a cancelled save dialog isn't a failure).
 - More `serde_json::json!({"path": path})` on a `PathBuf` (`Pending::Open`, `save_for_exit`), which
   panics on a non-UTF-8 path; same fix as the M3 finding below.
 - The `Recovered/` file name is the document's name as is; a `.studio` header could carry path

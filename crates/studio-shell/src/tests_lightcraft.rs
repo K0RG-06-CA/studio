@@ -1087,6 +1087,33 @@ fn what_fails_after_the_prompt_is_answered_says_why() {
 }
 
 #[test]
+fn the_prompt_goes_with_its_document_and_a_save_that_cant_happen_says_why() {
+    let mut h = studio();
+    // a demo photo's document: no file, and (here) no save dialog
+    h.run_steps(3);
+    pick_first(&mut h);
+    h.state_mut().run("document.new").unwrap();
+    settle_base(&mut h);
+    edit(&mut h, 1.5);
+    let name = h.state().document.as_ref().unwrap().name.clone();
+    // Save from the prompt can't happen: it says why, and the prompt and document stay
+    assert!(h.state_mut().run("document.new").is_err());
+    h.run_steps(2);
+    answer(&mut h, "Save");
+    h.run_steps(2);
+    h.get_by_label(format!("Couldn\u{2019}t save \u{201c}{name}\u{201d}").as_str());
+    assert!(h.query_by_label_contains("use document.saveAs").is_some(), "and why");
+    assert!(prompt_shown(&h) && h.state().document.as_ref().unwrap().unsaved());
+    answer(&mut h, "OK");
+    h.run_steps(2);
+    // the document is closed by another caller (MCP) while the prompt is up: the prompt goes too
+    h.state_mut().run_with("document.close", &serde_json::json!({"discard": true})).unwrap();
+    h.run_steps(2);
+    assert!(!prompt_shown(&h) && h.state().prompt.is_none());
+    assert!(h.state().error.is_none(), "nothing to complain about");
+}
+
+#[test]
 fn an_edit_made_just_before_closing_still_asks() {
     let dir = temp_dir("prompt-same-frame");
     let path = dir.join("trip.studio");
