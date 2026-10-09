@@ -127,6 +127,26 @@ Former hand checks and the tests that replaced them:
     `opt-level = 2` in dev (`Cargo.toml` since the scaffold), so CI's >60 s was its 2-core runners,
     not a debug build: no profile change.
 
+## Review (M4 must-fixes): LOW findings left open
+
+From the code review of the must-fixes (the HIGH and both MEDIUM were fixed, one commit each, with a
+test that fails without the fix):
+
+- The exit save runs after eframe has already persisted the shell state (`save` before `on_exit`), so
+  a document recovered into `Recovered/` isn't reopened at the next launch; it's only in the folder.
+  Reachable only by exiting past the prompt.
+- A prompt left showing after another command closed or saved the document (MCP) stays up; its Save
+  then fails without a word. Drop the prompt once nothing is unsaved.
+- More `serde_json::json!({"path": path})` on a `PathBuf` (`Pending::Open`, `save_for_exit`), which
+  panics on a non-UTF-8 path; same fix as the M3 finding below.
+- The `Recovered/` file name is the document's name as is; a `.studio` header could carry path
+  separators (unreachable today: only a document without a file goes there, and opened ones have one).
+- Ctrl+Q does nothing in Library/Develop while a text field has focus (LightCraft's rule), but quits
+  in Film/Pixel even then (Studio consumes it).
+- The `StageCache` keeps up to two full-size stages per open document; memory not measured.
+- Non-drag edits arriving faster than a render (scripted) keep dropping stale results; the base
+  updates once they pause.
+
 ## Review (milestone 3): LOW findings left open
 
 From the code review of milestone 3 (HIGH/MEDIUM were fixed, one commit each, with tests):
