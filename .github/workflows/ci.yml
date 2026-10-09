@@ -9,6 +9,10 @@ on:
   pull_request:
     paths-ignore: ["**.md"]
 
+# No debug info: with PhotoCraft, target/ outgrew ubuntu-latest's disk (ld died with 30 MB left).
+env:
+  CARGO_PROFILE_DEV_DEBUG: 0
+
 jobs:
   test:
     name: test (${{ matrix.os }})
