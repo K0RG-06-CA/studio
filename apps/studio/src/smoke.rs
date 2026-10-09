@@ -13,8 +13,9 @@ use lightcraft_engine::gpu;
 use studio_shell::StudioShell;
 
 /// The script: one command every [`STEP`] seconds. Ends in Develop, so the next run starts there.
-/// The document is saved as `smoke.studio` in the data folder, closed and opened again; the next
-/// run opens it at launch.
+/// The document is saved as `smoke.studio` in the data folder, closed and opened again, edited
+/// (`lightcraft:` runs a LightCraft command), and quit with: the quit must stop at the "save
+/// changes?" prompt, which is cancelled before saving. The next run opens it at launch.
 const SCRIPT: &[&str] = &[
     "persona.develop",
     "window.resetWorkspace",
@@ -26,6 +27,10 @@ const SCRIPT: &[&str] = &[
     "document.saveAs",
     "document.close",
     "document.open",
+    "lightcraft:develop.set",
+    "app.quit",
+    "document.prompt.cancel",
+    "document.save",
     "persona.library",
     "window.resetWorkspace",
     "view.loupe",
@@ -128,7 +133,21 @@ impl Script {
         while self.next < SCRIPT.len() && now - start >= STEP * (self.next + 1) as f64 {
             let id = SCRIPT[self.next];
             println!("smoke: {id}");
-            if let Err(e) = shell.run_with(id, &params(id)) {
+            if id == "document.prompt.cancel" && shell.prompt.is_none() {
+                fail("app.quit with an unsaved document didn't ask first");
+            }
+            let r = match id.strip_prefix("lightcraft:") {
+                // the document's exposure moved on, so the edit is a change whatever the file holds
+                Some(lc) => match (&mut shell.lightroom, &shell.document) {
+                    (Some(lr), Some(doc)) => {
+                        let value = (doc.develop.light.exposure + 0.25) % 2.0;
+                        lr.app.run(lc, serde_json::json!({"control": "light.exposure", "value": value})).map(|_| ()).map_err(|e| e.to_string())
+                    }
+                    _ => Err("no document open in LightCraft".into()),
+                },
+                None => shell.run_with(id, &params(id)),
+            };
+            if let Err(e) = r {
                 fail(format!("{id}: {e}"));
             }
             self.next += 1;

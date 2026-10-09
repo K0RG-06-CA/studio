@@ -235,6 +235,26 @@ fn render_personas() {
         settle(&mut h);
         h.render().unwrap().save(dir.join(format!("{}.png", p.id()))).unwrap();
     }
+    // the "save changes?" prompt over an edited document, then a failed save's message over it
+    h.state_mut().run("persona.pixel").unwrap();
+    h.state_mut().run("document.new").unwrap();
+    while !h.state().base_up_to_date() {
+        h.run_steps(1);
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    let lr = h.state_mut().lightroom.as_mut().unwrap();
+    lr.app.run("develop.set", serde_json::json!({"control": "light.exposure", "value": 1.0})).unwrap();
+    h.run_steps(1);
+    assert!(h.state_mut().run("document.close").is_err());
+    settle(&mut h);
+    h.render().unwrap().save(dir.join("prompt.png")).unwrap();
+    let blocker = dir.join("blocker");
+    std::fs::write(&blocker, b"").unwrap();
+    h.state_mut().document.as_mut().unwrap().path = Some(blocker.join("trip.studio"));
+    assert!(h.state_mut().run("document.prompt.save").is_err());
+    settle(&mut h);
+    h.render().unwrap().save(dir.join("save-error.png")).unwrap();
+    let _ = std::fs::remove_file(blocker);
 }
 
 /// Run frames until LightCraft's background renders (thumbnails, the loupe) are done.

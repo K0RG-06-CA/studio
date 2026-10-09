@@ -107,7 +107,8 @@ Former hand checks and the tests that replaced them:
   - [x] Save of a document with no file picks one (save dialog; cancelling it keeps the prompt)
   - [x] Visible save error (`document.dismissError`); `on_exit` saves whatever is still unsaved, a
     never-saved document into `<library>/Recovered/` (no dialog, never over an earlier one)
-  - [ ] Smoke script and offscreen renders of the prompt and the error
+  - [x] Offscreen renders of the prompt and the error (`prompt.png`, `save-error.png`); smoke script
+    edits, quits (must stop at the prompt), cancels and saves (script extended, not yet run)
 - **Full-size 16-bit base render is CPU-only and slow** (CI runners took over 60 s for 24 MP). Measure
   it on this machine with a real S9 file and fix before Pixel ships (draft size while editing, GPU
   16-bit, or render in bands).
