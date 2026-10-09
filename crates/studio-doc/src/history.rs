@@ -38,6 +38,7 @@ use photocraft_doc::DocId;
 use photocraft_engine::{DocState, Session as PixelSession};
 
 use crate::Document;
+use crate::base::Base;
 use crate::pixel::{framing, state_of};
 
 /// Pixel memory the history may hold (PhotoCraft's states and Studio's own steps), by default.
@@ -586,32 +587,27 @@ impl Document {
         Ok(())
     }
 
-    /// Settle everything before a decision on the history: a slider drag open on the photo ends
-    /// (and is its step), PhotoCraft's edits are copied back and reconciled. Before every undo,
-    /// redo, jump, save and close. A Develop step still waiting for its render to land as its
-    /// Pixel half ([`RENDERING`]) stops it: the caller waits for that render first
-    /// ([`crate::base::Base::finish`]), so a geometry change is never undone half way.
-    pub fn flush(&mut self, lr: &mut Session, px: &mut PixelSession) -> Result<(), String> {
-        if lr.interaction.as_ref().is_some_and(|i| i.photo == self.source.photo) {
-            lr.end_interaction().map_err(|e| e.to_string())?;
-        }
-        self.note_develop(lr);
-        if self.history.pending_follow() {
-            return Err(RENDERING.into());
-        }
+    /// Settle everything before a decision on the document: a slider drag open on the photo ends
+    /// (and is its step); a Develop step still waiting for its render (a geometry change) waits
+    /// for it here and lands it as its Pixel half, through `base`, which renders it (up to the
+    /// ceiling; one that fails or takes longer undoes the step and is the error); PhotoCraft's
+    /// edits are copied back and reconciled. Before every undo, redo, jump, save, close and
+    /// persona switch: no caller can decide on a geometry change half done.
+    pub fn flush(&mut self, lr: &mut Session, px: &mut PixelSession, base: &mut Base) -> Result<(), String> {
+        base.finish(lr, px, self)?;
         self.reconcile(lr, px)
     }
 
     /// Undo the last step, in whichever engine made it. False when there is none.
-    pub fn undo(&mut self, lr: &mut Session, px: &mut PixelSession) -> Result<bool, String> {
-        self.flush(lr, px)?;
+    pub fn undo(&mut self, lr: &mut Session, px: &mut PixelSession, base: &mut Base) -> Result<bool, String> {
+        self.flush(lr, px, base)?;
         let done = self.undo_one(lr, px)?;
         self.copy_back(px);
         Ok(done)
     }
 
-    pub fn redo(&mut self, lr: &mut Session, px: &mut PixelSession) -> Result<bool, String> {
-        self.flush(lr, px)?;
+    pub fn redo(&mut self, lr: &mut Session, px: &mut PixelSession, base: &mut Base) -> Result<bool, String> {
+        self.flush(lr, px, base)?;
         let done = self.redo_one(lr, px)?;
         self.copy_back(px);
         Ok(done)
@@ -619,8 +615,8 @@ impl Document {
 
     /// Go to row `index` of [`History::entries`] (0 = the original document), undoing or redoing
     /// as many steps as it takes; the engines move first, one copy-back at the end.
-    pub fn goto(&mut self, lr: &mut Session, px: &mut PixelSession, index: usize) -> Result<(), String> {
-        self.flush(lr, px)?;
+    pub fn goto(&mut self, lr: &mut Session, px: &mut PixelSession, base: &mut Base, index: usize) -> Result<(), String> {
+        self.flush(lr, px, base)?;
         if index > self.history.steps.len() + self.history.redo.len() {
             return Err(format!("no history row {index}"));
         }
@@ -697,6 +693,10 @@ impl Document {
     /// back, so both halves stay at the step, which is kept; the notice says why. No copy-back
     /// here (a jump copies once at the end).
     fn undo_one(&mut self, lr: &mut Session, px: &mut PixelSession) -> Result<bool, String> {
+        // a jump PhotoCraft began reaches here past `flush`: never into a step half recorded
+        if self.history.pending_follow() {
+            return Err(RENDERING.into());
+        }
         let Some(mut step) = self.history.steps.pop() else { return Ok(false) };
         if let Err(e) = ready(lr, px, self.source.photo, &step) {
             self.history.steps.push(step);
@@ -727,6 +727,9 @@ impl Document {
     /// The mirror of [`Document::undo_one`]: the states redone (oldest first), then the Develop
     /// half; a failed commit undoes them back and keeps the step on the redo side.
     fn redo_one(&mut self, lr: &mut Session, px: &mut PixelSession) -> Result<bool, String> {
+        if self.history.pending_follow() {
+            return Err(RENDERING.into());
+        }
         let Some(mut step) = self.history.redo.pop() else { return Ok(false) };
         if let Err(e) = ready(lr, px, self.source.photo, &step) {
             self.history.redo.push(step);
@@ -820,23 +823,23 @@ pub(crate) mod tests {
         assert_eq!(doc.history.position(), 4);
         let rev = doc.revision;
         // back, newest first, from whichever engine made the step
-        assert!(doc.undo(&mut lr, &mut px).unwrap());
+        assert!(doc.undo(&mut lr, &mut px, &mut Base::new()).unwrap());
         assert_eq!((layers(&doc), exposure(&lr, id), rows(&lr, id)), (vec!["Develop".to_owned(), "Brush".into()], 2.0, h2.clone()));
-        assert!(doc.undo(&mut lr, &mut px).unwrap());
+        assert!(doc.undo(&mut lr, &mut px, &mut Base::new()).unwrap());
         assert_eq!((exposure(&lr, id), doc.develop.light.exposure, rows(&lr, id)), (1.0, 1.0, h1.clone()));
-        assert!(doc.undo(&mut lr, &mut px).unwrap());
+        assert!(doc.undo(&mut lr, &mut px, &mut Base::new()).unwrap());
         assert_eq!((layers(&doc), exposure(&lr, id)), (vec!["Develop".to_owned()], 1.0));
-        assert!(doc.undo(&mut lr, &mut px).unwrap());
+        assert!(doc.undo(&mut lr, &mut px, &mut Base::new()).unwrap());
         assert_eq!((exposure(&lr, id), rows(&lr, id), doc.history.position()), (0.0, h0, 0));
-        assert!(!doc.undo(&mut lr, &mut px).unwrap(), "nothing left");
+        assert!(!doc.undo(&mut lr, &mut px, &mut Base::new()).unwrap(), "nothing left");
         assert!(doc.revision > rev, "undo is an edit");
         assert_eq!(labels(&doc), ["Original", "Exposure", "Brush", "Exposure", "Pencil"], "the rows stay, greyed");
         // and forward again
         for (i, (want_layers, want_exposure)) in [(1, 1.0), (2, 1.0), (2, 2.0), (3, 2.0)].into_iter().enumerate() {
-            assert!(doc.redo(&mut lr, &mut px).unwrap(), "redo {i}");
+            assert!(doc.redo(&mut lr, &mut px, &mut Base::new()).unwrap(), "redo {i}");
             assert_eq!((layers(&doc).len(), exposure(&lr, id)), (want_layers, want_exposure), "redo {i}");
         }
-        assert!(!doc.redo(&mut lr, &mut px).unwrap());
+        assert!(!doc.redo(&mut lr, &mut px, &mut Base::new()).unwrap());
         assert_eq!((rows(&lr, id).len(), doc.history.position()), (h2.len(), 4));
         assert_eq!(doc.take_notice(), None);
     }
@@ -872,7 +875,7 @@ pub(crate) mod tests {
         set_exposure(&mut lr, id, 1.0);
         tick(&mut doc, &lr, &mut px);
         assert_eq!(rows(&lr, id).len(), before.len() + 1);
-        assert!(doc.undo(&mut lr, &mut px).unwrap());
+        assert!(doc.undo(&mut lr, &mut px, &mut Base::new()).unwrap());
         assert_eq!((exposure(&lr, id), rows(&lr, id)), (0.0, before.clone()));
         lr.persist().unwrap();
         lr.close_library().unwrap();
@@ -900,9 +903,9 @@ pub(crate) mod tests {
         lr.end_interaction().unwrap();
         tick(&mut doc, &lr, &mut px);
         assert_eq!(labels(&doc), ["Original", "Exposure"]);
-        assert!(doc.undo(&mut lr, &mut px).unwrap());
+        assert!(doc.undo(&mut lr, &mut px, &mut Base::new()).unwrap());
         assert_eq!(exposure(&lr, id), 0.0, "back to before the drag, not to a notch of it");
-        assert!(doc.redo(&mut lr, &mut px).unwrap());
+        assert!(doc.redo(&mut lr, &mut px, &mut Base::new()).unwrap());
         assert_eq!(exposure(&lr, id), 1.5);
         // a second edit, then a click on the first row of LightCraft's History panel
         let mut s = (*lr.develop_of(id).unwrap()).clone();
@@ -916,7 +919,7 @@ pub(crate) mod tests {
         assert_eq!(labels(&doc), ["Original", "Exposure", "Contrast", "History: Exposure"]);
         assert_eq!((exposure(&lr, id), lr.develop_of(id).unwrap().light.contrast), (1.5, 0.0));
         assert_eq!(rows(&lr, id).len(), rows_before.len() + 1, "a restore appends a row");
-        assert!(doc.undo(&mut lr, &mut px).unwrap());
+        assert!(doc.undo(&mut lr, &mut px, &mut Base::new()).unwrap());
         assert_eq!((lr.develop_of(id).unwrap().light.contrast, rows(&lr, id)), (20.0, rows_before), "the row is gone again");
     }
 
@@ -929,10 +932,10 @@ pub(crate) mod tests {
         set_exposure(&mut lr, id, 0.5);
         set_exposure(&mut lr, id, 1.0);
         tick(&mut doc, &lr, &mut px);
-        assert!(doc.undo(&mut lr, &mut px).unwrap());
+        assert!(doc.undo(&mut lr, &mut px, &mut Base::new()).unwrap());
         assert!(lr.interaction.is_none(), "the drag ended");
         assert_eq!((exposure(&lr, id), doc.develop.light.exposure), (0.0, 0.0));
-        assert!(doc.redo(&mut lr, &mut px).unwrap());
+        assert!(doc.redo(&mut lr, &mut px, &mut Base::new()).unwrap());
         assert_eq!((exposure(&lr, id), labels(&doc)), (1.0, vec!["Original".to_owned(), "Exposure".into()]));
     }
 
@@ -942,7 +945,7 @@ pub(crate) mod tests {
         let id = doc.source.photo;
         paint(&mut px, "Brush", 1, 1);
         tick(&mut doc, &lr, &mut px);
-        assert!(doc.undo(&mut lr, &mut px).unwrap());
+        assert!(doc.undo(&mut lr, &mut px, &mut Base::new()).unwrap());
         assert!(px.active().unwrap().history.can_redo() && doc.history.can_redo());
         // a Develop edit after a Pixel undo
         set_exposure(&mut lr, id, 1.0);
@@ -950,13 +953,13 @@ pub(crate) mod tests {
         assert!(!doc.history.can_redo() && !px.active().unwrap().history.can_redo(), "PhotoCraft's redo went too");
         assert_eq!(labels(&doc), ["Original", "Exposure"]);
         // a Pixel edit after a Develop undo
-        assert!(doc.undo(&mut lr, &mut px).unwrap());
+        assert!(doc.undo(&mut lr, &mut px, &mut Base::new()).unwrap());
         assert!(doc.history.can_redo());
         paint(&mut px, "Pencil", 2, 2);
         tick(&mut doc, &lr, &mut px);
         assert!(!doc.history.can_redo());
         assert_eq!(labels(&doc), ["Original", "Pencil"]);
-        assert!(!doc.redo(&mut lr, &mut px).unwrap());
+        assert!(!doc.redo(&mut lr, &mut px, &mut Base::new()).unwrap());
         assert_eq!(doc.take_notice(), None);
     }
 
@@ -974,7 +977,7 @@ pub(crate) mod tests {
         lr.execute("library.import", &serde_json::json!({"paths": [png.to_string_lossy()]})).unwrap();
         tick(&mut doc, &lr, &mut px);
         assert_eq!(doc.history.position(), 0);
-        assert!(!doc.undo(&mut lr, &mut px).unwrap());
+        assert!(!doc.undo(&mut lr, &mut px, &mut Base::new()).unwrap());
         assert_eq!(lr.catalog.photo(id).unwrap().rating, 3, "untouched");
         // a file whose settings differ from the library's: opened as "Open x.studio", not a step
         let bytes = doc.to_bytes().unwrap();
@@ -985,7 +988,7 @@ pub(crate) mod tests {
         tick(&mut opened, &lr, &mut px);
         assert_eq!((exposure(&lr, id), opened.history.position()), (0.0, 0));
         assert_eq!(lr.undo.last().map(|e| e.label.as_str()), Some("Open one.studio"), "LightCraft's own stack has it");
-        assert!(!opened.undo(&mut lr, &mut px).unwrap());
+        assert!(!opened.undo(&mut lr, &mut px, &mut Base::new()).unwrap());
         assert_eq!((exposure(&lr, id), lr.catalog.photo(id).unwrap().rating), (0.0, 3));
         lr.close_library().unwrap();
         let _ = std::fs::remove_dir_all(&dir);
@@ -1004,9 +1007,9 @@ pub(crate) mod tests {
         tick(&mut b, &lr, &mut px);
         set_exposure(&mut lr, id_b, 0.5);
         tick(&mut b, &lr, &mut px);
-        assert!(b.undo(&mut lr, &mut px).unwrap());
+        assert!(b.undo(&mut lr, &mut px, &mut Base::new()).unwrap());
         assert_eq!((exposure(&lr, id_b), exposure(&lr, id_a)), (0.0, 1.0));
-        assert!(!b.undo(&mut lr, &mut px).unwrap(), "A's step isn't B's");
+        assert!(!b.undo(&mut lr, &mut px, &mut Base::new()).unwrap(), "A's step isn't B's");
         assert_eq!(exposure(&lr, id_a), 1.0);
     }
 
@@ -1018,7 +1021,7 @@ pub(crate) mod tests {
         set_exposure(&mut lr, id_b, 1.0);
         tick(&mut doc, &lr, &mut px);
         assert_eq!(doc.history.position(), 0);
-        assert!(!doc.undo(&mut lr, &mut px).unwrap());
+        assert!(!doc.undo(&mut lr, &mut px, &mut Base::new()).unwrap());
         assert_eq!((exposure(&lr, id_a), exposure(&lr, id_b)), (0.0, 1.0));
         // its drag doesn't hold ours back either
         lr.selection.active = Some(id_b);
@@ -1058,7 +1061,7 @@ pub(crate) mod tests {
         px.execute("edit.redo", serde_json::json!({})).unwrap();
         doc.reconcile(&mut lr, &mut px).unwrap();
         assert_eq!((layers(&doc).len(), exposure(&lr, id), doc.history.position()), (3, 0.0, 2));
-        assert!(doc.redo(&mut lr, &mut px).unwrap());
+        assert!(doc.redo(&mut lr, &mut px, &mut Base::new()).unwrap());
         assert_eq!((exposure(&lr, id), doc.history.position()), (1.0, 3));
         // the mirror case: P1 D P2 undone to P1, then PhotoCraft redoes P2 by itself, past D
         let (mut lr, mut px, mut doc) = open();
@@ -1068,7 +1071,7 @@ pub(crate) mod tests {
         tick(&mut doc, &lr, &mut px);
         paint(&mut px, "Pencil", 2, 2);
         tick(&mut doc, &lr, &mut px);
-        doc.goto(&mut lr, &mut px, 1).unwrap();
+        doc.goto(&mut lr, &mut px, &mut Base::new(), 1).unwrap();
         assert_eq!((layers(&doc).len(), exposure(&lr, id)), (2, 0.0));
         px.execute("edit.redo", serde_json::json!({})).unwrap();
         doc.reconcile(&mut lr, &mut px).unwrap();
@@ -1098,7 +1101,7 @@ pub(crate) mod tests {
         tick(&mut doc, &lr, &mut px);
         assert_eq!(doc.take_notice().as_deref(), Some(crate::pixel::LOCKED));
         assert_eq!((labels(&doc), pc_entries(&px)), (vec!["Original".to_owned(), "Both".into()], vec!["Open".to_owned(), "Both".into()]));
-        assert!(doc.undo(&mut lr, &mut px).unwrap());
+        assert!(doc.undo(&mut lr, &mut px, &mut Base::new()).unwrap());
         assert_eq!(layers(&doc), ["Develop"], "the fold undoes to before both");
         // P1 D P2, then P2 folded into P1: the fold reaches across the Develop step
         let (mut lr, mut px, mut doc) = open();
@@ -1108,13 +1111,13 @@ pub(crate) mod tests {
         tick(&mut doc, &lr, &mut px);
         paint(&mut px, "Pencil", 2, 2);
         tick(&mut doc, &lr, &mut px);
-        assert!(doc.undo(&mut lr, &mut px).unwrap() && doc.redo(&mut lr, &mut px).unwrap());
+        assert!(doc.undo(&mut lr, &mut px, &mut Base::new()).unwrap() && doc.redo(&mut lr, &mut px, &mut Base::new()).unwrap());
         assert!(px.active_mut().unwrap().history.purge_last());
         tick(&mut doc, &lr, &mut px);
         assert_eq!(doc.take_notice().as_deref(), Some(RESET_PIXEL));
         assert_eq!((labels(&doc), doc.history.can_redo()), (vec!["Original".to_owned()], false));
         assert!(!px.active().unwrap().history.can_redo());
-        assert!(!doc.undo(&mut lr, &mut px).unwrap());
+        assert!(!doc.undo(&mut lr, &mut px, &mut Base::new()).unwrap());
         assert_eq!(doc.take_notice(), None, "said once");
     }
 
@@ -1131,7 +1134,7 @@ pub(crate) mod tests {
         lr.open_library(dir.join("other"), false).unwrap();
         tick(&mut doc, &lr, &mut px);
         assert_eq!((doc.history.position(), doc.take_notice().as_deref()), (0, Some(RESET_LIBRARY)));
-        assert!(!doc.undo(&mut lr, &mut px).unwrap());
+        assert!(!doc.undo(&mut lr, &mut px, &mut Base::new()).unwrap());
         lr.close_library().unwrap();
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -1170,13 +1173,13 @@ pub(crate) mod tests {
         tick(&mut doc, &lr, &mut px);
         assert_eq!(px.active().unwrap().history.max_states, usize::MAX / 2);
         // redo states count and survive a trim
-        assert!(doc.undo(&mut lr, &mut px).unwrap());
+        assert!(doc.undo(&mut lr, &mut px, &mut Base::new()).unwrap());
         for _ in 0..4 {
             let (r, s) = render_sized(64, 48);
             doc.write_base(&mut px, r, s, anchor(1, 0.0, 0.0)).unwrap();
         }
         assert!(doc.history.can_redo() && px.active().unwrap().history.can_redo());
-        assert!(doc.redo(&mut lr, &mut px).unwrap());
+        assert!(doc.redo(&mut lr, &mut px, &mut Base::new()).unwrap());
         assert_eq!(doc.take_notice(), None);
     }
 
@@ -1201,7 +1204,7 @@ pub(crate) mod tests {
             Arc::ptr_eq(&a.history_after, &b.history_before)
         });
         assert!(shared, "neighbouring steps share one History list");
-        assert!(doc.undo(&mut lr, &mut px).unwrap());
+        assert!(doc.undo(&mut lr, &mut px, &mut Base::new()).unwrap());
         assert_eq!(exposure(&lr, id), value(4998));
     }
 
@@ -1211,21 +1214,21 @@ pub(crate) mod tests {
         let id = doc.source.photo;
         set_exposure(&mut lr, id, 1.0);
         tick(&mut doc, &lr, &mut px);
-        assert!(doc.undo(&mut lr, &mut px).unwrap());
+        assert!(doc.undo(&mut lr, &mut px, &mut Base::new()).unwrap());
         // the render for the undone settings lands: a host replacement, not an edit
         let (r, s) = render_sized(64, 48);
         doc.write_base(&mut px, r, s, anchor(1, 0.0, 0.0)).unwrap();
         tick(&mut doc, &lr, &mut px);
         assert!(doc.history.can_redo());
-        assert!(doc.redo(&mut lr, &mut px).unwrap());
+        assert!(doc.redo(&mut lr, &mut px, &mut Base::new()).unwrap());
         assert_eq!(exposure(&lr, id), 1.0);
         // a render under Pixel steps the same: the current label is adopted, nothing else
         paint(&mut px, "Brush", 1, 1);
         tick(&mut doc, &lr, &mut px);
-        assert!(doc.undo(&mut lr, &mut px).unwrap());
+        assert!(doc.undo(&mut lr, &mut px, &mut Base::new()).unwrap());
         let (r, s) = render_sized(64, 48);
         doc.write_base(&mut px, r, s, anchor(1, 0.0, 0.0)).unwrap();
-        assert!(doc.redo(&mut lr, &mut px).unwrap());
+        assert!(doc.redo(&mut lr, &mut px, &mut Base::new()).unwrap());
         assert_eq!(layers(&doc), ["Develop", "Brush"]);
         assert_eq!(doc.take_notice(), None);
     }
@@ -1242,13 +1245,13 @@ pub(crate) mod tests {
         tick(&mut doc, &lr, &mut px);
         let rows = doc.history.entries();
         assert_eq!(rows.iter().map(|e| (e.develop, e.pixel)).collect::<Vec<_>>(), [(false, false), (true, false), (false, true), (true, false)]);
-        doc.goto(&mut lr, &mut px, 1).unwrap();
+        doc.goto(&mut lr, &mut px, &mut Base::new(), 1).unwrap();
         assert_eq!((exposure(&lr, id), layers(&doc).len(), doc.history.position()), (1.0, 1, 1));
-        doc.goto(&mut lr, &mut px, 3).unwrap();
+        doc.goto(&mut lr, &mut px, &mut Base::new(), 3).unwrap();
         assert_eq!((exposure(&lr, id), layers(&doc).len(), doc.history.position()), (2.0, 2, 3));
-        doc.goto(&mut lr, &mut px, 0).unwrap();
+        doc.goto(&mut lr, &mut px, &mut Base::new(), 0).unwrap();
         assert_eq!((exposure(&lr, id), layers(&doc).len(), doc.history.position()), (0.0, 1, 0));
-        assert!(doc.goto(&mut lr, &mut px, 4).unwrap_err().contains("no history row"));
+        assert!(doc.goto(&mut lr, &mut px, &mut Base::new(), 4).unwrap_err().contains("no history row"));
         assert_eq!(doc.history.entries(), rows, "the rows stay");
     }
 
@@ -1259,7 +1262,7 @@ pub(crate) mod tests {
         set_exposure(&mut lr, id, 1.0);
         tick(&mut doc, &lr, &mut px);
         doc.source.photo = PhotoId(u64::MAX);
-        assert!(doc.undo(&mut lr, &mut px).is_err());
+        assert!(doc.undo(&mut lr, &mut px, &mut Base::new()).is_err());
         assert!(doc.take_notice().unwrap().starts_with("History reset"));
         assert_eq!(doc.history.position(), 0);
     }
@@ -1285,9 +1288,9 @@ pub(crate) mod tests {
         tick(&mut doc, &lr, &mut px);
         assert_eq!(doc.take_notice(), None, "a prune, not a reset");
         assert_eq!(labels(&doc), ["Original", "Pencil"], "both Develop steps older than the surviving state went with the Brush step");
-        assert!(doc.undo(&mut lr, &mut px).unwrap());
+        assert!(doc.undo(&mut lr, &mut px, &mut Base::new()).unwrap());
         assert_eq!((layers(&doc), exposure(&lr, id)), (vec!["Develop".to_owned(), "Brush".into()], 2.0));
-        assert!(!doc.undo(&mut lr, &mut px).unwrap(), "nothing older is left");
+        assert!(!doc.undo(&mut lr, &mut px, &mut Base::new()).unwrap(), "nothing older is left");
         // the same through the byte cap: with room for one state only, each paint trims the one before
         let (mut lr, mut px, mut doc) = open();
         for i in 0..3 {
@@ -1311,12 +1314,12 @@ pub(crate) mod tests {
         let (mut lr, mut px, mut doc) = open();
         paint(&mut px, "Brush", 1, 1);
         tick(&mut doc, &lr, &mut px);
-        assert!(doc.undo(&mut lr, &mut px).unwrap());
+        assert!(doc.undo(&mut lr, &mut px, &mut Base::new()).unwrap());
         assert!(doc.history.can_redo());
         px.active_mut().unwrap().history.clear_redo();
         tick(&mut doc, &lr, &mut px);
         assert!(!doc.history.can_redo());
-        assert_eq!(doc.redo(&mut lr, &mut px), Ok(false));
+        assert_eq!(doc.redo(&mut lr, &mut px, &mut Base::new()), Ok(false));
         assert_eq!(doc.take_notice(), None);
         assert_eq!(layers(&doc), ["Develop"]);
     }
@@ -1364,7 +1367,7 @@ pub(crate) mod tests {
         tick(&mut doc, &lr, &mut px);
         assert_eq!((labels(&doc), doc.history.position(), layers(&doc).len()), (vec!["Original".to_owned(), "Brush".into(), "Pencil".into()], 0, 1));
         assert!(doc.history.requested.is_none());
-        doc.goto(&mut lr, &mut px, 2).unwrap();
+        doc.goto(&mut lr, &mut px, &mut Base::new(), 2).unwrap();
         // a Develop step above them: PhotoCraft's undo is put back until the jump runs
         set_exposure(&mut lr, id, 1.0);
         tick(&mut doc, &lr, &mut px);
@@ -1376,7 +1379,7 @@ pub(crate) mod tests {
         assert_eq!((layers(&doc).len(), exposure(&lr, id), doc.history.position()), (2, 0.0, 1), "the jump: Develop step undone first");
         assert_eq!(doc.take_notice(), None);
         // what PhotoCraft left doesn't match: it undid, and something replaced its document
-        doc.goto(&mut lr, &mut px, 3).unwrap();
+        doc.goto(&mut lr, &mut px, &mut Base::new(), 3).unwrap();
         assert!(px.undo());
         let st = px.active_mut().unwrap();
         st.doc = Arc::new((*st.doc).clone());

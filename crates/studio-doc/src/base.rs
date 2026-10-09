@@ -54,6 +54,9 @@ pub struct Base {
     pub hold: bool,
     /// A render that finished while `hold` was on: (settings hash, anchor, pixels, size).
     ready: Option<(u64, Anchor, Surface, Size)>,
+    /// How long [`Base::finish`] waits for a Develop step's render: [`FOLLOW_CEILING`] unless a
+    /// test shortens it.
+    pub ceiling: Option<Duration>,
 }
 
 impl Base {
@@ -61,9 +64,9 @@ impl Base {
         Base::default()
     }
 
-    /// A fresh base (nothing mirrored, shown or pending) with the same render cap.
+    /// A fresh base (nothing mirrored, shown or pending) with the same render cap and ceiling.
     pub fn renewed(&self) -> Self {
-        Base { max_edge: self.max_edge, ..Base::default() }
+        Base { max_edge: self.max_edge, ceiling: self.ceiling, ..Base::default() }
     }
 
     /// A render is in flight.
@@ -125,12 +128,13 @@ impl Base {
         Ok(())
     }
 
-    /// Wait for the render a Develop step is waiting for, and land it: before anything decides
-    /// on the document (a persona switch, a save, a close, an undo), so a geometry change is never
-    /// half done. A slider drag open on the photo ends first (its render is the one waited for).
-    /// Nothing to wait for returns at once. A render that fails, or takes longer than
-    /// [`FOLLOW_CEILING`], undoes the step (see [`Document::follow_failed`]) and is the error.
-    pub fn finish(&mut self, session: &mut Session, pixel: &mut PixelSession, doc: &mut Document) -> Result<(), String> {
+    /// Wait for the render a Develop step is waiting for, and land it: [`Document::flush`] runs
+    /// it before anything decides on the document (an undo, a save, a close, a persona switch),
+    /// so a geometry change is never half done. A slider drag open on the photo ends first (its
+    /// render is the one waited for). Nothing to wait for returns at once. A render that fails,
+    /// can't start, or takes longer than the ceiling ([`FOLLOW_CEILING`]) undoes the step (see
+    /// [`Document::follow_failed`]) and is the error.
+    pub(crate) fn finish(&mut self, session: &mut Session, pixel: &mut PixelSession, doc: &mut Document) -> Result<(), String> {
         if session.interaction.as_ref().is_some_and(|i| i.photo == doc.source.photo) {
             session.end_interaction().map_err(|e| e.to_string())?;
         }
@@ -140,19 +144,23 @@ impl Base {
         }
         // no gesture can be open in Pixel while it is barred: a render held for one goes in now
         self.hold = false;
+        let ceiling = self.ceiling.unwrap_or(FOLLOW_CEILING);
         let t0 = Instant::now();
         while doc.history.pending_follow() {
             let Some((generation, want, anchor, rx)) = self.pending.take() else {
                 let before = self.started;
+                // a failed start undoes the step itself (`sync`)
                 self.sync(session, pixel, doc)?;
                 if self.started == before && doc.history.pending_follow() {
-                    return Err("Develop isn\u{2019}t rendering the pending change".into());
+                    let e = "Develop couldn\u{2019}t start the render".to_owned();
+                    doc.follow_failed(session, &e);
+                    return Err(e);
                 }
                 continue;
             };
-            let r = match rx.recv_timeout(FOLLOW_CEILING.saturating_sub(t0.elapsed())) {
+            let r = match rx.recv_timeout(ceiling.saturating_sub(t0.elapsed())) {
                 Ok((result, converted)) => self.landed(session, pixel, doc, generation, want, anchor, result, converted),
-                Err(RecvTimeoutError::Timeout) => Err(format!("the render took longer than {} s", FOLLOW_CEILING.as_secs())),
+                Err(RecvTimeoutError::Timeout) => Err(format!("the render took longer than {} s", ceiling.as_secs())),
                 Err(RecvTimeoutError::Disconnected) => Err("the render thread stopped without a result".into()),
             };
             if let Err(e) = r {

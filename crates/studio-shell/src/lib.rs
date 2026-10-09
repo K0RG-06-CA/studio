@@ -192,7 +192,7 @@ impl StudioShell {
             }
             // a Develop geometry change lands (Pixel layers follow) before any persona shows it;
             // one that can't render was undone, and its notice shows next frame
-            let _ = self.finish_follow();
+            let _ = self.flush();
             if let Some(lr) = &mut self.lightroom {
                 lr.switch(self.persona, p);
             }
@@ -382,7 +382,7 @@ impl StudioShell {
         }
         // every document command and the quit prompt ask this first: a Develop geometry change
         // lands before (one that can't render was undone, and says so)
-        let _ = self.finish_follow();
+        let _ = self.flush();
         if let (Some(doc), Some(px)) = (&mut self.document, &mut self.pixel) {
             px.apply_pending();
             doc.copy_back(&mut px.app.session);
@@ -390,11 +390,12 @@ impl StudioShell {
         self.document.as_ref().is_some_and(Document::unsaved)
     }
 
-    /// Wait for the render a Develop geometry change is waiting for, and land it as the step's
-    /// Pixel half (see `studio_doc::follow`). Nothing to wait for returns at once.
-    fn finish_follow(&mut self) -> Result<(), String> {
+    /// Settle the document before a decision on it ([`Document::flush`]): a drag ends, a Develop
+    /// geometry change waiting for its render lands as the step's Pixel half (see
+    /// `studio_doc::follow`), PhotoCraft's edits are reconciled.
+    fn flush(&mut self) -> Result<(), String> {
         let (Some(doc), Some(lr), Some(px)) = (&mut self.document, &mut self.lightroom, &mut self.pixel) else { return Ok(()) };
-        let r = self.base.finish(&mut lr.app.session, &mut px.app.session, doc);
+        let r = doc.flush(&mut lr.app.session, &mut px.app.session, &mut self.base);
         if let Err(e) = &r {
             self.base_error = Some(e.clone());
         }

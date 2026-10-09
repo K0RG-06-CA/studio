@@ -221,7 +221,6 @@ mod tests {
 
     use super::*;
     use crate::base::Base;
-    use crate::history::RENDERING;
     use crate::pixel::tests::paint;
 
     /// Both engines, the document on the first demo photo and its base, rendered (600 px).
@@ -298,13 +297,11 @@ mod tests {
         }
 
         fn undo(&mut self) -> bool {
-            self.base.finish(&mut self.lr, &mut self.px, &mut self.doc).unwrap();
-            self.doc.undo(&mut self.lr, &mut self.px).unwrap()
+            self.doc.undo(&mut self.lr, &mut self.px, &mut self.base).unwrap()
         }
 
         fn redo(&mut self) -> bool {
-            self.base.finish(&mut self.lr, &mut self.px, &mut self.doc).unwrap();
-            self.doc.redo(&mut self.lr, &mut self.px).unwrap()
+            self.doc.redo(&mut self.lr, &mut self.px, &mut self.base).unwrap()
         }
 
         fn rows(&self) -> Vec<(String, bool, bool)> {
@@ -406,7 +403,7 @@ mod tests {
         let settings = t.lr.develop_of(id).unwrap();
         // the commit fails: the photo isn't in the library as far as it is concerned
         t.doc.source.photo = PhotoId(u64::MAX);
-        let e = t.doc.undo(&mut t.lr, &mut t.px).unwrap_err();
+        let e = t.doc.undo(&mut t.lr, &mut t.px, &mut t.base).unwrap_err();
         assert!(Arc::ptr_eq(&t.pc(), &rotated), "the Pixel half was redone back: the same document");
         assert_eq!(t.lr.develop_of(id).unwrap(), settings, "the Develop half never moved");
         assert_eq!((t.rows(), t.doc.history.position(), t.doc.history.can_redo()), (rows.clone(), position, false), "the step is kept");
@@ -420,7 +417,7 @@ mod tests {
         assert_eq!(t.lr.develop_of(id).unwrap().orientation, Default::default());
         // the same on the redo side
         t.doc.source.photo = PhotoId(u64::MAX);
-        assert!(t.doc.redo(&mut t.lr, &mut t.px).is_err());
+        assert!(t.doc.redo(&mut t.lr, &mut t.px, &mut t.base).is_err());
         assert!(Arc::ptr_eq(&t.pc(), &unrotated), "the Pixel half was undone back");
         assert_eq!(t.lr.develop_of(id).unwrap().orientation, Default::default());
         assert_eq!((t.doc.history.position(), t.doc.history.can_redo()), (position - 1, true), "still redoable");
@@ -483,8 +480,6 @@ mod tests {
         t.develop("Straighten", |s| s.crop.geometry.angle = 5.0);
         t.frame().unwrap();
         assert!(t.base.rendering() && t.doc.history.pending_follow());
-        // the history waits
-        assert_eq!(t.doc.undo(&mut t.lr, &mut t.px).unwrap_err(), RENDERING);
         t.develop("Straighten", |s| s.crop.geometry.angle = 10.0);
         t.develop("Exposure", |s| s.light.exposure = 0.5);
         t.settle();
@@ -555,8 +550,7 @@ mod tests {
         // together with the rotation, the redone state shows that exposure, not the target's
         t.develop("Exposure", |s| s.light.exposure = 1.0);
         t.settle();
-        t.base.finish(&mut t.lr, &mut t.px, &mut t.doc).unwrap();
-        t.doc.goto(&mut t.lr, &mut t.px, 1).unwrap();
+        t.doc.goto(&mut t.lr, &mut t.px, &mut t.base, 1).unwrap();
         t.settle();
         let past = t.st().history.past_len();
         let started = t.base.started();
@@ -715,6 +709,49 @@ mod tests {
         t.rotate_left();
         t.settle();
         assert!(t.doc.unsaved());
+    }
+
+    /// Review: the wait is `flush`'s own, so an undo (what Ctrl+Z runs) during a pending render
+    /// completes once it has landed: the follow is recorded, then the whole step undone. Both
+    /// with the render not even started (no frame since the rotation) and with it in flight.
+    #[test]
+    fn undo_during_a_pending_render_waits_for_it_then_undoes_the_whole_step() {
+        for in_flight in [false, true] {
+            let mut t = open();
+            t.paint("Paint", 300, 100);
+            let start = t.pc();
+            t.rotate_left();
+            if in_flight {
+                t.frame().unwrap();
+                assert!(t.base.rendering() && t.doc.history.pending_follow());
+            }
+            assert!(t.doc.undo(&mut t.lr, &mut t.px, &mut t.base).unwrap(), "in flight: {in_flight}");
+            assert!(!t.doc.history.pending_follow());
+            assert!(Arc::ptr_eq(&t.pc(), &start), "the exact pre-follow document");
+            assert_eq!(t.lr.develop_of(t.id()).unwrap().orientation, Default::default());
+            assert!(t.doc.redo(&mut t.lr, &mut t.px, &mut t.base).unwrap());
+            assert_eq!(dot(&t.pc(), "Paint"), (100, 299), "the follow it waited for comes back");
+            assert_eq!(t.doc.take_notice(), None);
+        }
+    }
+
+    /// Review: the wait has a ceiling (30 s; zero here): a render past it undoes the waiting step,
+    /// Pixel stays as it was, and the undo that waited is the error.
+    #[test]
+    fn a_render_past_the_ceiling_undoes_the_waiting_step() {
+        let mut t = open();
+        t.paint("Paint", 300, 100);
+        let (start, rows) = (t.pc(), t.rows());
+        t.base.ceiling = Some(Duration::ZERO);
+        t.rotate_left();
+        let e = t.doc.undo(&mut t.lr, &mut t.px, &mut t.base).unwrap_err();
+        assert!(e.contains("longer than"), "{e}");
+        assert!(!t.doc.history.pending_follow());
+        assert_eq!(t.lr.develop_of(t.id()).unwrap().orientation, Default::default(), "the rotation was undone");
+        assert!(Arc::ptr_eq(&t.pc(), &start), "Pixel untouched");
+        assert_eq!(t.rows(), rows, "the step is gone, the one before it stays");
+        let notice = t.doc.take_notice().unwrap();
+        assert!(notice.starts_with("Develop couldn\u{2019}t render \u{201c}Rotate Left\u{201d}: the edit was undone"), "{notice}");
     }
 
     #[test]

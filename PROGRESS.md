@@ -182,9 +182,13 @@ See [`PRD.md`](PRD.md) → *Milestones for Claude Code*.
     drag open on the photo); the Pixel half moves, then the Develop commit; if the commit fails,
     the Pixel half is redone/undone back, the step is kept, notice ("Couldn't undo X: …"); tested
     with a forced commit failure on both sides (mutation-checked). Tests: `follow.rs` (14),
-    `history::a_step_with_a_develop_half_waits_*`, three shell barrier tests. Deviations, small:
-    the wait is `Base::finish` (the render channel is `Base`'s), and `Document::flush` refuses
-    while pending instead of blocking (task 3's `edit.undo` calls `finish` first); the plan's
+    `history::a_step_with_a_develop_half_waits_*`, three shell barrier tests. The wait is
+    `flush`'s own (user, 2026-10-09): `Document::flush/undo/redo/goto` take the `Base`, which
+    starts the render if none is in flight, blocks up to the ceiling (30 s; `Base.ceiling` is
+    the test knob) and lands it; a render that fails, can't start or passes the ceiling undoes
+    the step and is the error. The shell's persona switch and `unsaved()` (every `document.*`,
+    the quit prompt) go through it. Tests: an undo during a pending render (not started, and in
+    flight) completes after it lands; a zero ceiling rolls back. Deviations, small: the plan's
     "rotate → exposure → goto before both → redo" case exercises the re-render path (the
     exposure render replaced the post-follow document in place), so adoption is tested with an
     undo/redo of the rotation alone. A Develop-only step whose commit fails still resets the
