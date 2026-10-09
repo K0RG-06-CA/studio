@@ -87,6 +87,14 @@ Former hand checks and the tests that replaced them:
   halation on scene-linear light before the tone curve, which its render API doesn't expose (its
   `F32Linear` output is after the curve and clamped). The document only reserves `Film` settings.
 
+## Must fix before milestone 4
+
+- **A never-saved document is dropped silently on exit**, and a failed exit save only goes to stderr
+  (`apps/studio/src/main.rs` `on_exit`). Harmless today, since a document holds only develop settings
+  and those live in the library, but the moment M4 adds pixel layers it is data loss: M4 must start
+  with a close/quit prompt (save, discard, cancel) for an unsaved document, and a visible error when
+  saving fails.
+
 ## Review (milestone 3): LOW findings left open
 
 From the code review of milestone 3 (HIGH/MEDIUM were fixed, one commit each, with tests):
@@ -100,8 +108,6 @@ From the code review of milestone 3 (HIGH/MEDIUM were fixed, one commit each, wi
   imported, giving the opaque "couldn't be imported".
 - `document.close` keeps the last `base_error`; undo/redo re-mirrors and bumps `revision`, so a document
   can't return to "saved" (track the saved settings hash instead).
-- A never-saved document is dropped silently on exit; a failed exit save only goes to stderr. Fine while
-  the document holds only develop settings (they live in the library); a prompt comes with M4's layers.
 - `session.interaction` is global: a drag left open on another photo blocks base renders.
 - Errors are `String` throughout `studio-doc`; a small error enum would let callers tell transient from
   permanent failures.
