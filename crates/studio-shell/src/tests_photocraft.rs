@@ -546,6 +546,41 @@ fn photocraft_holds_studios_document_and_nothing_else() {
     assert!(text.contains("undo history"), "{text}");
 }
 
+/// Review: work still open in PhotoCraft (a Free Transform not yet applied) counts: closing asks,
+/// and saving writes it.
+#[test]
+fn an_open_free_transform_is_applied_before_closing_asks_or_saving_writes() {
+    let dir = temp_dir("pixel-pending");
+    let path = dir.join("trip.studio");
+    let mut h = studio();
+    pixel_edited(&mut h, &path);
+    let session = &mut h.state_mut().pixel.as_mut().unwrap().app.session;
+    session
+        .edit("Paint", |d, active| {
+            let mut l = Layer::raster("Painted", PixelFormat::RGBA16);
+            l.surface_mut().unwrap().write_region(photocraft_geom::Rect::from_xywh(10, 10, 20, 20), &[1.0, 0.0, 0.0, 1.0].repeat(400));
+            *active = Some(l.id);
+            d.layers.push(l);
+            Ok(())
+        })
+        .unwrap();
+    h.run_steps(2);
+    h.state_mut().run("document.save").unwrap();
+    press(&mut h, egui::Modifiers::COMMAND, egui::Key::T);
+    press(&mut h, egui::Modifiers::NONE, egui::Key::ArrowRight);
+    h.run_steps(3);
+    assert!(h.state().pixel.as_ref().unwrap().app.ui.transform.is_some());
+    // closing: the transform is applied, so the document has changes, and the prompt asks
+    assert!(h.state_mut().run("document.close").unwrap_err().contains("unsaved"));
+    assert!(h.state().pixel.as_ref().unwrap().app.ui.transform.is_none(), "applied");
+    // saving writes it
+    h.state_mut().run("document.prompt.save").unwrap();
+    let saved = studio_doc::Document::open(&path).unwrap();
+    let painted = saved.pixel.layers.iter().find(|l| l.name == "Painted").unwrap();
+    let b = photocraft_compose::bounds::content_bounds(painted.surface().unwrap());
+    assert_eq!((b.x0, b.y0), (11, 10), "moved one pixel right");
+}
+
 #[test]
 fn ctrl_z_in_pixel_undoes_pixel_edits_and_leaves_develops_history_alone() {
     let dir = temp_dir("pixel-undo");

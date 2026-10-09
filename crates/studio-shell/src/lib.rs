@@ -371,6 +371,7 @@ impl StudioShell {
             self.base.mirror(&lr.app.session, doc);
         }
         if let (Some(doc), Some(px)) = (&mut self.document, &mut self.pixel) {
+            px.apply_pending();
             doc.copy_back(&mut px.app.session);
         }
         self.document.as_ref().is_some_and(Document::unsaved)

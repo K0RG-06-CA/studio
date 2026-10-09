@@ -92,6 +92,23 @@ impl Pixel {
         self.frames = self.frames.saturating_add(1);
     }
 
+    /// Apply what is still open in PhotoCraft (a Free Transform, type being edited, a pen path),
+    /// as picking another tool would: before anything asks whether the document has changes, so
+    /// they count, and are saved.
+    pub fn apply_pending(&mut self) {
+        use photocraft_ui_egui::{transform_tool, type_tool, vector_ui};
+        let app = &mut self.app;
+        if app.ui.transform.is_some() {
+            transform_tool::commit(app);
+        }
+        if app.ui.text_edit.is_some() {
+            type_tool::commit(app);
+        }
+        if app.ui.pen.is_some() {
+            vector_ui::pen_commit(app, false);
+        }
+    }
+
     /// PhotoCraft's fonts are installed, so its pieces can be drawn.
     pub fn ready(&self) -> bool {
         self.frames >= 2
