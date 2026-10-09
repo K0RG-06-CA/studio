@@ -112,6 +112,12 @@ Former hand checks and the tests that replaced them:
 - **Full-size 16-bit base render is CPU-only and slow** (CI runners took over 60 s for 24 MP). Measure
   it on this machine with a real S9 file and fix before Pixel ships (draft size while editing, GPU
   16-bit, or render in bands).
+  - [x] Benchmark `bench_base_render` (`crates/studio-doc/src/bench.rs`, opt-in, skips without
+    `samples/rw2`). This machine (Windows ARM64, 12 threads), release, 24 MP S9: first render incl.
+    decode 1.6–2.0 s; full after an edit ~0.9 s (LightCraft ~0.67 s + 16-bit → surface ~0.21 s);
+    **with a StageCache ~0.43 s**; draft 2560 ~0.17 s, 1280 ~0.055 s; GPU 8-bit full ~1.1 s (no
+    faster than the CPU). Dev profile: full after an edit ~1.1 s. The 60 s was CI's 2-core runners.
+  - [ ] Fix: decision pending review (proposed: StageCache, no draft)
 
 ## Review (milestone 3): LOW findings left open
 
