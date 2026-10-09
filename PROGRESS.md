@@ -57,7 +57,13 @@ See [`PRD.md`](PRD.md) → *Milestones for Claude Code*.
     (rotate, straighten, flip, lens/transform) leaves them where they were, with a notice
     (`Document::take_notice`; shown from task 6); a position-locked user layer stops the move,
     with a notice.
-  - [ ] 4. Lock guard (everything but `visible`)
+  - [x] 4. Lock guard: a new document in PhotoCraft is checked before it's copied back. The base
+    must stay the one marked layer at the bottom of the root, keep every property but `visible`
+    (hiding is allowed; a `setProps` that also unlocks or changes anything else is refused as a
+    whole), show pixels Studio wrote, and the canvas keeps its render's size. A breaking edit is
+    taken back with PhotoCraft's own undo + `clear_redo` (history as before; a good edit made in
+    the same frame stays), else the last copy goes back in; notice `LOCKED`. Checks the result,
+    so menus, panel drags, shortcuts and commands are all covered.
   - [ ] 5. Renders held during a gesture
   - [ ] 6. Shell wiring (`pixel.rs`, layout, badge, empty state)
   - [ ] 7. Commands and shortcuts (`pixel.*`, Studio's keys first, drops ignored, prompt)

@@ -36,6 +36,9 @@ pub struct Anchor {
 /// What a Develop rotation (or any other change of the frame) does to Pixel layers for now.
 pub const LAYERS_STAY: &str = "Pixel layers don\u{2019}t follow Develop rotation yet (milestone 5): they stayed where they were";
 
+/// Why an edit of the base layer (or of the canvas size, which follows its render) was taken back.
+pub const LOCKED: &str = "The Develop layer is locked: change it in Develop";
+
 /// Where an open document's pixels are in PhotoCraft's session.
 #[derive(Clone, Debug, Default)]
 pub struct Link {
@@ -107,6 +110,13 @@ impl Document {
         if self.link.copied.as_ref().is_some_and(|c| Arc::ptr_eq(c, &st.doc)) {
             return;
         }
+        if let Some(why) = self.link.refusal(&st.doc) {
+            self.refuse(session, why);
+        }
+        let Some(st) = self.state(session) else { return };
+        if self.link.copied.as_ref().is_some_and(|c| Arc::ptr_eq(c, &st.doc)) {
+            return;
+        }
         if let Some(doc) = self.link.restored(&st.doc) {
             st.doc = Arc::new(doc);
             st.revision += 1;
@@ -154,6 +164,28 @@ impl Document {
         self.link.notice.take()
     }
 
+    /// Take back the edit that made PhotoCraft's document break the lock (`why`): PhotoCraft's own
+    /// undo, its redo cleared, so its history is as before; failing that (nothing to undo, a
+    /// background job running, or the step undone to still breaks it), the document as last
+    /// copied goes back in. Its notice says why.
+    fn refuse(&mut self, session: &mut Session, why: &'static str) {
+        let undone = session.undo();
+        if let Some(st) = self.state(session) {
+            if undone {
+                st.history.clear_redo();
+            }
+            if (!undone || self.link.refusal(&st.doc).is_some())
+                && let Some(good) = self.link.copied.clone()
+            {
+                st.doc = good;
+                st.revision += 1;
+                st.last_damage = None;
+            }
+            st.saved_revision = st.revision;
+        }
+        self.link.notice = Some(why.into());
+    }
+
     /// The document's state in PhotoCraft (made the active one: the session only has this one).
     fn state<'s>(&self, session: &'s mut Session) -> Option<&'s mut DocState> {
         let id = self.link.id?;
@@ -164,6 +196,31 @@ impl Document {
 }
 
 impl Link {
+    /// Why `doc` (new in PhotoCraft) can't stand: an edit changed the base layer or the canvas.
+    /// The base must be the one marked layer, at the bottom of the root; keep everything as it
+    /// was but its visibility (hiding it is fine, as hiding a locked layer is in Photoshop); show
+    /// pixels Studio wrote; and the canvas keeps the size of the render it shows. PhotoCraft
+    /// enforces the lock on painting, moving and filters itself, not on deleting, arranging,
+    /// merging, flattening or layer properties (`d836e34`; see `tests::l2_*`).
+    fn refusal(&self, doc: &photocraft_doc::Document) -> Option<&'static str> {
+        let good = self.copied.as_ref()?;
+        let good_base = good.layers.iter().find(|l| crate::is_base(l))?;
+        let marked = doc.walk().into_iter().filter(|(_, _, l)| crate::is_base(l)).count();
+        let Some(base) = doc.layers.first().filter(|l| crate::is_base(l) && marked == 1) else { return Some(LOCKED) };
+        // everything but visibility and the pixels
+        let plain =
+            |l: &Layer| Layer { visible: true, content: LayerContent::Raster(Surface::new(photocraft_color::PixelFormat::RGBA16)), ..l.clone() };
+        if plain(base) != plain(good_base) {
+            return Some(LOCKED);
+        }
+        let (Some(shown), Some(good_shown)) = (base.surface(), good_base.surface()) else { return Some(LOCKED) };
+        let unchanged = Written::of(good_shown, None).shows(shown);
+        if (unchanged && doc.size != good.size) || (!unchanged && !self.written.iter().any(|w| w.shows(shown))) {
+            return Some(LOCKED);
+        }
+        None
+    }
+
     /// The anchor of the render `surface` shows: a written one, or none (unknown, or the empty
     /// base before the first render).
     fn anchor_of(&self, surface: &Surface) -> Option<Anchor> {
@@ -491,6 +548,216 @@ mod tests {
         let (r, s) = render_sized(48, 64);
         doc.write_base(&mut session, r, s, anchor(2, 0.0, 0.0)).unwrap();
         assert_eq!(doc.take_notice(), None);
+    }
+
+    /// A rendered document with a Pixel layer "Paint" over the base, both copied back.
+    fn painted() -> (Session, Document) {
+        let (mut session, mut doc) = attached();
+        let (r, s) = render_sized(64, 48);
+        doc.write_base(&mut session, r, s, anchor(1, 0.0, 0.0)).unwrap();
+        paint(&mut session, "Paint", 10, 10);
+        doc.copy_back(&mut session);
+        (session, doc)
+    }
+
+    fn base_id(doc: &Document) -> u64 {
+        doc.base_layer().unwrap().id.0
+    }
+
+    fn paint_id(doc: &Document) -> u64 {
+        doc.pixel.layers.iter().find(|l| l.name == "Paint").unwrap().id.0
+    }
+
+    /// Run a PhotoCraft command, then copy back (as the next frame does): was it taken back?
+    fn refused(session: &mut Session, doc: &mut Document, id: &str, params: serde_json::Value) -> bool {
+        let before = (names(&doc.pixel).iter().map(|s| (*s).to_owned()).collect::<Vec<_>>(), session.active().unwrap().history.entries());
+        session.execute(id, params).unwrap_or_else(|e| panic!("{id}: {e}"));
+        doc.copy_back(session);
+        let after = (names(&doc.pixel).iter().map(|s| (*s).to_owned()).collect::<Vec<_>>(), session.active().unwrap().history.entries());
+        match doc.take_notice() {
+            Some(n) => {
+                assert_eq!(n, LOCKED, "{id}");
+                assert_eq!(before, after, "{id}: layers and history as before");
+                let base = doc.base_layer().unwrap();
+                assert!(std::ptr::eq(base, &doc.pixel.layers[0]) && base.locks.all && base.visible, "{id}");
+                assert!(!session.active().unwrap().history.can_redo(), "{id}: nothing to redo into");
+                true
+            }
+            None => false,
+        }
+    }
+
+    #[test]
+    fn the_develop_layer_can_be_hidden_but_nothing_else_changes() {
+        let (mut session, mut doc) = painted();
+        let base = base_id(&doc);
+        // hiding it is fine, and undoable
+        assert!(!refused(&mut session, &mut doc, "layer.setProps", serde_json::json!({"layer": base, "visible": false})));
+        assert!(!doc.base_layer().unwrap().visible);
+        assert!(undo(&mut session, &mut doc) && doc.base_layer().unwrap().visible);
+        // hiding it while clearing its lock is refused as a whole: it stays shown and locked
+        let unlock = serde_json::json!({"layer": base, "visible": false, "locks": {"all": false}});
+        assert!(refused(&mut session, &mut doc, "layer.setProps", unlock));
+        for change in [
+            serde_json::json!({"layer": base, "name": "Mine now"}),
+            serde_json::json!({"layer": base, "opacity": 0.5}),
+            serde_json::json!({"layer": base, "blend": "Multiply"}),
+            serde_json::json!({"layer": base, "locked": false}),
+        ] {
+            assert!(refused(&mut session, &mut doc, "layer.setProps", change.clone()), "{change}");
+        }
+        // the same on another layer is an ordinary edit
+        let paint = paint_id(&doc);
+        assert!(!refused(&mut session, &mut doc, "layer.setProps", serde_json::json!({"layer": paint, "opacity": 0.5})));
+    }
+
+    #[test]
+    fn deleting_moving_merging_or_flattening_the_develop_layer_is_refused() {
+        let (mut session, mut doc) = painted();
+        let (base, paint) = (base_id(&doc), paint_id(&doc));
+        assert!(refused(&mut session, &mut doc, "layer.delete", serde_json::json!({"layer": base})));
+        assert!(refused(&mut session, &mut doc, "layer.arrange.bringForward", serde_json::json!({"layer": base})));
+        assert!(refused(&mut session, &mut doc, "layer.arrange.sendToBack", serde_json::json!({"layer": paint})));
+        assert!(refused(&mut session, &mut doc, "layer.moveTo", serde_json::json!({"layer": paint, "target": base, "position": "below"})));
+        assert!(refused(&mut session, &mut doc, "layer.mergeDown", serde_json::json!({"layer": paint})));
+        assert!(refused(&mut session, &mut doc, "layer.flattenImage", serde_json::json!({})));
+        // ordinary edits still go through
+        assert!(!refused(&mut session, &mut doc, "layer.delete", serde_json::json!({"layer": paint})));
+        assert_eq!(names(&doc.pixel), [crate::BASE_LAYER]);
+    }
+
+    #[test]
+    fn painting_into_the_develop_layer_or_resizing_the_canvas_by_any_path_is_refused() {
+        let (mut session, mut doc) = painted();
+        // what PhotoCraft's tools refuse on a locked layer, done by a path that doesn't check
+        session
+            .edit("Sneaky", |d, _| {
+                let base = d.layers.iter_mut().find(|l| crate::is_base(l)).unwrap();
+                base.surface_mut().unwrap().write_region(photocraft_geom::Rect::from_xywh(0, 0, 1, 1), &[0.0, 0.0, 1.0, 1.0]);
+                Ok(())
+            })
+            .unwrap();
+        doc.copy_back(&mut session);
+        assert_eq!(doc.take_notice().as_deref(), Some(LOCKED));
+        assert!(shows_current(&doc, &session), "the render, untouched");
+        session
+            .edit("Canvas Size", |d, _| {
+                d.size = Size { width: 100, height: 100 };
+                Ok(())
+            })
+            .unwrap();
+        doc.copy_back(&mut session);
+        assert_eq!(doc.take_notice().as_deref(), Some(LOCKED));
+        assert_eq!(doc.pixel.size, Size { width: 64, height: 48 });
+    }
+
+    #[test]
+    fn a_bad_edit_after_a_good_one_in_the_same_frame_keeps_the_good_one() {
+        let (mut session, mut doc) = painted();
+        paint(&mut session, "Good", 5, 5);
+        session.execute("layer.delete", serde_json::json!({"layer": base_id(&doc)})).unwrap();
+        doc.copy_back(&mut session);
+        assert_eq!(doc.take_notice().as_deref(), Some(LOCKED));
+        assert_eq!(names(&doc.pixel), [crate::BASE_LAYER, "Paint", "Good"]);
+        assert!(undo(&mut session, &mut doc), "the good one undoes as usual");
+        assert_eq!(names(&doc.pixel), [crate::BASE_LAYER, "Paint"]);
+    }
+
+    #[test]
+    fn with_the_history_cap_hit_a_bad_edit_is_still_refused() {
+        let (mut session, mut doc) = painted();
+        session.active_mut().unwrap().history.max_states = 2;
+        for i in 0..5 {
+            paint(&mut session, &format!("Paint {i}"), i, i);
+            doc.copy_back(&mut session);
+            let (r, s) = render_sized(64, 48);
+            doc.write_base(&mut session, r, s, anchor(1, 0.0, 0.0)).unwrap();
+        }
+        while undo(&mut session, &mut doc) {}
+        assert_eq!(doc.take_notice(), None, "nothing undone to was taken for a bad edit");
+        assert!(shows_current(&doc, &session));
+        // merging the layer right above the base into it
+        let above = doc.pixel.layers[1].id.0;
+        assert!(refused(&mut session, &mut doc, "layer.mergeDown", serde_json::json!({"layer": above})));
+    }
+
+    // --- PhotoCraft limitations (`d836e34`): each test fails once upstream fixes it ---
+
+    /// L2: PhotoCraft's engine lets these through on a fully locked layer (it refuses painting,
+    /// moving and filters on one). Once it refuses one of them, its test fails: the guard above
+    /// can stay (it also covers paths that never ask), but this list shrinks.
+    fn locked_doc() -> (Session, u64, u64) {
+        let mut d =
+            photocraft_doc::Document::new("l2", Size { width: 8, height: 8 }, photocraft_color::ColorMode::Rgb, photocraft_color::SampleType::U16);
+        let mut locked = Layer::raster("Locked", PixelFormat::RGBA16);
+        locked.locks.all = true;
+        let free = Layer::raster("Free", PixelFormat::RGBA16);
+        let (l, f) = (locked.id.0, free.id.0);
+        d.layers.push(locked);
+        d.layers.push(free);
+        let mut session = Session::new();
+        session.add_document(d, None);
+        (session, l, f)
+    }
+
+    fn l2_runs(id: &str, params: impl Fn(u64, u64) -> serde_json::Value) {
+        let (mut session, locked, free) = locked_doc();
+        let before = session.active().unwrap().doc.clone();
+        session.execute(id, params(locked, free)).unwrap_or_else(|e| panic!("upstream now refuses {id} on a locked layer: {e}"));
+        assert!(!Arc::ptr_eq(&before, &session.active().unwrap().doc), "{id} changed nothing");
+    }
+
+    #[test]
+    fn l2_photocraft_deletes_a_locked_layer() {
+        l2_runs("layer.delete", |l, _| serde_json::json!({"layer": l}));
+    }
+
+    #[test]
+    fn l2_photocraft_arranges_a_locked_layer() {
+        l2_runs("layer.arrange.bringForward", |l, _| serde_json::json!({"layer": l}));
+    }
+
+    #[test]
+    fn l2_photocraft_moves_a_layer_below_a_locked_bottom_layer() {
+        l2_runs("layer.moveTo", |l, f| serde_json::json!({"layer": f, "target": l, "position": "below"}));
+    }
+
+    #[test]
+    fn l2_photocraft_changes_a_locked_layers_properties_and_its_lock() {
+        l2_runs("layer.setProps", |l, _| serde_json::json!({"layer": l, "opacity": 0.5, "locks": {"all": false}}));
+    }
+
+    #[test]
+    fn l2_photocraft_merges_down_into_a_locked_layer() {
+        l2_runs("layer.mergeDown", |_, f| serde_json::json!({"layer": f}));
+    }
+
+    #[test]
+    fn l2_photocraft_flattens_a_locked_layer() {
+        l2_runs("layer.flattenImage", |_, _| serde_json::json!({}));
+    }
+
+    /// L3: PhotoCraft's undo restores the whole document, a layer the host wrote outside its
+    /// history included. Fails once it can leave a layer out (the register above can go then).
+    #[test]
+    fn l3_photocraft_undo_brings_back_pixels_written_outside_its_history() {
+        let (mut session, locked, _) = locked_doc();
+        let before = session.active().unwrap().doc.clone();
+        session.execute("layer.setProps", serde_json::json!({"layer": locked, "visible": false})).unwrap();
+        // the host writes the locked layer's pixels, no history step
+        let st = session.active_mut().unwrap();
+        let mut d = (*st.doc).clone();
+        d.layer_mut(photocraft_doc::LayerId(locked))
+            .unwrap()
+            .surface_mut()
+            .unwrap()
+            .write_region(photocraft_geom::Rect::from_xywh(0, 0, 1, 1), &[1.0; 4]);
+        d.size = Size { width: 4, height: 4 };
+        st.doc = Arc::new(d);
+        assert!(session.undo());
+        let now = &session.active().unwrap().doc;
+        assert!(Arc::ptr_eq(&before, now), "undo brought back the whole earlier document, pixels and size");
+        assert_eq!(now.layer(photocraft_doc::LayerId(locked)).unwrap().surface().unwrap().tile_count(), 0);
     }
 
     #[test]

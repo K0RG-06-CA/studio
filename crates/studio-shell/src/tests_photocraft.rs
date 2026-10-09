@@ -115,6 +115,23 @@ fn spike_b_photocraft_and_lightcraft_fonts_live_in_one_context() {
     assert!(text.contains("Presets"), "{text}");
 }
 
+/// L2, menu side: PhotoCraft greys Arrange, Delete and Merge Down by its Background heuristic
+/// (named "Background", at the bottom), never by the lock, so on Studio's locked "Develop" layer
+/// they stay enabled and the guard in `studio_doc::pixel` takes them back. Fails once upstream
+/// greys them for a fully locked layer.
+#[test]
+fn l2_photocraft_menus_dont_grey_changes_to_a_fully_locked_layer() {
+    use photocraft_ui_egui::enable_rules::disabled_for;
+    let mut doc = pixel_doc();
+    doc.layers[0].locks.all = true;
+    doc.layers.push(Layer::raster("Paint", PixelFormat::RGBA16));
+    let (base, top) = (&doc.layers[0], &doc.layers[1]);
+    for id in ["layer.arrange.bringForward", "layer.arrange.bringToFront", "layer.delete"] {
+        assert!(!disabled_for(&doc, Some(base), id), "upstream now greys {id} on a locked layer");
+    }
+    assert!(!disabled_for(&doc, Some(top), "layer.mergeDown"), "upstream now greys merging into a locked layer");
+}
+
 // --- Studio with PhotoCraft as the home of the document's pixels ---
 
 use crate::tests_lightcraft::{pick_first, settle_base, studio, temp_dir};
