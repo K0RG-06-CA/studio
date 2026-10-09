@@ -424,12 +424,7 @@ impl StudioShell {
             ui.ctx().send_viewport_cmd(egui::ViewportCommand::CancelClose);
             let _ = self.run(&Persona::Library.command());
         }
-        if let Some(lr) = self.lightroom.as_mut().filter(|_| self.persona.lightroom()) {
-            lr.logic(ui.ctx());
-        }
-        if let Some(px) = self.pixel.as_mut().filter(|_| self.persona == Persona::Pixel) {
-            px.logic(ui.ctx());
-        }
+        self.engine_logic(ui.ctx());
         self.top_bar(ui);
         self.persona_area(ui);
         if let Some(lr) = self.lightroom.as_mut().filter(|_| self.persona.lightroom()) {
@@ -440,6 +435,25 @@ impl StudioShell {
         }
         self.document_prompt(ui.ctx());
         self.error_notice(ui.ctx());
+    }
+
+    /// One engine's logic per frame, by construction: the persona's own (LightCraft's in Library,
+    /// Develop and Film; PhotoCraft's in Pixel), so the document's history only ever sees one
+    /// engine change between two looks (milestone 5). There is no second call site.
+    fn engine_logic(&mut self, ctx: &egui::Context) {
+        match self.persona {
+            Persona::Pixel => {
+                if let Some(px) = self.pixel.as_mut() {
+                    px.logic(ctx);
+                }
+            }
+            p if p.lightroom() => {
+                if let Some(lr) = self.lightroom.as_mut() {
+                    lr.logic(ctx);
+                }
+            }
+            _ => {}
+        }
     }
 
     /// What failed and why, over everything (and over the prompt it may have come from).

@@ -126,7 +126,44 @@ See [`PRD.md`](PRD.md) → *Milestones for Claude Code*.
   a Develop rotate/straighten/flip yet (they stay, with a notice; M5) or a crop that changes the
   render scale (only tests render at a capped size); the Lightroom filmstrip under Pixel is still
   a placeholder; Pixel's undo is PhotoCraft's own, one shared history is M5.
-- [ ] **5. Round trip** — Library → Develop → Pixel and back on one document, one undo history across personas.
+- [ ] **5. Round trip** — Library → Develop → Pixel and back on one document, one undo history across personas. Plan: [`docs/m5-plan.md`](docs/m5-plan.md) (rev. 3).
+  - [x] 1. `studio_doc::history` (2026-10-09): Studio owns the history, the engines keep the
+    states. A Develop step is a settings pair Studio records (before/after `Arc<DevelopSettings>`
+    plus the photo's History list, lists shared between neighbouring steps), noted by
+    `Document::note_develop` (what `Base::mirror` now is) while no drag is open on the photo,
+    labelled by LightCraft's top undo entry when that entry touches the photo; undone/redone by
+    `session.commit("Undo X", Batch[SetDevelop, SetHistory])`, so it is journaled (test: a new
+    session on the same library) and Lightroom's History rows go and come back. A Pixel step is
+    a PhotoCraft state tracked by identity (weak `Arc` pointers), diffed after every copy-back
+    and render write (before the copy too, so an undo to a state showing an old render is seen
+    before the current render goes back in): appended = new steps; same states, new current =
+    host replacement or coalesce (label adopted, redo kept); removed with PhotoCraft's redo grown
+    = its own undo (accepted as Studio's when the newest steps are Pixel, else put back and done
+    as a Studio jump, Develop steps included, by `Document::reconcile`); removed without redo =
+    fold / refused edit (merged into the Pixel step before, else reset); a lost prefix = its cap.
+    Anything else resets the history with a notice. `flush` (ends the drag, reconciles) runs
+    before `undo`/`redo`/`goto`; `entries()`/`position()` for the panel; `HISTORY_BYTES` 1 GiB /
+    `HISTORY_STEPS` 1000 as one budget: Studio sets PhotoCraft's `max_states`/`max_bytes` on
+    every reconcile (its prefs re-apply 50 / 8 GB otherwise), trims after every write, prunes
+    Develop-only steps from the oldest end itself. Shell: `engine_logic` runs one engine's logic
+    per frame by construction (test). Tests in `history.rs` (16) + `tests_photocraft::one_engine_*`;
+    the M4 cap tests now use Studio's byte cap. Deviations from the plan, small: a lost prefix is
+    always taken as PhotoCraft's cap (its states only ever go from the front, in `record` and
+    `trim`), not only right after Studio's own trim; PhotoCraft's own undo/redo of a Pixel-only
+    tail is simply Studio's (no redo-back); "undo mid-stroke commits the stroke" is a shell test
+    (the stroke lives in PhotoCraft's UI), moved to task 3. The shell doesn't call `flush`,
+    `undo`, `reconcile` yet (task 3): Pixel steps are recorded through `copy_back`, Develop steps
+    through `mirror`; Ctrl+Z in Pixel is still PhotoCraft's own, which the history accepts.
+  - [ ] 2. Pixel layers follow a Develop rotate / straighten / flip / crop / scale, as a paired step
+  - [ ] 3. Shell: commands, shortcuts, Studio's History panel, reconcile points
+  - [ ] 4. A document without a photo: PNG/JPEG/TIFF/PSD straight into Pixel
+  - [ ] 5. Save/close flush and render identity
+  - [ ] 6. Round trip end to end, smoke, docs, limitations
+
+  **Upstream limitations found so far (each gets its failing-when-fixed test in task 6):**
+  - L12 PhotoCraft `History` can't drop its oldest state on demand (only inside `record` via
+    `max_states` or `trim` via bytes): a Pixel step at the oldest end of Studio's history goes at
+    PhotoCraft's next `record` (Studio lowers `max_states` for it), so the step cap can lag by one.
 - [ ] **6. MCP** — one MCP server exposing commands from every persona.
 - [ ] **7. ARM64 + Linux builds** — CI on Windows ARM64/x64 and Linux ARM64/x64; downloadable .exe and AppImage/.deb.
 

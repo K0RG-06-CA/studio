@@ -111,7 +111,7 @@ impl Document {
                 session.close(i);
             }
         }
-        let Some(st) = self.state(session) else {
+        if self.state(session).is_none() {
             let (was, current, written) = (self.link.id.is_some(), self.link.current.take(), std::mem::take(&mut self.link.written));
             self.attach(session);
             if was {
@@ -121,7 +121,17 @@ impl Document {
                 self.link.notice = Some(REOPENED.into());
             }
             return;
-        };
+        }
+        // the history sees PhotoCraft's document as it left it (an undo to a state showing an
+        // old render is one before the copy puts the current render back), and then the copy
+        self.reconcile_pixel(session);
+        self.copy_changed(session);
+        self.reconcile_pixel(session);
+    }
+
+    /// The copy itself, once PhotoCraft holds the document.
+    fn copy_changed(&mut self, session: &mut Session) {
+        let Some(st) = self.state(session) else { return };
         st.saved_revision = st.revision;
         if self.link.copied.as_ref().is_some_and(|c| Arc::ptr_eq(c, &st.doc)) {
             return;
@@ -171,13 +181,14 @@ impl Document {
         self.pixel = (*doc).clone();
         self.link.copied = Some(doc);
         self.link.written.retain(|w| !w.gone());
+        self.reconcile_pixel(session);
         Ok(())
     }
 
     /// What to tell the user about the document, once (layers that stayed when a Develop rotation
-    /// moved the frame).
+    /// moved the frame; a history that had to start over).
     pub fn take_notice(&mut self) -> Option<String> {
-        self.link.notice.take()
+        self.link.notice.take().or_else(|| self.history.take_notice())
     }
 
     /// Take back the edit that made PhotoCraft's document break the lock (`why`): PhotoCraft's own
@@ -212,14 +223,34 @@ impl Document {
 
     /// The document's state in PhotoCraft (made the active one: the session only has this one).
     fn state<'s>(&self, session: &'s mut Session) -> Option<&'s mut DocState> {
-        let id = self.link.id?;
-        let i = session.documents().iter().position(|s| s.doc.id == id)?;
-        session.set_active(i);
-        session.active_mut()
+        state_of(session, self.link.id?)
     }
 }
 
+/// The state of document `id` in `session`, made the active one.
+pub(crate) fn state_of(session: &mut Session, id: DocId) -> Option<&mut DocState> {
+    let i = session.documents().iter().position(|s| s.doc.id == id)?;
+    session.set_active(i);
+    session.active_mut()
+}
+
 impl Link {
+    /// The document's id in PhotoCraft's session, once attached.
+    pub(crate) fn id(&self) -> Option<DocId> {
+        self.id
+    }
+
+    /// Drop the renders no state shows any more (after the history let go of states).
+    pub(crate) fn forget_gone(&mut self) {
+        self.written.retain(|w| !w.gone());
+    }
+
+    /// Renders some state may still show.
+    #[cfg(test)]
+    pub(crate) fn written_len(&self) -> usize {
+        self.written.len()
+    }
+
     /// `doc` without the base's mark (and lock) on any layer but the base: a Duplicate Layer of
     /// it is an ordinary layer, as Photoshop's `"Background copy`". None when there is none.
     fn unmarked(&self, doc: &photocraft_doc::Document) -> Option<photocraft_doc::Document> {
@@ -327,14 +358,14 @@ pub fn close_all(session: &mut Session) {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use photocraft_color::PixelFormat;
     use photocraft_doc::Layer;
 
     use super::*;
     use crate::tests::demo;
 
-    fn attached() -> (Session, Document) {
+    pub(crate) fn attached() -> (Session, Document) {
         let (lc, id) = demo();
         let mut doc = Document::from_photo(&lc, id).unwrap();
         let mut session = Session::new();
@@ -361,7 +392,10 @@ mod tests {
         (s, Size { width: 2, height: 2 })
     }
 
-    fn names(doc: &photocraft_doc::Document) -> Vec<&str> {
+    /// Bytes of one tile (every surface in these tests fits in one).
+    pub(crate) const TILE: usize = 256 * 256 * 8;
+
+    pub(crate) fn names(doc: &photocraft_doc::Document) -> Vec<&str> {
         doc.layers.iter().map(|l| l.name.as_str()).collect()
     }
 
@@ -429,18 +463,18 @@ mod tests {
     }
 
     /// A new render of `w × h` (fresh tiles every call).
-    fn render_sized(w: u32, h: u32) -> (Surface, Size) {
+    pub(crate) fn render_sized(w: u32, h: u32) -> (Surface, Size) {
         let mut s = Surface::new(PixelFormat::RGBA16);
         s.write_region(photocraft_geom::Rect::from_xywh(0, 0, w, h), &[0.5, 0.5, 0.5, 1.0].repeat((w * h) as usize));
         (s, Size { width: w, height: h })
     }
 
-    fn anchor(frame: u64, x: f64, y: f64) -> Option<Anchor> {
+    pub(crate) fn anchor(frame: u64, x: f64, y: f64) -> Option<Anchor> {
         Some(Anchor { frame, origin: [x, y], scale: 1.0 })
     }
 
     /// A Pixel edit: a layer with one painted pixel at (x, y).
-    fn paint(session: &mut Session, name: &str, x: i32, y: i32) {
+    pub(crate) fn paint(session: &mut Session, name: &str, x: i32, y: i32) {
         session
             .edit(name, |d, active| {
                 let mut l = Layer::raster(name, PixelFormat::RGBA16);
@@ -501,7 +535,9 @@ mod tests {
     #[test]
     fn with_photocrafts_history_cap_hit_undo_still_gets_the_current_render_back() {
         let (mut session, mut doc) = attached();
-        session.active_mut().unwrap().history.max_states = 2;
+        // the cap is Studio's (milestone 5): room for the current document (a render and five
+        // paints, a tile each), two older renders and Studio's own few bytes
+        doc.history.bytes_cap = 9 * TILE;
         for i in 0..5 {
             paint(&mut session, &format!("Paint {i}"), i, i);
             doc.copy_back(&mut session);
@@ -757,7 +793,7 @@ mod tests {
     #[test]
     fn with_the_history_cap_hit_a_bad_edit_is_still_refused() {
         let (mut session, mut doc) = painted();
-        session.active_mut().unwrap().history.max_states = 2;
+        doc.history.bytes_cap = 9 * TILE;
         for i in 0..5 {
             paint(&mut session, &format!("Paint {i}"), i, i);
             doc.copy_back(&mut session);

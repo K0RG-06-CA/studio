@@ -114,6 +114,12 @@ impl Pixel {
         self.frames >= 2
     }
 
+    /// Frames its logic has run.
+    #[cfg(test)]
+    pub(crate) fn frames(&self) -> u32 {
+        self.frames
+    }
+
     /// Draw a piece of PhotoCraft into `ui`, in its style.
     fn show(&mut self, ui: &mut Ui, add: impl FnOnce(&mut PhotocraftApp, &mut Ui)) {
         if !self.ready() {

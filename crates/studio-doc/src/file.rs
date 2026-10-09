@@ -60,6 +60,7 @@ impl Document {
             revision: 0,
             saved_revision: 0,
             link: Default::default(),
+            history: Default::default(),
         })
     }
 

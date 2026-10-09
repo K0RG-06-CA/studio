@@ -28,8 +28,6 @@ type Done = (RenderResult, Result<(Surface, Size), String>);
 /// Keeps a document's base layer in step with its develop settings.
 #[derive(Default)]
 pub struct Base {
-    /// The catalog's settings as last mirrored (pointer compare: the catalog hands out `Arc`s).
-    mirrored: Option<Arc<DevelopSettings>>,
     /// Hash of the settings the base pixels show; none until the first render.
     shown: Option<u64>,
     /// The render in flight: the settings hash it renders, and where its result arrives.
@@ -111,18 +109,11 @@ impl Base {
         Ok(())
     }
 
-    /// Copy the catalog's settings into `doc` if they changed. `sync` does this at the start of a
-    /// frame; call it before saving, since LightCraft's panels edit later in the frame.
+    /// Copy the catalog's settings into `doc` if they changed (a change is a Develop step of the
+    /// document's history). `sync` does this at the start of a frame; call it before saving,
+    /// since LightCraft's panels edit later in the frame.
     pub fn mirror(&mut self, session: &Session, doc: &mut Document) {
-        if let Some(now) = session.develop_of(doc.source.photo)
-            && !self.mirrored.as_ref().is_some_and(|m| Arc::ptr_eq(m, &now))
-        {
-            if *now != doc.develop {
-                doc.develop = (*now).clone();
-                doc.revision += 1;
-            }
-            self.mirrored = Some(now);
-        }
+        doc.note_develop(session);
     }
 
     fn start(&mut self, session: &mut Session, doc: &Document, want: u64) -> Result<(), String> {

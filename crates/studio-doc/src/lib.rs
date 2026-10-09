@@ -9,6 +9,7 @@ pub mod base;
 #[cfg(test)]
 mod bench;
 pub mod file;
+pub mod history;
 pub mod open;
 pub mod pixel;
 
@@ -48,8 +49,8 @@ pub struct Source {
 pub struct Film {}
 
 /// The document. `develop` and `film` are the base layer's recipe; `pixel` is PhotoCraft's layer
-/// tree, whose bottom layer is the base. `revision` counts every change (one undo history later
-/// snapshots by it, as PhotoCraft's does), `saved_revision` the one on disk.
+/// tree, whose bottom layer is the base. `revision` counts every change, `saved_revision` the
+/// one on disk. `history` is its one undo history across personas (see [history]).
 pub struct Document {
     pub name: String,
     pub source: Source,
@@ -62,6 +63,7 @@ pub struct Document {
     pub saved_revision: u64,
     /// Where pixel lives while the document is open: PhotoCraft's session (see [pixel]).
     pub(crate) link: pixel::Link,
+    pub history: history::History,
 }
 
 /// `document.json`: everything but the layer tree (which is a `.pcraft` bundle next to it).
@@ -110,6 +112,7 @@ impl Document {
             revision: 0,
             saved_revision: 0,
             link: Default::default(),
+            history: Default::default(),
         })
     }
 

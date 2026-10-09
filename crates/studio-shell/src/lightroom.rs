@@ -107,6 +107,12 @@ impl Lightroom {
         self.frames >= 2
     }
 
+    /// Frames its logic has run.
+    #[cfg(test)]
+    pub(crate) fn frames(&self) -> u32 {
+        self.frames
+    }
+
     /// Show what a module key asks for (after the persona switch).
     pub fn go(&mut self, to: Go) {
         match to {

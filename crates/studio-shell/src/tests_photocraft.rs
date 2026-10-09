@@ -335,6 +335,32 @@ fn press(h: &mut Harness<'_, crate::StudioShell>, modifiers: egui::Modifiers, ke
     h.run_steps(1);
 }
 
+/// Milestone 5: the document's history reconciles one engine at a time, so only the persona's
+/// own engine runs its logic in a frame, and a persona switch takes effect from the next frame.
+#[test]
+fn one_engine_runs_its_logic_per_frame_across_persona_switches() {
+    let mut h = studio();
+    h.run_steps(3);
+    let counts = |h: &Harness<'_, crate::StudioShell>| (h.state().lightroom.as_ref().unwrap().frames(), h.state().pixel.as_ref().unwrap().frames());
+    for persona in ["persona.pixel", "persona.develop", "persona.pixel", "persona.library", "persona.film"] {
+        let before = counts(&h);
+        h.state_mut().run(persona).unwrap();
+        for _ in 0..3 {
+            let at = counts(&h);
+            h.run_steps(1);
+            let after = counts(&h);
+            assert!((after.0 - at.0) + (after.1 - at.1) <= 1, "{persona}: two engines ran their logic in one frame");
+        }
+        let (lr, px) = (counts(&h).0 - before.0, counts(&h).1 - before.1);
+        let want = match persona {
+            "persona.pixel" => (0, 3),
+            "persona.film" => (0, 0),
+            _ => (3, 0),
+        };
+        assert_eq!((lr, px), want, "{persona}: only its own engine, from the next frame on");
+    }
+}
+
 #[test]
 fn pixel_commands_run_photocraft_and_a_change_to_the_develop_layer_says_why() {
     let mut h = studio();
