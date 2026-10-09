@@ -194,8 +194,16 @@ See [`PRD.md`](PRD.md) → *Milestones for Claude Code*.
     a render is ever reused by frame instead of by settings, mutation-checked); adoption itself
     is tested with an undo/redo of the rotation alone. A Develop-only step whose commit fails is
     kept with a notice too, as a paired one (user, 2026-10-09; it used to reset the history; task
-    1's test rewritten, both sides). Not done here: `bench.rs` peak bytes during a follow and
-    the memory test for k geometry steps (design §5); a single-channel Channels-panel restriction
+    1's test rewritten, both sides). Memory (design §5, user, 2026-10-09): ten exposure +
+    rotation rounds with the cap in the 24 MP ratio (16 MiB to a 6-tile render, as 1 GiB to 384
+    tiles) keep exactly four geometry steps, a contiguous suffix, retained bytes (counted
+    independently of upstream) = five renders, under the cap after every step; undo stops at the
+    oldest kept step. Its tight-cap phase found a bug, fixed in the same commit: a follow's state
+    was joined to its waiting Develop step only after the budget's prune, which took the step
+    for a Develop-only one (reset); and a follow whose own trim took every older state drained
+    the waiting step too. The diff now joins the follow to its step directly, and a lost prefix
+    keeps the waiting step (both mutation-checked). Not done here: `bench.rs` peak bytes during
+    a follow (waits for the slow-frame fix); a single-channel Channels-panel restriction
     on `edit.transform` during a follow is untested.
   - [ ] 3. Shell: commands, shortcuts, Studio's History panel, reconcile points
   - [ ] 4. A document without a photo: PNG/JPEG/TIFF/PSD straight into Pixel

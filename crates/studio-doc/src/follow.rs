@@ -600,6 +600,77 @@ mod tests {
         assert_eq!(t.doc.take_notice(), None);
     }
 
+    /// Unique tile bytes over PhotoCraft's past states and its current document, counted here as
+    /// upstream's `tile_bytes` does (layers, masks, channels, Quick Mask), independently of it.
+    fn retained(st: &DocState) -> usize {
+        let mut seen = std::collections::HashSet::new();
+        let mut add = |s: &Surface| s.tiles().filter(|(_, t)| seen.insert(Arc::as_ptr(t) as usize)).map(|(_, t)| t.bytes().len()).sum::<usize>();
+        let docs: Vec<_> = (0..st.history.past_len()).filter_map(|i| st.history.state(i)).chain([st.doc.clone()]).collect();
+        let mut n = 0;
+        for d in &docs {
+            for (_, _, l) in d.walk() {
+                n += l.surface().map_or(0, &mut add) + l.mask.as_ref().map_or(0, |m| add(&m.surface));
+            }
+            n += d.channels.iter().chain(&d.quick_mask).map(|c| add(&c.surface)).sum::<usize>();
+        }
+        n
+    }
+
+    /// Design §5: a geometry step's state holds a whole render, so the budget holds a handful.
+    /// The cap is to a 600 px render (6 tiles) what 1 GiB is to a 24 MP one (384 tiles): the
+    /// current document and four states fit either way (24 MP: 192 + 4 × 192 = 960 MiB ≤ 1024).
+    /// The oldest steps go as a contiguous prefix (Develop steps older than the oldest surviving
+    /// state with them), the bytes stay under the cap, undo stops at the oldest kept step, and
+    /// nothing says "reset". Then a cap under two renders: every follow's own trim takes all
+    /// older states, and the step it records is still paired, not a reset.
+    #[test]
+    fn geometry_steps_at_24_mp_scale_keep_four_and_drop_the_oldest_as_a_prefix() {
+        let mut t = open();
+        let render: usize = base_surface(&t.pc()).tiles().map(|(_, tile)| tile.bytes().len()).sum();
+        assert_eq!(render, 6 * crate::pixel::tests::TILE, "a 600 \u{d7} 400 render is 6 tiles");
+        let cap = crate::history::HISTORY_BYTES / 384 * 6;
+        t.doc.history.bytes_cap = cap;
+        let mut labels = Vec::new();
+        for i in 0..10 {
+            let e = format!("Exposure {i}");
+            t.develop(&e, |s| s.light.exposure = f64::from(i + 1) * 0.1);
+            t.settle();
+            t.rotate_left();
+            t.settle();
+            labels.extend([e, "Rotate Left".to_owned()]);
+            let bytes = retained(t.st());
+            assert!(bytes <= cap, "after step {i}: {bytes} bytes over the cap of {cap}");
+            assert_eq!(t.doc.take_notice(), None, "after step {i}");
+        }
+        let rows: Vec<String> = t.rows().into_iter().skip(1).map(|r| r.0).collect();
+        assert_eq!(rows[..], labels[labels.len() - 7..], "four geometry steps and the Develop steps between them, a contiguous suffix");
+        assert_eq!((t.st().history.past_len(), retained(t.st())), (4, 5 * render), "four states and the current document, a render each");
+        // undo walks back to the oldest kept step and stops there
+        for i in 0..rows.len() {
+            assert!(t.undo(), "undo {i}");
+        }
+        assert!(!t.undo(), "the history ends at the oldest kept step");
+        assert_eq!(t.lr.develop_of(t.id()).unwrap().light.exposure, f64::from(7) * 0.1, "before the oldest kept rotation, after its exposure");
+        t.settle();
+        assert_eq!(t.doc.take_notice(), None);
+        // a cap under two renders: one state at a time, each follow's trim takes the one before
+        let mut t = open();
+        t.doc.history.bytes_cap = render + render / 2;
+        for i in 0..3 {
+            t.rotate_left();
+            t.settle();
+            assert_eq!(t.doc.take_notice(), None, "rotation {i}: a prune, not a reset");
+            assert_eq!(t.rows(), [row("Original", false, false), row("Rotate Left", true, true)], "rotation {i}");
+        }
+        let started = t.base.started();
+        assert!(t.undo());
+        assert!(!t.undo(), "nothing older is left");
+        for _ in 0..3 {
+            t.frame().unwrap();
+        }
+        assert_eq!((t.base.started(), t.doc.take_notice()), (started, None), "no render: the kept state's base is its own");
+    }
+
     #[test]
     fn strokes_between_geometry_changes_undo_and_redo_through_the_exact_states() {
         let mut t = open();

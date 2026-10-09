@@ -229,26 +229,11 @@ impl History {
         self.pending.and_then(|_| self.steps.last()).map(|s| s.label.as_str())
     }
 
-    /// The follow landed and was reconciled as a Pixel step of its own: it joins the Develop step
-    /// waiting for it (one step, Develop and Pixel). Anything else there is a history Studio
-    /// can't name.
+    /// The follow landed and was reconciled: the diff joined its state to the Develop step waiting
+    /// for it (one step, Develop and Pixel). If it didn't, the history is one Studio can't name.
     pub(crate) fn absorb_follow(&mut self) {
-        if self.pending.take().is_none() {
-            return;
-        }
-        let n = self.steps.len();
-        let paired = n >= 2
-            && self.steps[n - 1].pixel_only()
-            && self.steps[n - 1].pixel.len() == 1
-            && !self.steps[n - 2].pixel_only()
-            && self.steps[n - 2].pixel.is_empty();
-        match self.steps.pop().filter(|_| paired) {
-            Some(follow) => {
-                if let Some(step) = self.steps.last_mut() {
-                    step.pixel = follow.pixel;
-                }
-            }
-            None => self.clear(RESET_PIXEL),
+        if self.pending.take().is_some() {
+            self.clear(RESET_PIXEL);
         }
     }
 
@@ -381,9 +366,13 @@ impl History {
         };
         if lost > 0 {
             // every step older than the oldest surviving state goes, Develop steps included: a
-            // contiguous prefix of the whole history, never a hole
-            let keep =
-                now.first().and_then(|first| self.steps.iter().position(|s| s.pixel.iter().any(|p| same(p, first)))).unwrap_or(self.steps.len());
+            // contiguous prefix of the whole history, never a hole. A surviving state no step owns
+            // yet is new (every old one went): all steps are older, but the one waiting for it
+            let waiting = usize::from(self.pending.is_some());
+            let keep = now
+                .first()
+                .and_then(|first| self.steps.iter().position(|s| s.pixel.iter().any(|p| same(p, first))))
+                .unwrap_or(self.steps.len().saturating_sub(waiting));
             self.steps.drain(..keep);
         }
         let old = &old[lost..];
@@ -446,6 +435,19 @@ impl History {
             if redo_count != 0 {
                 return false;
             }
+            // the follow a Develop step waits for (PhotoCraft is barred meanwhile, so the one
+            // state appended is it): it is that step's Pixel half, joined here, before anything
+            // (the budget's prune) could take the step for a Develop-only one
+            if self.pending.is_some()
+                && let [follow] = added
+                && let Some(s) = self.steps.last_mut().filter(|s| s.develop.is_some() && s.pixel.is_empty())
+            {
+                s.pixel = vec![follow.clone()];
+                self.pending = None;
+                self.redo.clear();
+                self.redo_docs.clear();
+                return true;
+            }
             // new edits: one step per state, labelled by the step that made the next state
             let labels = state_of(px, id).map(|st| st.history.entries()).unwrap_or_default();
             for (i, p) in added.iter().enumerate() {
@@ -505,7 +507,9 @@ impl History {
     /// state goes when PhotoCraft drops the state (its next `record`, cap lowered here).
     fn prune(&mut self, st: Option<&mut DocState>) {
         let over = |h: &History| h.steps.len() > HISTORY_STEPS || h.studio_bytes().saturating_add(h.pixel_bytes) > h.bytes_cap;
-        while over(self) && self.steps.first().is_some_and(|s| s.pixel.is_empty()) {
+        // a step waiting for its follow (always the newest) owns no state yet, but isn't Develop-only
+        let waiting = usize::from(self.pending.is_some());
+        while over(self) && self.steps.len() > waiting && self.steps.first().is_some_and(|s| s.pixel.is_empty()) {
             self.steps.remove(0);
         }
         if let Some(st) = st {
