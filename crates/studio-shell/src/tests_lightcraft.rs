@@ -1053,6 +1053,14 @@ fn exiting_with_unsaved_changes_anyway_saves_them_never_over_an_earlier_recovery
     edit(&mut h, 0.5);
     assert_eq!(h.state_mut().save_for_exit(&recovered).unwrap(), Some(second.clone()));
     assert_eq!(studio_doc::Document::open(&second).unwrap().develop.light.exposure, 0.5);
+    // and if its file can't be written (the drive is gone), into Recovered all the same
+    let blocker = dir.join("blocker");
+    std::fs::write(&blocker, b"").unwrap();
+    h.state_mut().document.as_mut().unwrap().path = Some(blocker.join("trip.studio"));
+    edit(&mut h, 0.25);
+    let third = h.state_mut().save_for_exit(&recovered).unwrap().unwrap();
+    assert_eq!(third, recovered.join(format!("{name} 3.studio")));
+    assert_eq!(studio_doc::Document::open(&third).unwrap().develop.light.exposure, 0.25);
     let _ = std::fs::remove_dir_all(&dir);
 }
 

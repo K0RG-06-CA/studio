@@ -394,22 +394,26 @@ impl StudioShell {
     }
 
     /// Last resort when the app exits with unsaved changes anyway (the prompt stops every close it
-    /// sees): save to the document's file, else beside its source file, else into `recovered`,
-    /// never through a dialog. Where it went.
+    /// sees): save to the document's file, else beside its source file; if there is neither, or
+    /// writing there fails (a drive gone), into `recovered`. Never through a dialog. Where it went.
     pub fn save_for_exit(&mut self, recovered: &std::path::Path) -> Result<Option<PathBuf>, String> {
-        let Some(doc) = self.document.as_ref().filter(|d| d.unsaved()) else { return Ok(None) };
-        let path = match doc.path.clone().or_else(|| doc.default_path()) {
-            Some(p) => p,
-            None => {
-                std::fs::create_dir_all(recovered).map_err(|e| format!("{}: {e}", recovered.display()))?;
-                // never over an earlier recovery
-                let ext = studio_doc::file::EXTENSION;
-                (1..)
-                    .map(|n| recovered.join(if n == 1 { format!("{}.{ext}", doc.name) } else { format!("{} {n}.{ext}", doc.name) }))
-                    .find(|p| !p.exists())
-                    .ok_or("no free file name to recover the document under")?
-            }
-        };
+        if !self.unsaved() {
+            return Ok(None);
+        }
+        let own = self.document.as_ref().and_then(|d| d.path.clone().or_else(|| d.default_path()));
+        if let Some(path) = own
+            && self.run_with("document.saveAs", &serde_json::json!({"path": path})).is_ok()
+        {
+            return Ok(Some(path));
+        }
+        let name = self.document.as_ref().map_or_else(String::new, |d| d.name.clone());
+        std::fs::create_dir_all(recovered).map_err(|e| format!("{}: {e}", recovered.display()))?;
+        // never over an earlier recovery
+        let ext = studio_doc::file::EXTENSION;
+        let path = (1..)
+            .map(|n| recovered.join(if n == 1 { format!("{name}.{ext}") } else { format!("{name} {n}.{ext}") }))
+            .find(|p| !p.exists())
+            .ok_or("no free file name to recover the document under")?;
         self.run_with("document.saveAs", &serde_json::json!({"path": path}))?;
         Ok(Some(path))
     }
