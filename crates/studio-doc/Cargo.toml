@@ -16,6 +16,8 @@ photocraft-raster = { workspace = true }
 photocraft-color = { workspace = true }
 photocraft-geom = { workspace = true }
 photocraft-format = { workspace = true }
+# the pixel half's home while the document is open (its session, with its own undo)
+photocraft-engine = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 

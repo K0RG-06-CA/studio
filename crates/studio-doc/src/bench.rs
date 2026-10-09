@@ -28,9 +28,10 @@ fn samples() -> Vec<PathBuf> {
 
 /// Sync until the base shows the document's settings; how long that took.
 fn settle(base: &mut Base, session: &mut Session, doc: &mut Document) -> Duration {
+    let mut pixel = photocraft_engine::Session::new();
     let t0 = Instant::now();
     loop {
-        base.sync(session, doc).unwrap();
+        base.sync(session, &mut pixel, doc).unwrap();
         if base.up_to_date(doc) {
             return t0.elapsed();
         }

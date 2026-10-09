@@ -15,6 +15,8 @@ eframe = { workspace = true, features = ["default_fonts", "wgpu", "accesskit", "
 egui = { workspace = true }
 lightcraft-ui-egui = { workspace = true }
 lightcraft-engine = { workspace = true }
+photocraft-ui-egui = { workspace = true }
+photocraft-engine = { workspace = true }
 rfd = { workspace = true }
 # the smoke script's command parameters
 serde_json = { workspace = true }

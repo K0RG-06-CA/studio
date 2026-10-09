@@ -12,8 +12,10 @@ use eframe::wgpu::Backends;
 use lightcraft_engine::Session;
 use lightcraft_ui_egui::panels::library_problem::LibraryProblem;
 use lightcraft_ui_egui::{LightcraftApp, Services, UiState};
+use photocraft_ui_egui::PhotocraftApp;
 use studio_shell::StudioShell;
 use studio_shell::lightroom::Lightroom;
+use studio_shell::pixel::Pixel;
 
 /// Storage key for the shell state (active persona and every persona's panel layout).
 const SHELL_KEY: &str = "studio.shell";
@@ -155,6 +157,12 @@ fn main() -> ExitCode {
                 rfd::FileDialog::new().set_title("Save As").set_file_name(file).add_filter("Studio document", &[ext]).save_file()
             }));
             shell.lightroom = Some(lightroom(open_library(library, smoke), cc.storage.and_then(|s| eframe::get_value(s, LIGHTCRAFT_KEY))));
+            // PhotoCraft: Pixel's editor and the open document's pixels; its GPU canvas on wgpu
+            let mut photocraft = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
+            if let Some(rs) = cc.wgpu_render_state.as_ref() {
+                photocraft.set_wgpu(rs.clone());
+            }
+            shell.pixel = Some(Pixel::new(photocraft));
             // the document of the last launch (a deleted one is forgotten, see `reopen`)
             if let Err(e) = shell.reopen() {
                 eprintln!("studio: reopening the document failed: {e}");
@@ -212,7 +220,8 @@ mod tests {
         app.ui.right_width = 333.0;
         app.ui.open_sections = vec!["color".into()];
         app.ui.settings.gpu = false;
-        let mut shell = StudioShell { lightroom: Some(Lightroom::new(app)), ..Default::default() };
+        let pixel = Pixel::new(PhotocraftApp::new(photocraft_engine::Session::new(), Default::default()));
+        let mut shell = StudioShell { lightroom: Some(Lightroom::new(app)), pixel: Some(pixel), ..Default::default() };
         shell.run("persona.develop").unwrap();
         let mut storage = Memory::default();
         App(shell, None, PathBuf::new()).save(&mut storage);

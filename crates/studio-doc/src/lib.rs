@@ -10,6 +10,7 @@ pub mod base;
 mod bench;
 pub mod file;
 pub mod open;
+pub mod pixel;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -59,6 +60,8 @@ pub struct Document {
     pub path: Option<PathBuf>,
     pub revision: u64,
     pub saved_revision: u64,
+    /// Where pixel lives while the document is open: PhotoCraft's session (see [pixel]).
+    pub(crate) link: pixel::Link,
 }
 
 /// `document.json`: everything but the layer tree (which is a `.pcraft` bundle next to it).
@@ -106,6 +109,7 @@ impl Document {
             path: None,
             revision: 0,
             saved_revision: 0,
+            link: Default::default(),
         })
     }
 

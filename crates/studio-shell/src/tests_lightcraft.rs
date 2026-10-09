@@ -122,11 +122,16 @@ fn spike_b_right_panel_twice_in_one_frame_clashes() {
 use crate::lightroom::Lightroom;
 use crate::{Persona, StudioShell};
 
+/// PhotoCraft's editor on an empty session, as the app starts it (no disk, CPU canvas).
+pub(crate) fn pixel() -> crate::pixel::Pixel {
+    crate::pixel::Pixel::new(photocraft_ui_egui::PhotocraftApp::new(photocraft_engine::Session::new(), Default::default()))
+}
+
 /// The shell running LightCraft on its in-memory demo library (no disk, no GPU work).
 pub(crate) fn demo_shell() -> StudioShell {
     let mut app = LightcraftApp::new(lightcraft_engine::Session::with_demo(), Services::default());
     app.ui.settings.gpu = false;
-    let mut shell = StudioShell { lightroom: Some(Lightroom::new(app)), ..Default::default() };
+    let mut shell = StudioShell { lightroom: Some(Lightroom::new(app)), pixel: Some(pixel()), ..Default::default() };
     // the demo photos are 24 MP: a document's base renders at 600 px here (CI's runners take a
     // minute or more for the full size on the CPU)
     shell.base.max_edge = Some(600);
@@ -369,7 +374,7 @@ fn leaving_develop_saves_its_edits() {
     app.ui.settings.gpu = false;
     let first = app.session.catalog.photos().next().map(|p| p.id);
     app.session.selection.active = first;
-    let mut shell = StudioShell { lightroom: Some(Lightroom::new(app)), ..Default::default() };
+    let mut shell = StudioShell { lightroom: Some(Lightroom::new(app)), pixel: Some(pixel()), ..Default::default() };
     shell.run("persona.develop").unwrap();
     let log = dir.join("catalog.log");
     let size = || std::fs::metadata(&log).map(|m| m.len()).unwrap_or(0);
@@ -516,7 +521,7 @@ fn closing_from_pixel_with_unsaved_changes_asks_first() {
     session.open_library_in(stores, false).unwrap();
     let mut app = LightcraftApp::new(session, Services::default());
     app.ui.settings.gpu = false;
-    let shell = StudioShell { lightroom: Some(Lightroom::new(app)), ..Default::default() };
+    let shell = StudioShell { lightroom: Some(Lightroom::new(app)), pixel: Some(pixel()), ..Default::default() };
     let mut h = Harness::builder().with_size([1400.0, 900.0]).build_ui_state(|ui, shell: &mut StudioShell| shell.ui(ui), shell);
     h.run_steps(5);
     // a change that can't be written, then off to Pixel and close the window
@@ -591,7 +596,7 @@ fn files_dropped_on_library_are_imported() {
     session.open_library(dir.join("lib"), false).unwrap();
     let mut app = LightcraftApp::new(session, Services::default());
     app.ui.settings.gpu = false;
-    let shell = StudioShell { lightroom: Some(Lightroom::new(app)), ..Default::default() };
+    let shell = StudioShell { lightroom: Some(Lightroom::new(app)), pixel: Some(pixel()), ..Default::default() };
     let mut h = Harness::builder().with_size([1400.0, 900.0]).build_ui_state(|ui, shell: &mut StudioShell| shell.ui(ui), shell);
     h.run_steps(5);
     assert!(lc(&h).session.catalog.is_empty());
@@ -639,14 +644,14 @@ fn history_lists_develop_steps() {
 // --- Milestone 3: the shared document in the shell ---
 
 /// Pick the first demo photo (Library's selection) so `document.new` has one.
-fn pick_first(h: &mut Harness<'_, StudioShell>) {
+pub(crate) fn pick_first(h: &mut Harness<'_, StudioShell>) {
     let lr = h.state_mut().lightroom.as_mut().unwrap();
     lr.app.session.selection.active = lr.app.session.catalog.photos().next().map(|p| p.id);
 }
 
 /// Run frames until the document's base layer is rendered for its current settings (one frame
 /// first: the document mirrors the catalog during a frame).
-fn settle_base(h: &mut Harness<'_, StudioShell>) {
+pub(crate) fn settle_base(h: &mut Harness<'_, StudioShell>) {
     let t0 = std::time::Instant::now();
     h.run_steps(1);
     while !h.state().base_up_to_date() {
@@ -756,7 +761,8 @@ fn a_saved_document_comes_back_after_a_relaunch() {
     drop(h);
     let mut shell = StudioShell::restore(Some(ron::from_str(&saved).unwrap()));
     assert!(shell.document.is_none() && shell.document_path.is_some());
-    shell.lightroom = demo_shell().lightroom;
+    let demo = demo_shell();
+    (shell.lightroom, shell.pixel) = (demo.lightroom, demo.pixel);
     shell.base.max_edge = Some(600);
     shell.reopen().unwrap();
     let doc = shell.document.as_ref().unwrap();
@@ -826,7 +832,7 @@ fn click_button(h: &mut Harness<'_, StudioShell>, label: &str) {
     h.run_steps(2);
 }
 
-fn temp_dir(name: &str) -> std::path::PathBuf {
+pub(crate) fn temp_dir(name: &str) -> std::path::PathBuf {
     let dir = std::env::temp_dir().join(format!("studio-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();

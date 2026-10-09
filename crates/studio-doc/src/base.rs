@@ -11,7 +11,7 @@ use lightcraft_engine::develop::DevelopSettings;
 use lightcraft_engine::media::RenderResult;
 use lightcraft_engine::pipeline::{DeepImage, DeepSamples, OutputDepth, Rendered, StageCache};
 use photocraft_color::PixelFormat;
-use photocraft_doc::LayerContent;
+use photocraft_engine::Session as PixelSession;
 use photocraft_geom::{Rect, Size};
 use photocraft_raster::Surface;
 
@@ -79,14 +79,15 @@ impl Base {
     }
 
     /// Once per frame: mirror the catalog's settings into `doc`, take a finished render into the
-    /// base layer, and start one when the base is stale and no slider drag is open (a drag then
-    /// renders once, at release). Errors are LightCraft's (a photo gone from the library, a
+    /// base layer (in PhotoCraft's session, `pixel`, the pixels' one home), and start one when
+    /// the base is stale and no slider drag is open (a drag then renders once, at release).
+    /// Errors are LightCraft's (a photo gone from the library, a
     /// decode that failed); the base keeps its last pixels, and a failed render is reported again
     /// every frame, not retried, until the settings change.
-    pub fn sync(&mut self, session: &mut Session, doc: &mut Document) -> Result<(), String> {
+    pub fn sync(&mut self, session: &mut Session, pixel: &mut PixelSession, doc: &mut Document) -> Result<(), String> {
         self.mirror(session, doc);
         let want = doc.develop.hash64();
-        if let Err(e) = self.take(session, doc) {
+        if let Err(e) = self.take(session, pixel, doc) {
             self.failed = Some((want, e.clone()));
             return Err(e);
         }
@@ -150,7 +151,7 @@ impl Base {
     /// straighten and rotation change it). One for settings edited since it started is dropped,
     /// pixels or error: the next `sync` renders the newest settings (edits made meanwhile
     /// coalesce into that one render).
-    fn take(&mut self, session: &mut Session, doc: &mut Document) -> Result<(), String> {
+    fn take(&mut self, session: &mut Session, pixel: &mut PixelSession, doc: &mut Document) -> Result<(), String> {
         let Some((want, rx)) = &self.pending else { return Ok(()) };
         let (result, converted) = match rx.try_recv() {
             Ok(r) => r,
@@ -167,10 +168,9 @@ impl Base {
             return Ok(());
         }
         let (surface, size) = converted?;
-        let base = doc.base_layer_mut().ok_or("the document has no base layer")?;
-        base.content = LayerContent::Raster(surface);
-        // derived pixels, not an edit: the revision (and so "unsaved") doesn't move
-        doc.pixel.size = size;
+        // into PhotoCraft, the pixels' one home: derived pixels, not an edit (the revision, and so
+        // "unsaved", doesn't move)
+        doc.write_base(pixel, surface, size)?;
         self.shown = Some(want);
         Ok(())
     }
@@ -238,10 +238,10 @@ mod tests {
     }
 
     /// Sync until the base is up to date (the render runs on a thread).
-    fn settle(base: &mut Base, session: &mut Session, doc: &mut Document) {
+    fn settle(base: &mut Base, session: &mut Session, pixel: &mut PixelSession, doc: &mut Document) {
         let t0 = Instant::now();
         loop {
-            base.sync(session, doc).unwrap();
+            base.sync(session, pixel, doc).unwrap();
             if base.up_to_date(doc) {
                 return;
             }
@@ -306,29 +306,31 @@ mod tests {
     #[test]
     fn edits_during_a_render_coalesce_and_its_stale_result_is_dropped() {
         let (mut session, mut doc, mut base) = open();
+        let mut pixel = PixelSession::new();
         let id = doc.source.photo;
-        base.sync(&mut session, &mut doc).unwrap();
+        base.sync(&mut session, &mut pixel, &mut doc).unwrap();
         assert!(base.rendering());
         // three edits while the first render runs: no second render alongside it
         for e in [0.5, 1.0, 1.5] {
             set_exposure(&mut session, id, e);
-            base.sync(&mut session, &mut doc).unwrap();
+            base.sync(&mut session, &mut pixel, &mut doc).unwrap();
             assert_eq!((doc.develop.light.exposure, base.started()), (e, 1));
         }
         // the first finishes for superseded settings: dropped, and the newest renders next
         let t0 = Instant::now();
         while base.started() == 1 {
             assert!(t0.elapsed() < Duration::from_secs(300), "the first render never finished");
-            base.sync(&mut session, &mut doc).unwrap();
+            base.sync(&mut session, &mut pixel, &mut doc).unwrap();
             std::thread::sleep(Duration::from_millis(2));
         }
         assert_eq!(doc.base_layer().unwrap().surface().unwrap().tile_count(), 0, "the stale render never reached the base");
-        settle(&mut base, &mut session, &mut doc);
+        settle(&mut base, &mut session, &mut pixel, &mut doc);
         assert_eq!(base.started(), 2, "one render for all three edits");
         // the same pixels as a base rendered straight at the newest settings
         let (mut other_session, mut other, mut other_base) = open();
+        let mut other_pixel = PixelSession::new();
         set_exposure(&mut other_session, id, 1.5);
-        settle(&mut other_base, &mut other_session, &mut other);
+        settle(&mut other_base, &mut other_session, &mut other_pixel, &mut other);
         let (ours, theirs) =
             (photocraft_compose::flatten(base.current(&doc).unwrap()), photocraft_compose::flatten(other_base.current(&other).unwrap()));
         assert_eq!(ours.px.len(), theirs.px.len());
@@ -339,32 +341,34 @@ mod tests {
     #[test]
     fn reading_the_base_waits_until_it_shows_the_current_settings() {
         let (mut session, mut doc, mut base) = open();
+        let mut pixel = PixelSession::new();
         let id = doc.source.photo;
         assert!(base.current(&doc).is_err(), "nothing rendered yet");
-        base.sync(&mut session, &mut doc).unwrap();
+        base.sync(&mut session, &mut pixel, &mut doc).unwrap();
         assert!(base.rendering() && base.current(&doc).is_err(), "in flight");
-        settle(&mut base, &mut session, &mut doc);
+        settle(&mut base, &mut session, &mut pixel, &mut doc);
         let before = photocraft_compose::flatten(base.current(&doc).unwrap()).px;
         // an edit: stale from the sync that sees it until its render is in
         set_exposure(&mut session, id, 2.0);
-        base.sync(&mut session, &mut doc).unwrap();
+        base.sync(&mut session, &mut pixel, &mut doc).unwrap();
         let e = base.current(&doc).unwrap_err();
         assert!(e.contains("still rendering"), "{e}");
-        settle(&mut base, &mut session, &mut doc);
+        settle(&mut base, &mut session, &mut pixel, &mut doc);
         let after = photocraft_compose::flatten(base.current(&doc).unwrap()).px;
         assert!(after.len() == before.len() && after != before, "the new render, not the old one");
         // a render that fails leaves the base stale: never readable as if current
         doc.source.photo = PhotoId(u64::MAX);
         doc.develop.light.exposure = -1.0;
-        assert!(base.sync(&mut session, &mut doc).is_err());
+        assert!(base.sync(&mut session, &mut pixel, &mut doc).is_err());
         assert!(base.current(&doc).is_err());
     }
 
     #[test]
     fn the_first_sync_renders_the_photo_into_the_base_as_lightcraft_renders_it() {
         let (mut session, mut doc, mut base) = open();
+        let mut pixel = PixelSession::new();
         assert!(doc.base_layer().unwrap().surface().unwrap().tile_count() == 0);
-        settle(&mut base, &mut session, &mut doc);
+        settle(&mut base, &mut session, &mut pixel, &mut doc);
         let (w, h) = (doc.pixel.size.width as usize, doc.pixel.size.height as usize);
         assert_eq!((w, h), (600, 400), "capped at 600 on the long side, never scaled up");
         let theirs = session.render_now(doc.source.photo, w, h).unwrap().image;
@@ -381,20 +385,22 @@ mod tests {
     #[test]
     fn changing_develop_settings_in_the_catalog_re_renders_the_base() {
         let (mut session, mut doc, mut base) = open();
-        settle(&mut base, &mut session, &mut doc);
+        let mut pixel = PixelSession::new();
+        settle(&mut base, &mut session, &mut pixel, &mut doc);
         let before = mean_rgb(&doc);
         let (id, rev) = (doc.source.photo, doc.revision);
         let mut s = (*session.develop_of(id).unwrap()).clone();
         s.light.exposure = 2.0;
         session.set_develop(id, s.clone(), "Exposure").unwrap();
-        base.sync(&mut session, &mut doc).unwrap();
+        base.sync(&mut session, &mut pixel, &mut doc).unwrap();
         assert_eq!((doc.develop.light.exposure, base.rendering(), base.up_to_date(&doc)), (2.0, true, false));
         assert!(doc.revision > rev, "mirroring the settings is a change");
-        settle(&mut base, &mut session, &mut doc);
+        settle(&mut base, &mut session, &mut pixel, &mut doc);
         assert!(mean_rgb(&doc) > before + 0.05, "{before} → {}", mean_rgb(&doc));
         // without a sync the document doesn't know (the mirror is the sync's job)
         let (mut other_session, mut other, mut other_base) = open();
-        settle(&mut other_base, &mut other_session, &mut other);
+        let mut other_pixel = PixelSession::new();
+        settle(&mut other_base, &mut other_session, &mut other_pixel, &mut other);
         other_session.set_develop(id, s, "Exposure").unwrap();
         assert_eq!(other.develop.light.exposure, 0.0);
         assert!((mean_rgb(&other) - before).abs() < 1e-6);
@@ -403,7 +409,8 @@ mod tests {
     #[test]
     fn a_slider_drag_renders_once_at_release() {
         let (mut session, mut doc, mut base) = open();
-        settle(&mut base, &mut session, &mut doc);
+        let mut pixel = PixelSession::new();
+        settle(&mut base, &mut session, &mut pixel, &mut doc);
         let id = doc.source.photo;
         session.selection.active = Some(id);
         session.begin_interaction("Exposure").unwrap();
@@ -411,14 +418,14 @@ mod tests {
             let mut s = (*session.develop_of(id).unwrap()).clone();
             s.light.exposure = e;
             session.set_develop(id, s, "Exposure").unwrap();
-            base.sync(&mut session, &mut doc).unwrap();
+            base.sync(&mut session, &mut pixel, &mut doc).unwrap();
             assert_eq!(doc.develop.light.exposure, e, "mirrored during the drag");
             assert!(!base.rendering() && !base.up_to_date(&doc), "no render while dragging");
         }
         session.end_interaction().unwrap();
-        base.sync(&mut session, &mut doc).unwrap();
+        base.sync(&mut session, &mut pixel, &mut doc).unwrap();
         assert!(base.rendering());
-        settle(&mut base, &mut session, &mut doc);
+        settle(&mut base, &mut session, &mut pixel, &mut doc);
         assert!(doc.develop.light.exposure == 1.5 && base.up_to_date(&doc));
         assert_eq!(base.started(), 2, "the first render, and one for the whole drag");
     }
@@ -446,9 +453,10 @@ mod tests {
         // the file disappears before the first render
         std::fs::remove_file(&png).unwrap();
         let mut base = Base::new();
+        let mut pixel = PixelSession::new();
         let t0 = Instant::now();
         let first = loop {
-            match base.sync(&mut session, &mut doc) {
+            match base.sync(&mut session, &mut pixel, &mut doc) {
                 Err(e) => break e,
                 Ok(()) => {
                     assert!(base.rendering() && t0.elapsed() < Duration::from_secs(60), "the render never failed");
@@ -458,7 +466,7 @@ mod tests {
         };
         assert_eq!(base.started(), 1);
         for _ in 0..3 {
-            assert_eq!(base.sync(&mut session, &mut doc).unwrap_err(), first, "reported again");
+            assert_eq!(base.sync(&mut session, &mut pixel, &mut doc).unwrap_err(), first, "reported again");
             assert!(!base.rendering(), "not tried again");
         }
         assert_eq!(base.started(), 1);
@@ -466,7 +474,7 @@ mod tests {
         let mut s = doc.develop.clone();
         s.light.exposure = 1.0;
         session.set_develop(id, s, "Exposure").unwrap();
-        base.sync(&mut session, &mut doc).unwrap();
+        base.sync(&mut session, &mut pixel, &mut doc).unwrap();
         assert!(base.rendering() && base.started() == 2);
         session.close_library().unwrap();
         let _ = std::fs::remove_dir_all(&dir);
@@ -475,7 +483,8 @@ mod tests {
     #[test]
     fn a_crop_resizes_the_document_with_the_base() {
         let (mut session, mut doc, mut base) = open_native();
-        settle(&mut base, &mut session, &mut doc);
+        let mut pixel = PixelSession::new();
+        settle(&mut base, &mut session, &mut pixel, &mut doc);
         let full = doc.pixel.size;
         let photo = session.catalog.photo(doc.source.photo).unwrap();
         assert_eq!((full.width, full.height), (photo.width, photo.height), "native size");
@@ -484,7 +493,7 @@ mod tests {
         s.crop.geometry.rect.x1 = 0.5;
         s.crop.geometry.rect.y1 = 0.5;
         session.set_develop(id, s.clone(), "Crop").unwrap();
-        settle(&mut base, &mut session, &mut doc);
+        settle(&mut base, &mut session, &mut pixel, &mut doc);
         let half = doc.pixel.size;
         assert!(
             half.width.abs_diff(full.width / 2) <= 1 && half.height.abs_diff(full.height / 2) <= 1,
@@ -497,7 +506,7 @@ mod tests {
         s.crop = Default::default();
         session.set_develop(id, s, "Uncrop").unwrap();
         session.execute("photo.rotateLeft", &serde_json::json!({"ids": [id.0]})).unwrap();
-        settle(&mut base, &mut session, &mut doc);
+        settle(&mut base, &mut session, &mut pixel, &mut doc);
         let turned = doc.pixel.size;
         assert!(turned.width.abs_diff(full.height) <= 1 && turned.height.abs_diff(full.width) <= 1, "{full:?} → {turned:?}");
     }
@@ -538,8 +547,9 @@ mod tests {
     #[test]
     fn a_photo_gone_from_the_library_is_an_error_not_a_crash() {
         let (mut session, mut doc, mut base) = open();
+        let mut pixel = PixelSession::new();
         doc.source.photo = PhotoId(u64::MAX);
-        let e = base.sync(&mut session, &mut doc).unwrap_err();
+        let e = base.sync(&mut session, &mut pixel, &mut doc).unwrap_err();
         assert!(e.contains("isn't in the library"), "{e}");
         assert!(!base.rendering());
     }

@@ -115,6 +115,54 @@ fn spike_b_photocraft_and_lightcraft_fonts_live_in_one_context() {
     assert!(text.contains("Presets"), "{text}");
 }
 
+// --- Studio with PhotoCraft as the home of the document's pixels ---
+
+use crate::tests_lightcraft::{pick_first, settle_base, studio, temp_dir};
+
+/// A Pixel edit, as PhotoCraft's panels make one: a new layer on top.
+pub(crate) fn add_layer(h: &mut Harness<'_, crate::StudioShell>, name: &str) {
+    let session = &mut h.state_mut().pixel.as_mut().unwrap().app.session;
+    session
+        .edit(name, |d, active| {
+            let l = Layer::raster(name, PixelFormat::RGBA16);
+            *active = Some(l.id);
+            d.layers.push(l);
+            Ok(())
+        })
+        .unwrap();
+}
+
+fn layer_names(doc: &studio_doc::Document) -> Vec<String> {
+    doc.pixel.layers.iter().map(|l| l.name.clone()).collect()
+}
+
+#[test]
+fn pixel_edits_live_in_photocraft_and_are_what_saving_writes() {
+    let dir = temp_dir("pixel-save");
+    let path = dir.join("trip.studio");
+    let mut h = studio();
+    h.run_steps(3);
+    pick_first(&mut h);
+    h.state_mut().run("document.new").unwrap();
+    // the new document's pixels went to PhotoCraft, and the base renders into them there
+    settle_base(&mut h);
+    let pc = &h.state().pixel.as_ref().unwrap().app.session;
+    assert_eq!(pc.documents().len(), 1);
+    assert!(pc.active().unwrap().doc.layers[0].surface().unwrap().tile_count() > 0, "the render is in PhotoCraft");
+    h.state_mut().run_with("document.saveAs", &serde_json::json!({"path": path})).unwrap();
+    // an edit in PhotoCraft, saved without a frame in between
+    add_layer(&mut h, "Paint");
+    h.state_mut().run("document.save").unwrap();
+    assert_eq!(layer_names(&studio_doc::Document::open(&path).unwrap()), ["Develop", "Paint"]);
+    // and one the app exits with (no frame, no prompt): recovered from PhotoCraft too
+    add_layer(&mut h, "Late");
+    assert_eq!(h.state_mut().save_for_exit(&dir.join("Recovered")).unwrap(), Some(path.clone()));
+    assert_eq!(layer_names(&studio_doc::Document::open(&path).unwrap()), ["Develop", "Paint", "Late"]);
+    // closing the document takes it out of PhotoCraft
+    h.state_mut().run("document.close").unwrap();
+    assert!(h.state().pixel.as_ref().unwrap().app.session.documents().is_empty());
+}
+
 fn harness_app() -> PhotocraftApp {
     let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Services::default());
     app.session.add_document(pixel_doc(), None);

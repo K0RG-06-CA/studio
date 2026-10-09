@@ -19,3 +19,17 @@
 //!     photocraft_ui_egui::panels::toolbar(app, ui);
 //! }
 //! ```
+
+use photocraft_ui_egui::PhotocraftApp;
+
+pub struct Pixel {
+    /// PhotoCraft's editor; its session holds the open document's pixels (see
+    /// `studio_doc::pixel`).
+    pub app: PhotocraftApp,
+}
+
+impl Pixel {
+    pub fn new(app: PhotocraftApp) -> Self {
+        Pixel { app }
+    }
+}

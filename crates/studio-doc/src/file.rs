@@ -50,7 +50,17 @@ impl Document {
         if !pixel.layers.iter().any(crate::is_base) {
             return Err("the layer tree has no Develop base layer".into());
         }
-        Ok(Document { name: header.name, source, develop: header.develop, film: header.film, pixel, path: None, revision: 0, saved_revision: 0 })
+        Ok(Document {
+            name: header.name,
+            source,
+            develop: header.develop,
+            film: header.film,
+            pixel,
+            path: None,
+            revision: 0,
+            saved_revision: 0,
+            link: Default::default(),
+        })
     }
 
     pub fn open(path: &Path) -> Result<Document, String> {
@@ -100,9 +110,9 @@ mod tests {
         lightcraft_engine::gpu::set_enabled(false);
         let (mut session, id) = demo();
         let mut doc = Document::from_photo(&session, id).unwrap();
-        let mut base = Base::new();
+        let (mut base, mut pixel) = (Base::new(), photocraft_engine::Session::new());
         while !base.up_to_date(&doc) {
-            base.sync(&mut session, &mut doc).unwrap();
+            base.sync(&mut session, &mut pixel, &mut doc).unwrap();
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
         let mut over = Layer::raster("Over", PixelFormat::RGBA16);

@@ -39,7 +39,13 @@ See [`PRD.md`](PRD.md) → *Milestones for Claude Code*.
     with PhotoCraft's own undo + `clear_redo`; Free Transform / type sessions are public
     (`app.ui.transform`, `app.ui.text_edit`), stroke and drag state isn't (a held pointer button
     stands in); the crop rectangle is readable (`crop.geometry.rect`). L1 doctest in `pixel.rs`.
-  - [ ] 2. `studio-doc` pixel module: one source of truth (PhotoCraft's session), copy-back
+  - [x] 2. One source of truth: while a document is open its pixels live in PhotoCraft's session
+    (`studio_doc::pixel`; the shell's `pixel: Option<Pixel>` holds PhotoCraft's editor, set by the
+    app like `lightroom`). `Document::pixel` is the copy Studio saves: `copy_back` (an edit,
+    `revision` moves; selecting a layer doesn't) and `write_base` (`Base::take` puts renders into
+    PhotoCraft, no history step, not an edit). PhotoCraft's own "unsaved" is kept clear (its close
+    guard and autosave stay quiet). `document.new/open` attach, `close` takes it out;
+    `unsaved()` copies first, so saves, the prompt and `save_for_exit` see Pixel edits.
   - [ ] 3. Render register (pruned), undo restore, Pixel layers anchored across crops
   - [ ] 4. Lock guard (everything but `visible`)
   - [ ] 5. Renders held during a gesture

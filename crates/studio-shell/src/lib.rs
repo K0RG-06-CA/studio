@@ -70,6 +70,10 @@ pub struct StudioShell {
     /// in tests of the shell alone, which then shows placeholders.
     #[serde(skip)]
     pub lightroom: Option<lightroom::Lightroom>,
+    /// PhotoCraft, which runs Pixel and is the home of the open document's pixels (its layers,
+    /// their undo, the base layer's renders). Set by the app like `lightroom`.
+    #[serde(skip)]
+    pub pixel: Option<pixel::Pixel>,
     /// The open document (milestone 3): one library photo's develop settings as a live base layer
     /// under PhotoCraft's layer tree. Reopened at launch from `document_path`.
     #[serde(skip)]
@@ -122,6 +126,7 @@ impl Default for StudioShell {
             persona: Persona::default(),
             layouts: Persona::ALL.map(dock::default_layout),
             lightroom: None,
+            pixel: None,
             document: None,
             base: Base::new(),
             base_error: None,
@@ -276,6 +281,9 @@ impl StudioShell {
             }
             "close" => {
                 self.document.take().ok_or("no document is open")?;
+                if let Some(px) = &mut self.pixel {
+                    studio_doc::pixel::close_all(&mut px.app.session);
+                }
                 self.document_path = None;
                 Ok(())
             }
@@ -286,7 +294,8 @@ impl StudioShell {
     /// `document.save` / `document.saveAs {path}` (`to`).
     fn save(&mut self, save_as: bool, to: Option<PathBuf>) -> Result<(), String> {
         let doc = self.document.as_mut().ok_or("no document is open")?;
-        // an edit made since this frame's sync (LightCraft's panels run after it)
+        // an edit made since this frame's sync (LightCraft's panels run after it; PhotoCraft's
+        // were copied by `unsaved`, which every document command asks first)
         if let Some(lr) = &self.lightroom {
             self.base.mirror(&lr.app.session, doc);
         }
@@ -306,8 +315,12 @@ impl StudioShell {
         Ok(())
     }
 
-    fn replace(&mut self, doc: Document) -> Result<(), String> {
+    fn replace(&mut self, mut doc: Document) -> Result<(), String> {
         self.document_path = doc.path.clone();
+        // its pixels' home from now on (whatever PhotoCraft held goes)
+        if let Some(px) = &mut self.pixel {
+            doc.attach(&mut px.app.session);
+        }
         self.document = Some(doc);
         self.base = self.base.renewed();
         self.base_error = None;
@@ -328,19 +341,23 @@ impl StudioShell {
 
     /// The document's base layer follows its photo's develop settings; once per frame.
     fn document_tick(&mut self) {
-        if let (Some(doc), Some(lr)) = (&mut self.document, &mut self.lightroom)
-            && let Err(e) = self.base.sync(&mut lr.app.session, doc)
-        {
-            self.base_error = Some(e);
+        if let (Some(doc), Some(lr), Some(px)) = (&mut self.document, &mut self.lightroom, &mut self.pixel) {
+            if let Err(e) = self.base.sync(&mut lr.app.session, &mut px.app.session, doc) {
+                self.base_error = Some(e);
+            }
+            doc.copy_back(&mut px.app.session);
         }
     }
 
-    /// The open document has unsaved changes, counting an edit LightCraft made since the last sync
-    /// (its panels edit after it, later in the frame): mirrored first, so a close or a replace
-    /// right after an edit still asks.
+    /// The open document has unsaved changes, counting an edit LightCraft or PhotoCraft made since
+    /// the last sync (their panels edit after it, later in the frame): copied first, so a close or
+    /// a replace right after an edit still asks.
     fn unsaved(&mut self) -> bool {
         if let (Some(doc), Some(lr)) = (&mut self.document, &self.lightroom) {
             self.base.mirror(&lr.app.session, doc);
+        }
+        if let (Some(doc), Some(px)) = (&mut self.document, &mut self.pixel) {
+            doc.copy_back(&mut px.app.session);
         }
         self.document.as_ref().is_some_and(Document::unsaved)
     }
