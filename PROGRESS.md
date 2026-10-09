@@ -96,7 +96,8 @@ Former hand checks and the tests that replaced them:
 
 ## Must fix before milestone 4 (done)
 
-- **A never-saved document is dropped silently on exit**, and a failed exit save only goes to stderr
+- [x] **Done: an unsaved document always asks (save, don't save, cancel) and a failed save is shown.**
+  Was: **A never-saved document is dropped silently on exit**, and a failed exit save only goes to stderr
   (`apps/studio/src/main.rs` `on_exit`). Harmless today, since a document holds only develop settings
   and those live in the library, but the moment M4 adds pixel layers it is data loss: M4 must start
   with a close/quit prompt (save, discard, cancel) for an unsaved document, and a visible error when
@@ -108,8 +109,10 @@ Former hand checks and the tests that replaced them:
   - [x] Visible save error (`document.dismissError`); `on_exit` saves whatever is still unsaved, a
     never-saved document into `<library>/Recovered/` (no dialog, never over an earlier one)
   - [x] Offscreen renders of the prompt and the error (`prompt.png`, `save-error.png`); smoke script
-    edits, quits (must stop at the prompt), cancels and saves (script extended, not yet run)
-- **Full-size 16-bit base render is CPU-only and slow** (CI runners took over 60 s for 24 MP). Measure
+    edits, quits (must stop at the prompt), cancels and saves; smoke test passes on DX12 (2026-10-09,
+    both launches, the relaunch reopens the document in Develop)
+- [x] **Done: full-size base re-render after an edit ~0.9 s → ~0.44 s (release, 24 MP S9) through
+  LightCraft's `StageCache`.** Was: **Full-size 16-bit base render is CPU-only and slow** (CI runners took over 60 s for 24 MP). Measure
   it on this machine with a real S9 file and fix before Pixel ships (draft size while editing, GPU
   16-bit, or render in bands).
   - [x] Benchmark `bench_base_render` (`crates/studio-doc/src/bench.rs`, opt-in, skips without
