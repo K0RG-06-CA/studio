@@ -421,8 +421,8 @@ the imported file: Ctrl+S is Save As.
   - document A edited, document B opened, undo in B does nothing to A (A's settings unchanged);
   - document open on photo A, a Develop edit made to photo B (another photo, not the document's):
     no Studio step; Ctrl+Z touches neither A nor B (B's edit stays, A unchanged);
-  - undo during a slider drag ends the drag (one step) then undoes it; undo mid-stroke (pointer
-    held) → the stroke is committed first;
+  - undo during a slider drag ends the drag (one step) then undoes it (undo mid-stroke is a
+    shell test: the stroke lives in PhotoCraft's UI, see Task 3);
   - `px.execute("edit.undo")` directly, with a Develop step after the Pixel step → Studio jump
     (Develop step undone too, lists consistent, one copy_back);
   - a fold (`purge_last` + relabel) of the newest Pixel step is merged; a fold reaching across a
@@ -494,7 +494,8 @@ the imported file: Ctrl+S is Save As.
   and vice versa; Shift+Ctrl+Z redoes; the History tab lists both kinds in order and a click
   jumps (settings + layers); Free Transform nudge undo unchanged; Ctrl+Z in a LightCraft text
   field leaves the history alone; with no document open Ctrl+Z in Library undoes a rating
-  (LightCraft's own); offscreen render `pixel-history.png` looked at.
+  (LightCraft's own); undo mid-stroke (pointer held) → the stroke is committed first, then
+  undone (moved here from Task 1); offscreen render `pixel-history.png` looked at.
 
 ### Task 4 — A document without a photo: PNG/JPEG/TIFF/PSD straight into Pixel
 

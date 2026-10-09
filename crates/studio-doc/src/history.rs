@@ -1200,4 +1200,43 @@ mod tests {
         assert_eq!(doc.take_notice(), None);
         assert_eq!(layers(&doc), ["Develop"]);
     }
+
+    /// Review: PhotoCraft's own undo is taken as Studio's only when the steps it undid are all
+    /// Pixel and on top; with a Develop step above them it is put back and done as a jump; and
+    /// when what it left doesn't match (the current document replaced meanwhile) the history
+    /// starts over.
+    #[test]
+    fn photocrafts_own_undo_is_accepted_only_for_pixel_steps_on_top() {
+        let (mut lr, mut px, mut doc) = open();
+        let id = doc.source.photo;
+        paint(&mut px, "Brush", 1, 1);
+        tick(&mut doc, &lr, &mut px);
+        paint(&mut px, "Pencil", 2, 2);
+        tick(&mut doc, &lr, &mut px);
+        // two Pixel steps on top: accepted as is, no jump requested
+        assert!(px.undo() && px.undo());
+        tick(&mut doc, &lr, &mut px);
+        assert_eq!((labels(&doc), doc.history.position(), layers(&doc).len()), (vec!["Original".to_owned(), "Brush".into(), "Pencil".into()], 0, 1));
+        assert!(doc.history.requested.is_none());
+        doc.goto(&mut lr, &mut px, 2).unwrap();
+        // a Develop step above them: PhotoCraft's undo is put back until the jump runs
+        set_exposure(&mut lr, id, 1.0);
+        tick(&mut doc, &lr, &mut px);
+        assert!(px.undo());
+        tick(&mut doc, &lr, &mut px);
+        assert_eq!((layers(&doc).len(), exposure(&lr, id), doc.history.position()), (3, 1.0, 3), "put back, nothing undone yet");
+        assert!(doc.history.requested.is_some());
+        doc.reconcile(&mut lr, &mut px).unwrap();
+        assert_eq!((layers(&doc).len(), exposure(&lr, id), doc.history.position()), (2, 0.0, 1), "the jump: Develop step undone first");
+        assert_eq!(doc.take_notice(), None);
+        // what PhotoCraft left doesn't match: it undid, and something replaced its document
+        doc.goto(&mut lr, &mut px, 3).unwrap();
+        assert!(px.undo());
+        let st = px.active_mut().unwrap();
+        st.doc = Arc::new((*st.doc).clone());
+        tick(&mut doc, &lr, &mut px);
+        assert_eq!(doc.take_notice().as_deref(), Some(RESET_PIXEL));
+        assert_eq!((doc.history.position(), doc.history.can_redo()), (0, false));
+        assert!(!px.active().unwrap().history.can_redo());
+    }
 }

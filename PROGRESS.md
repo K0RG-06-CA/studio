@@ -151,7 +151,11 @@ See [`PRD.md`](PRD.md) → *Milestones for Claude Code*.
     always taken as PhotoCraft's cap (its states only ever go from the front, in `record` and
     `trim`), not only right after Studio's own trim; PhotoCraft's own undo/redo of a Pixel-only
     tail is simply Studio's (no redo-back); "undo mid-stroke commits the stroke" is a shell test
-    (the stroke lives in PhotoCraft's UI), moved to task 3. The shell doesn't call `flush`,
+    (the stroke lives in PhotoCraft's UI), moved to task 3 in the plan. Review of task 1
+    (2026-10-09, two fixes, one commit each, tests first): a prune that takes every old state
+    along with an edit is a prune (first surviving state = the document that was current),
+    and a lost prefix drops every step older than the oldest surviving Pixel state; PhotoCraft's
+    redo going away takes Studio's with it. The shell doesn't call `flush`,
     `undo`, `reconcile` yet (task 3): Pixel steps are recorded through `copy_back`, Develop steps
     through `mirror`; Ctrl+Z in Pixel is still PhotoCraft's own, which the history accepts.
   - [ ] 2. Pixel layers follow a Develop rotate / straighten / flip / crop / scale, as a paired step
