@@ -650,7 +650,9 @@ fn settle_base(h: &mut Harness<'_, StudioShell>) {
     let t0 = std::time::Instant::now();
     h.run_steps(1);
     while !h.state().base_up_to_date() {
-        assert!(t0.elapsed().as_secs() < 60, "the base never rendered in {:?}: {:?}", t0.elapsed(), h.state().base_error);
+        // as studio-doc's: on a 2-core CI runner, every test building LightCraft's 24 MP demo scene
+        // at once can keep one render waiting over a minute
+        assert!(t0.elapsed().as_secs() < 300, "the base never rendered in {:?}: {:?}", t0.elapsed(), h.state().base_error);
         h.run_steps(1);
         std::thread::sleep(std::time::Duration::from_millis(5));
     }
