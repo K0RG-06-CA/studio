@@ -994,6 +994,68 @@ fn saving_a_document_without_a_file_asks_where_and_a_cancelled_dialog_keeps_ever
 }
 
 #[test]
+fn a_failed_save_says_why_and_keeps_the_document_and_the_window() {
+    let dir = temp_dir("save-error");
+    let mut h = studio();
+    edited_document(&mut h, &dir.join("trip.studio"));
+    // its folder is now a file: every save fails
+    let blocker = dir.join("blocker");
+    std::fs::write(&blocker, b"").unwrap();
+    h.state_mut().document.as_mut().unwrap().path = Some(blocker.join("trip.studio"));
+    let name = h.state().document.as_ref().unwrap().name.clone();
+    run_window(&mut h, 2, true);
+    answer(&mut h, "Save");
+    assert_eq!(run_window(&mut h, 4, false), Window::default(), "the window stays");
+    h.get_by_label(format!("Couldn\u{2019}t save \u{201c}{name}\u{201d}").as_str());
+    let why = h.state().save_error.clone().unwrap();
+    assert!(why.contains("blocker"), "{why}");
+    h.get_by_label(why.as_str());
+    assert_eq!(h.state().prompt, Some(crate::Pending::Quit), "still asking");
+    assert!(h.state().document.as_ref().unwrap().unsaved(), "nothing lost");
+    answer(&mut h, "OK");
+    h.run_steps(2);
+    assert!(h.state().save_error.is_none() && h.query_by_label(why.as_str()).is_none());
+    assert!(prompt_shown(&h), "back to the prompt");
+    // a save from anywhere else shows it too
+    answer(&mut h, "Cancel");
+    h.run_steps(2);
+    assert!(h.state_mut().run("document.save").is_err());
+    h.run_steps(2);
+    h.get_by_label(why.as_str());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn exiting_with_unsaved_changes_anyway_saves_them_never_over_an_earlier_recovery() {
+    let dir = temp_dir("exit-save");
+    let recovered = dir.join("Recovered");
+    let mut h = studio();
+    h.run_steps(3);
+    pick_first(&mut h);
+    h.state_mut().run("document.new").unwrap();
+    settle_base(&mut h);
+    assert_eq!(h.state_mut().save_for_exit(&recovered).unwrap(), None, "nothing unsaved");
+    // a demo photo's document has no file: it goes into Recovered, never through a dialog
+    h.state_mut().pick_save_path = Some(Box::new(|_| panic!("no dialog at exit")));
+    edit(&mut h, 1.5);
+    let name = h.state().document.as_ref().unwrap().name.clone();
+    let first = h.state_mut().save_for_exit(&recovered).unwrap().unwrap();
+    assert_eq!(first, recovered.join(format!("{name}.studio")));
+    assert_eq!(studio_doc::Document::open(&first).unwrap().develop.light.exposure, 1.5);
+    // the next one doesn't replace it
+    h.state_mut().document.as_mut().unwrap().path = None;
+    edit(&mut h, -1.0);
+    let second = h.state_mut().save_for_exit(&recovered).unwrap().unwrap();
+    assert_eq!(second, recovered.join(format!("{name} 2.studio")));
+    assert_eq!(studio_doc::Document::open(&first).unwrap().develop.light.exposure, 1.5, "kept");
+    // one with a file is saved to it
+    edit(&mut h, 0.5);
+    assert_eq!(h.state_mut().save_for_exit(&recovered).unwrap(), Some(second.clone()));
+    assert_eq!(studio_doc::Document::open(&second).unwrap().develop.light.exposure, 0.5);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn ctrl_q_asks_exactly_once_in_every_persona() {
     let dir = temp_dir("prompt-quit");
     let path = dir.join("trip.studio");

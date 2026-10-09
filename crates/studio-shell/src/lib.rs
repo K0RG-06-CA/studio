@@ -90,6 +90,9 @@ pub struct StudioShell {
     /// document that has no file yet (none: cancelled). Set by the app; tests put a fake here.
     #[serde(skip)]
     pub pick_save_path: Option<PickSavePath>,
+    /// Why the last save failed, shown until dismissed (`document.dismissError`).
+    #[serde(skip)]
+    pub save_error: Option<String>,
 }
 
 /// See [`StudioShell::pick_save_path`].
@@ -118,6 +121,7 @@ impl Default for StudioShell {
             prompt: None,
             close_window: false,
             pick_save_path: None,
+            save_error: None,
         }
     }
 }
@@ -155,7 +159,8 @@ impl StudioShell {
     ///   `document.close {discard?}`. Unsaved changes stop `new`, `open` and `close` unless
     ///   `discard` is true: they return an error and show the "save changes?" prompt, which
     ///   `document.prompt.save` (save, then go ahead), `document.prompt.discard` (go ahead) and
-    ///   `document.prompt.cancel` answer.
+    ///   `document.prompt.cancel` answer. A save that fails shows why until
+    ///   `document.dismissError`.
     pub fn run_with(&mut self, id: &str, params: &Value) -> Result<(), String> {
         if let Some(cmd) = id.strip_prefix("document.") {
             return self.run_document(cmd, params);
@@ -235,6 +240,10 @@ impl StudioShell {
                 self.prompt = None;
                 Ok(())
             }
+            "dismissError" => {
+                self.save_error = None;
+                Ok(())
+            }
             "new" => {
                 let lr = self.lightroom.as_ref().ok_or("LightCraft isn't running")?;
                 let id = lr.app.session.active().ok_or("no photo is picked in Library")?;
@@ -263,7 +272,10 @@ impl StudioShell {
                     // no file yet: ask where (the dialog may be cancelled)
                     None => self.pick_save_path.as_mut().and_then(|pick| pick(&file)).ok_or("this document has no file yet: use document.saveAs")?,
                 };
-                self.document.as_mut().ok_or("no document is open")?.save(&path)?;
+                if let Err(e) = self.document.as_mut().ok_or("no document is open")?.save(&path) {
+                    self.save_error = Some(e.clone());
+                    return Err(e);
+                }
                 self.document_path = Some(path);
                 Ok(())
             }
@@ -351,6 +363,45 @@ impl StudioShell {
             lr.overlays(ui.ctx());
         }
         self.document_prompt(ui.ctx());
+        self.save_error_notice(ui.ctx());
+    }
+
+    /// Why a save failed, over everything (and over the prompt it may have come from).
+    fn save_error_notice(&mut self, ctx: &egui::Context) {
+        let Some(why) = &self.save_error else { return };
+        let name = self.document.as_ref().map_or("the document", |d| d.name.as_str());
+        let title = format!("Couldn\u{2019}t save \u{201c}{name}\u{201d}");
+        let mut ok = false;
+        let r = egui::Modal::new(egui::Id::new("studio.save_error")).show(ctx, |ui| {
+            ui.strong(title);
+            ui.label(why.as_str());
+            ui.add_space(8.0);
+            ok = ui.button("OK").clicked();
+        });
+        if ok || r.should_close() {
+            let _ = self.run("document.dismissError");
+        }
+    }
+
+    /// Last resort when the app exits with unsaved changes anyway (the prompt stops every close it
+    /// sees): save to the document's file, else beside its source file, else into `recovered`,
+    /// never through a dialog. Where it went.
+    pub fn save_for_exit(&mut self, recovered: &std::path::Path) -> Result<Option<PathBuf>, String> {
+        let Some(doc) = self.document.as_ref().filter(|d| d.unsaved()) else { return Ok(None) };
+        let path = match doc.path.clone().or_else(|| doc.default_path()) {
+            Some(p) => p,
+            None => {
+                std::fs::create_dir_all(recovered).map_err(|e| format!("{}: {e}", recovered.display()))?;
+                // never over an earlier recovery
+                let ext = studio_doc::file::EXTENSION;
+                (1..)
+                    .map(|n| recovered.join(if n == 1 { format!("{}.{ext}", doc.name) } else { format!("{} {n}.{ext}", doc.name) }))
+                    .find(|p| !p.exists())
+                    .ok_or("no free file name to recover the document under")?
+            }
+        };
+        self.run_with("document.saveAs", &serde_json::json!({"path": path}))?;
+        Ok(Some(path))
     }
 
     /// Photoshop's "save changes?" prompt, over everything. Each button is a command; Escape

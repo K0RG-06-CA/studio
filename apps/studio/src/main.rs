@@ -20,8 +20,9 @@ const SHELL_KEY: &str = "studio.shell";
 /// Storage key for LightCraft's UI state (panel widths, open sections, settings…).
 const LIGHTCRAFT_KEY: &str = "studio.lightcraft";
 
-/// The shell, and the smoke-test script when run with `--smoke`.
-struct App(StudioShell, Option<smoke::Script>);
+/// The shell, the smoke-test script when run with `--smoke`, and where a document that was never
+/// saved is kept if the app exits with it unsaved anyway (`Recovered` in the library folder).
+struct App(StudioShell, Option<smoke::Script>, PathBuf);
 
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
@@ -39,12 +40,11 @@ impl eframe::App for App {
     }
 
     fn on_exit(&mut self) {
-        // a document with a file is saved; one never saved has nothing of its own yet (its
-        // develop edits live in the library)
-        if self.0.document.as_ref().is_some_and(|d| d.unsaved() && d.path.is_some())
-            && let Err(e) = self.0.run("document.save")
-        {
-            eprintln!("studio: saving the document failed: {e}");
+        // the prompt stops every close it sees; anything unsaved still here is saved, never dropped
+        match self.0.save_for_exit(&self.2) {
+            Ok(Some(path)) => eprintln!("studio: the unsaved document was saved to {}", path.display()),
+            Ok(None) => {}
+            Err(e) => eprintln!("studio: saving the document failed: {e}"),
         }
         // flush the catalog and write its snapshot
         if let Some(lr) = &mut self.0.lightroom
@@ -149,6 +149,7 @@ fn main() -> ExitCode {
             // A missing or unreadable saved state falls back to the default layout.
             let saved = cc.storage.and_then(|s| eframe::get_value(s, SHELL_KEY));
             let mut shell = StudioShell::restore(saved);
+            let recovered = library.clone().unwrap_or_else(std::env::temp_dir).join("Recovered");
             shell.pick_save_path = Some(Box::new(|file| {
                 let ext = std::path::Path::new(file).extension().map(|e| e.to_string_lossy().into_owned()).unwrap_or_default();
                 rfd::FileDialog::new().set_title("Save As").set_file_name(file).add_filter("Studio document", &[ext]).save_file()
@@ -159,7 +160,7 @@ fn main() -> ExitCode {
                 eprintln!("studio: reopening the document failed: {e}");
             }
             let script = smoke.then(|| smoke::Script::new(&shell));
-            Ok(Box::new(App(shell, script)))
+            Ok(Box::new(App(shell, script, recovered)))
         }),
     );
     if smoke {
@@ -214,7 +215,7 @@ mod tests {
         let mut shell = StudioShell { lightroom: Some(Lightroom::new(app)), ..Default::default() };
         shell.run("persona.develop").unwrap();
         let mut storage = Memory::default();
-        App(shell, None).save(&mut storage);
+        App(shell, None, PathBuf::new()).save(&mut storage);
         // the next launch
         let shell = StudioShell::restore(eframe::get_value(&storage, SHELL_KEY));
         assert_eq!(shell.persona, studio_shell::Persona::Develop);
