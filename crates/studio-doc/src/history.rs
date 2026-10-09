@@ -308,21 +308,26 @@ impl History {
         redo_count: usize,
     ) -> bool {
         // a lost prefix is PhotoCraft dropping its oldest states (its cap or a trim): states go
-        // from the front nowhere else
+        // from the front nowhere else. Every one of them may go, when an edit's own `record`
+        // and trim leave only the states it just made: the first of those is the document that
+        // was current.
         let lost = match now.first() {
             None => 0,
             Some(first) => match old.iter().position(|p| same(p, first)) {
                 Some(s) => s,
                 None if old.is_empty() => 0,
+                None if before.is_some_and(|b| same(b, first)) => old.len(),
                 None => return false,
             },
         };
-        let (gone, old) = old.split_at(lost);
-        if let Some(last) = gone.last()
-            && let Some(i) = self.steps.iter().rposition(|s| s.pixel.iter().any(|p| same(p, last)))
-        {
-            self.steps.drain(..=i);
+        if lost > 0 {
+            // every step older than the oldest surviving state goes, Develop steps included: a
+            // contiguous prefix of the whole history, never a hole
+            let keep =
+                now.first().and_then(|first| self.steps.iter().position(|s| s.pixel.iter().any(|p| same(p, first)))).unwrap_or(self.steps.len());
+            self.steps.drain(..keep);
         }
+        let old = &old[lost..];
         if starts_with(now, old) {
             let added = &now[old.len()..];
             if added.is_empty() {
@@ -1130,5 +1135,44 @@ mod tests {
         assert!(doc.undo(&mut lr, &mut px).is_err());
         assert!(doc.take_notice().unwrap().starts_with("History reset"));
         assert_eq!(doc.history.position(), 0);
+    }
+
+    /// Review: a lost prefix drops every step older than the oldest surviving Pixel state, the
+    /// Develop steps among them (a contiguous global prefix), and a prune that takes every old
+    /// state along with a new edit is still a prune, not a reset.
+    #[test]
+    fn a_lost_prefix_drops_every_step_older_than_the_oldest_surviving_state() {
+        let (mut lr, mut px, mut doc) = open();
+        let id = doc.source.photo;
+        set_exposure(&mut lr, id, 1.0);
+        tick(&mut doc, &lr, &mut px);
+        paint(&mut px, "Brush", 1, 1);
+        tick(&mut doc, &lr, &mut px);
+        set_exposure(&mut lr, id, 2.0);
+        tick(&mut doc, &lr, &mut px);
+        assert_eq!(labels(&doc), ["Original", "Exposure", "Brush", "Exposure"]);
+        // PhotoCraft's prefs re-apply its own cap just before an edit: its `record` drops the
+        // oldest state (the only one) before Studio sees either
+        px.active_mut().unwrap().history.max_states = 1;
+        paint(&mut px, "Pencil", 2, 2);
+        tick(&mut doc, &lr, &mut px);
+        assert_eq!(doc.take_notice(), None, "a prune, not a reset");
+        assert_eq!(labels(&doc), ["Original", "Pencil"], "both Develop steps older than the surviving state went with the Brush step");
+        assert!(doc.undo(&mut lr, &mut px).unwrap());
+        assert_eq!((layers(&doc), exposure(&lr, id)), (vec!["Develop".to_owned(), "Brush".into()], 2.0));
+        assert!(!doc.undo(&mut lr, &mut px).unwrap(), "nothing older is left");
+        // the same through the byte cap: with room for one state only, each paint trims the one before
+        let (mut lr, mut px, mut doc) = open();
+        for i in 0..3 {
+            set_exposure(&mut lr, id, f64::from(i) + 1.0);
+            tick(&mut doc, &lr, &mut px);
+            paint(&mut px, &format!("Paint {i}"), i, i);
+            tick(&mut doc, &lr, &mut px);
+            doc.history.bytes_cap = (i as usize + 1) * TILE + TILE / 2;
+            let (r, s) = render_sized(64, 48);
+            doc.write_base(&mut px, r, s, anchor(1, 0.0, 0.0)).unwrap();
+        }
+        assert_eq!(doc.take_notice(), None);
+        assert_eq!(labels(&doc), ["Original", "Paint 2"]);
     }
 }
