@@ -531,7 +531,12 @@ impl StudioShell {
         let t = theme::TOKENS;
         let p = self.persona;
         let chrome = egui::Frame::NONE.fill(t.chrome);
-        // Pixel: PhotoCraft's own options bar and tool bar (Photoshop's), once its fonts are in
+        // Pixel: PhotoCraft's own options bar and tool bar (Photoshop's), once its fonts are in.
+        // Its views follow its documents first: its `logic` (which syncs them) didn't run on the
+        // frame Pixel was clicked in the top bar, and its panels index them unchecked.
+        if let Some(px) = self.pixel.as_mut().filter(|_| p == Persona::Pixel) {
+            px.app.sync_views();
+        }
         let photocraft = self.pixel.as_ref().is_some_and(|px| p == Persona::Pixel && px.ready());
         if let Some(px) = self.pixel.as_mut().filter(|_| photocraft) {
             px.options_bar(ui);

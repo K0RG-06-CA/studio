@@ -454,6 +454,26 @@ fn copy_cut_and_paste_reach_photocraft_in_pixel() {
     assert!(key(&hooked(&mut h, egui::Event::Paste("x".into())), egui::Key::V), "Paste is Ctrl+V");
 }
 
+/// Review: PhotoCraft's views follow its documents even on the frame Pixel is clicked in the top
+/// bar (its `logic`, which syncs them, didn't run that frame): a document made elsewhere since
+/// Pixel was last shown must not be drawn with stale views.
+#[test]
+fn clicking_pixel_after_a_document_was_made_elsewhere_draws_it() {
+    let mut h = studio();
+    h.run_steps(3);
+    h.state_mut().run("persona.pixel").unwrap();
+    h.run_steps(4);
+    h.state_mut().run("persona.library").unwrap();
+    h.run_steps(2);
+    pick_first(&mut h);
+    h.state_mut().run("document.new").unwrap();
+    settle_base(&mut h);
+    h.get_by_label("Pixel").click();
+    h.run_steps(3);
+    assert_eq!(h.state().persona, crate::Persona::Pixel);
+    assert!(!painted_text(h.output()).contains("No document"));
+}
+
 #[test]
 fn ctrl_z_in_pixel_undoes_pixel_edits_and_leaves_develops_history_alone() {
     let dir = temp_dir("pixel-undo");
