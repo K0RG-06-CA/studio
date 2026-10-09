@@ -11,6 +11,8 @@ workspace = true
 
 [dependencies]
 lightcraft-engine = { workspace = true }
+# the point type LightCraft's frame mapping speaks (Pixel layers follow a Develop geometry change)
+lightcraft-geom = { workspace = true }
 photocraft-doc = { workspace = true }
 photocraft-raster = { workspace = true }
 photocraft-color = { workspace = true }

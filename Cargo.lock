@@ -4758,6 +4758,7 @@ name = "studio-doc"
 version = "0.1.0"
 dependencies = [
  "lightcraft-engine",
+ "lightcraft-geom",
  "photocraft-color",
  "photocraft-compose",
  "photocraft-doc",

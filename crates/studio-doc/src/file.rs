@@ -61,6 +61,7 @@ impl Document {
             saved_revision: 0,
             link: Default::default(),
             history: Default::default(),
+            generation: 0,
         })
     }
 

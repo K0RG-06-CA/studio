@@ -84,6 +84,9 @@ pub struct StudioShell {
 /// What a save returns when its dialog was cancelled: not a failure, nothing to show.
 const SAVE_CANCELLED: &str = "the save was cancelled";
 
+/// The top bar's busy mark while a Develop geometry change renders on its way into Pixel.
+const BUSY: &str = "Develop rendering\u{2026}";
+
 /// See [`StudioShell::pick_save_path`].
 pub type PickSavePath = Box<dyn FnMut(&str) -> Option<PathBuf>>;
 
@@ -187,6 +190,9 @@ impl StudioShell {
             if !p.enabled() {
                 return Err(format!("{} arrives in v{}", p.label(), p.version()));
             }
+            // a Develop geometry change lands (Pixel layers follow) before any persona shows it;
+            // one that can't render was undone, and its notice shows next frame
+            let _ = self.finish_follow();
             if let Some(lr) = &mut self.lightroom {
                 lr.switch(self.persona, p);
             }
@@ -289,6 +295,10 @@ impl StudioShell {
             return Ok(());
         }
         let doc = self.document.as_mut().ok_or("no document is open")?;
+        // a Develop geometry change is on its way into the layers: nothing may edit them meanwhile
+        if doc.history.pending_follow() {
+            return Err(studio_doc::history::RENDERING.into());
+        }
         let params = if params.is_null() { serde_json::json!({}) } else { params.clone() };
         px.app.run(cmd, params)?;
         doc.copy_back(&mut px.app.session);
@@ -370,11 +380,30 @@ impl StudioShell {
         if let (Some(doc), Some(lr)) = (&mut self.document, &self.lightroom) {
             self.base.mirror(&lr.app.session, doc);
         }
+        // every document command and the quit prompt ask this first: a Develop geometry change
+        // lands before (one that can't render was undone, and says so)
+        let _ = self.finish_follow();
         if let (Some(doc), Some(px)) = (&mut self.document, &mut self.pixel) {
             px.apply_pending();
             doc.copy_back(&mut px.app.session);
         }
         self.document.as_ref().is_some_and(Document::unsaved)
+    }
+
+    /// Wait for the render a Develop geometry change is waiting for, and land it as the step's
+    /// Pixel half (see `studio_doc::follow`). Nothing to wait for returns at once.
+    fn finish_follow(&mut self) -> Result<(), String> {
+        let (Some(doc), Some(lr), Some(px)) = (&mut self.document, &mut self.lightroom, &mut self.pixel) else { return Ok(()) };
+        let r = self.base.finish(&mut lr.app.session, &mut px.app.session, doc);
+        if let Err(e) = &r {
+            self.base_error = Some(e.clone());
+        }
+        r
+    }
+
+    /// A Develop geometry change waits for its render: PhotoCraft is barred until it lands.
+    pub fn develop_rendering(&self) -> bool {
+        self.document.as_ref().is_some_and(|d| d.history.pending_follow())
     }
 
     /// The base layer shows the document's current settings (nothing stale, nothing in flight).
@@ -442,6 +471,9 @@ impl StudioShell {
     /// engine change between two looks (milestone 5). There is no second call site.
     fn engine_logic(&mut self, ctx: &egui::Context) {
         match self.persona {
+            // not while a Develop geometry change is on its way into the layers (its shortcuts and
+            // tools would edit them meanwhile)
+            Persona::Pixel if self.develop_rendering() => {}
             Persona::Pixel => {
                 if let Some(px) = self.pixel.as_mut() {
                     px.logic(ctx);
@@ -618,8 +650,14 @@ impl StudioShell {
                     }
                 }
                 let title = self.document_title();
+                let busy = self.develop_rendering();
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.label(egui::RichText::new(title).color(t.text_dim));
+                    // the busy mark: Pixel waits for a Develop geometry change to land
+                    if busy {
+                        ui.label(egui::RichText::new(BUSY).color(t.text_dim)).on_hover_text(studio_doc::history::RENDERING);
+                        ui.spinner();
+                    }
                 });
             });
         });

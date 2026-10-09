@@ -2,12 +2,15 @@
 //! settings, kept live. The settings' home is LightCraft's catalog while the photo is in the
 //! library; the document mirrors them, and whenever they change the base is rendered again (at
 //! the photo's size, 16-bit, on a worker thread) and written under whatever layers sit above it.
+//! A render for a Develop step that changed the frame lands as that step's Pixel half instead
+//! ([`crate::follow`]); until it does, the document's history says so (`pending_follow`), and
+//! [`Base::finish`] waits for it.
 
 use std::sync::Arc;
-use std::sync::mpsc::{Receiver, TryRecvError, channel};
+use std::sync::mpsc::{Receiver, RecvTimeoutError, TryRecvError, channel};
+use std::time::{Duration, Instant};
 
 use lightcraft_engine::Session;
-use lightcraft_engine::develop::DevelopSettings;
 use lightcraft_engine::media::RenderResult;
 use lightcraft_engine::pipeline::{DeepImage, DeepSamples, OutputDepth, Rendered, StageCache};
 use photocraft_color::PixelFormat;
@@ -25,13 +28,15 @@ const BAND_ROWS: usize = 256;
 /// cache) and the base surface built from it, there and not on the UI thread.
 type Done = (RenderResult, Result<(Surface, Size), String>);
 
+/// A follow's render may take this long before the Develop step is undone instead.
+pub const FOLLOW_CEILING: Duration = Duration::from_secs(30);
+
 /// Keeps a document's base layer in step with its develop settings.
 #[derive(Default)]
 pub struct Base {
-    /// Hash of the settings the base pixels show; none until the first render.
-    shown: Option<u64>,
-    /// The render in flight: the settings hash it renders, and where its result arrives.
-    pending: Option<(u64, Anchor, Receiver<Done>)>,
+    /// The render in flight: the document generation it started for, the settings hash it
+    /// renders, and where its result arrives.
+    pending: Option<(u64, u64, Anchor, Receiver<Done>)>,
     /// A render that failed: the settings hash and why. Not tried again until the settings change
     /// (a photo whose file is gone would otherwise be re-decoded every frame).
     failed: Option<(u64, String)>,
@@ -73,7 +78,7 @@ impl Base {
 
     /// The base shows the current settings (and nothing is in flight).
     pub fn up_to_date(&self, doc: &Document) -> bool {
-        self.pending.is_none() && self.shown == Some(doc.develop.hash64())
+        self.pending.is_none() && doc.shown_hash() == Some(doc.develop.hash64())
     }
 
     /// The document's layer tree, for anything that flattens it or reads the base's pixels
@@ -91,6 +96,17 @@ impl Base {
     /// every frame, not retried, until the settings change.
     pub fn sync(&mut self, session: &mut Session, pixel: &mut PixelSession, doc: &mut Document) -> Result<(), String> {
         self.mirror(session, doc);
+        let r = self.step(session, pixel, doc);
+        if let Err(e) = &r
+            && doc.history.pending_follow()
+        {
+            // the render a Develop step waited for can't come: the step goes back
+            doc.follow_failed(session, e);
+        }
+        r
+    }
+
+    fn step(&mut self, session: &mut Session, pixel: &mut PixelSession, doc: &mut Document) -> Result<(), String> {
         let want = doc.develop.hash64();
         if let Err(e) = self.take(session, pixel, doc) {
             self.failed = Some((want, e.clone()));
@@ -103,8 +119,47 @@ impl Base {
             return Err(why.clone());
         }
         let waiting = self.ready.as_ref().is_some_and(|r| r.0 == want);
-        if self.pending.is_none() && self.shown != Some(want) && !waiting && session.interaction.is_none() {
+        if self.pending.is_none() && doc.shown_hash() != Some(want) && !waiting && session.interaction.is_none() {
             self.start(session, doc, want)?;
+        }
+        Ok(())
+    }
+
+    /// Wait for the render a Develop step is waiting for, and land it: before anything decides
+    /// on the document (a persona switch, a save, a close, an undo), so a geometry change is never
+    /// half done. A slider drag open on the photo ends first (its render is the one waited for).
+    /// Nothing to wait for returns at once. A render that fails, or takes longer than
+    /// [`FOLLOW_CEILING`], undoes the step (see [`Document::follow_failed`]) and is the error.
+    pub fn finish(&mut self, session: &mut Session, pixel: &mut PixelSession, doc: &mut Document) -> Result<(), String> {
+        if session.interaction.as_ref().is_some_and(|i| i.photo == doc.source.photo) {
+            session.end_interaction().map_err(|e| e.to_string())?;
+        }
+        self.mirror(session, doc);
+        if !doc.history.pending_follow() {
+            return Ok(());
+        }
+        // no gesture can be open in Pixel while it is barred: a render held for one goes in now
+        self.hold = false;
+        let t0 = Instant::now();
+        while doc.history.pending_follow() {
+            let Some((generation, want, anchor, rx)) = self.pending.take() else {
+                let before = self.started;
+                self.sync(session, pixel, doc)?;
+                if self.started == before && doc.history.pending_follow() {
+                    return Err("Develop isn\u{2019}t rendering the pending change".into());
+                }
+                continue;
+            };
+            let r = match rx.recv_timeout(FOLLOW_CEILING.saturating_sub(t0.elapsed())) {
+                Ok((result, converted)) => self.landed(session, pixel, doc, generation, want, anchor, result, converted),
+                Err(RecvTimeoutError::Timeout) => Err(format!("the render took longer than {} s", FOLLOW_CEILING.as_secs())),
+                Err(RecvTimeoutError::Disconnected) => Err("the render thread stopped without a result".into()),
+            };
+            if let Err(e) = r {
+                self.failed = Some((want, e.clone()));
+                doc.follow_failed(session, &e);
+                return Err(e);
+            }
         }
         Ok(())
     }
@@ -118,14 +173,14 @@ impl Base {
 
     fn start(&mut self, session: &mut Session, doc: &Document, want: u64) -> Result<(), String> {
         let id = doc.source.photo;
-        let (w, h) =
-            session.catalog.photo(id).map(|p| (p.width as usize, p.height as usize)).ok_or_else(|| format!("photo {} isn't in the library", id.0))?;
+        let photo = session.catalog.photo(id).ok_or_else(|| format!("photo {} isn't in the library", id.0))?;
+        let (w, h) = (photo.width as usize, photo.height as usize);
+        let anchor = Anchor::new(Arc::new(doc.develop.clone()), (w, h), photo.embedded_lens);
         // the size the crop has at the source's own resolution (rotation swaps the sides; a fit
         // into the photo's box would scale a crop up and a rotated photo down)
         let (nw, nh) = lightcraft_engine::pipeline::native_output_size(w, h, &doc.develop);
         // only ever smaller: LightCraft's fit would scale a small frame up to the box
         let scale = self.max_edge.map_or(1.0, |m| (m as f64 / nw.max(nh)).min(1.0));
-        let anchor = anchor(w, h, &doc.develop, scale);
         let (nw, nh) = ((nw * scale).round().max(1.0) as usize, (nh * scale).round().max(1.0) as usize);
         let mut job = session
             .preview_job(id, nw, nh, true, &doc.develop)
@@ -142,25 +197,24 @@ impl Base {
                 let _ = tx.send((r, surface));
             })
             .map_err(|e| format!("no thread for the render: {e}"))?;
-        self.pending = Some((want, anchor, rx));
+        self.pending = Some((doc.generation, want, anchor, rx));
         self.started += 1;
         Ok(())
     }
 
     /// A finished render goes into the base layer; the document takes the render's size (crop,
-    /// straighten and rotation change it). One for settings edited since it started is dropped,
-    /// pixels or error: the next `sync` renders the newest settings (edits made meanwhile
-    /// coalesce into that one render).
+    /// straighten and rotation change it). One for settings edited since it started, or for an
+    /// earlier generation of the document, is dropped, pixels or error: the next `sync` renders
+    /// the newest settings (edits made meanwhile coalesce into that one render).
     fn take(&mut self, session: &mut Session, pixel: &mut PixelSession, doc: &mut Document) -> Result<(), String> {
         // one that finished during a gesture goes in once it has ended (unless edited since)
         if !self.hold
             && let Some((want, anchor, surface, size)) = self.ready.take()
             && want == doc.develop.hash64()
         {
-            doc.write_base(pixel, surface, size, Some(anchor))?;
-            self.shown = Some(want);
+            write(pixel, doc, surface, size, anchor)?;
         }
-        let Some((want, anchor, rx)) = &self.pending else { return Ok(()) };
+        let Some((.., rx)) = &self.pending else { return Ok(()) };
         let (result, converted) = match rx.try_recv() {
             Ok(r) => r,
             Err(TryRecvError::Empty) => return Ok(()),
@@ -169,10 +223,26 @@ impl Base {
                 return Err("the render thread stopped without a result".into());
             }
         };
-        let (want, anchor) = (*want, anchor.clone());
-        self.pending = None;
+        let Some((generation, want, anchor, _)) = self.pending.take() else { return Ok(()) };
+        self.landed(session, pixel, doc, generation, want, anchor, result, converted)
+    }
+
+    /// The render's result arrived: LightCraft takes its decoded source, and the pixels go in
+    /// unless they are for another generation or other settings, or a gesture holds them.
+    #[allow(clippy::too_many_arguments)]
+    fn landed(
+        &mut self,
+        session: &mut Session,
+        pixel: &mut PixelSession,
+        doc: &mut Document,
+        generation: u64,
+        want: u64,
+        anchor: Anchor,
+        result: RenderResult,
+        converted: Result<(Surface, Size), String>,
+    ) -> Result<(), String> {
         session.accept(&result);
-        if want != doc.develop.hash64() {
+        if generation != doc.generation || want != doc.develop.hash64() {
             return Ok(());
         }
         let (surface, size) = converted?;
@@ -180,29 +250,14 @@ impl Base {
             self.ready = Some((want, anchor, surface, size));
             return Ok(());
         }
-        // into PhotoCraft, the pixels' one home: derived pixels, not an edit (the revision, and so
-        // "unsaved", doesn't move)
-        doc.write_base(pixel, surface, size, Some(anchor))?;
-        self.shown = Some(want);
-        Ok(())
+        write(pixel, doc, surface, size, anchor)
     }
 }
 
-/// Where a render of `s` (of a `w × h` source, at `scale`) puts the photo: Pixel layers follow
-/// its crop (see [`Anchor`]).
-fn anchor(w: usize, h: usize, s: &DevelopSettings, scale: f64) -> Anchor {
-    use std::hash::{DefaultHasher, Hash, Hasher};
-    // the crop rectangle is normalised to the frame without it (rotated by the straighten angle)
-    let mut whole = s.clone();
-    whole.crop.geometry = Default::default();
-    whole.crop.geometry.angle = s.crop.geometry.angle;
-    let (uw, uh) = lightcraft_engine::pipeline::native_output_size(w, h, &whole);
-    let frame =
-        serde_json::to_string(&(&s.orientation, &s.optics, &s.geometry, s.crop.geometry.angle, s.crop.flip_h, s.crop.flip_v)).unwrap_or_default();
-    let mut hasher = DefaultHasher::new();
-    frame.hash(&mut hasher);
-    let r = s.crop.geometry.rect;
-    Anchor { frame: hasher.finish(), origin: [r.x0 * uw, r.y0 * uh], scale }
+/// A render into PhotoCraft, the pixels' one home: the Pixel half of the Develop step waiting
+/// for it, else derived pixels, not an edit (the revision, and so "unsaved", doesn't move).
+fn write(pixel: &mut PixelSession, doc: &mut Document, surface: Surface, size: Size, anchor: Anchor) -> Result<(), String> {
+    if doc.history.pending_follow() { doc.follow(pixel, surface, size, anchor) } else { doc.write_base(pixel, surface, size, Some(anchor)) }
 }
 
 /// The base surface from a render: its 16-bit image, or why there is none.
@@ -242,8 +297,7 @@ pub(crate) fn surface_from_deep(deep: &DeepImage) -> Result<(Surface, Size), Str
 
 #[cfg(test)]
 mod tests {
-    use std::time::{Duration, Instant};
-
+    use lightcraft_engine::develop::DevelopSettings;
     use lightcraft_engine::pipeline::OutputSpace;
 
     use super::*;

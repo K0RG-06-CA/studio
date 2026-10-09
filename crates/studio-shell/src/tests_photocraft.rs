@@ -725,3 +725,105 @@ fn harness_app() -> PhotocraftApp {
     app.sync_views();
     app
 }
+
+// --- Milestone 5, task 2: a Develop geometry change is a barrier for Pixel ---
+
+/// A rendered document with a one-pixel "Paint" layer at (300, 100) in PhotoCraft (600 × 400).
+fn painted_document(h: &mut Harness<'_, crate::StudioShell>) {
+    h.run_steps(3);
+    pick_first(h);
+    h.state_mut().run("document.new").unwrap();
+    settle_base(h);
+    let session = &mut h.state_mut().pixel.as_mut().unwrap().app.session;
+    session
+        .edit("Paint", |d, active| {
+            let mut l = Layer::raster("Paint", PixelFormat::RGBA16);
+            l.surface_mut().unwrap().write_region(photocraft_geom::Rect::from_xywh(300, 100, 1, 1), &[1.0, 0.0, 0.0, 1.0]);
+            *active = Some(l.id);
+            d.layers.push(l);
+            Ok(())
+        })
+        .unwrap();
+    h.run_steps(1);
+}
+
+fn rotate_left(h: &mut Harness<'_, crate::StudioShell>) {
+    let id = h.state().document.as_ref().unwrap().source.photo.0;
+    let lr = &mut h.state_mut().lightroom.as_mut().unwrap().app.session;
+    lr.execute("photo.rotateLeft", &serde_json::json!({"ids": [id]})).unwrap();
+}
+
+fn paint_at(doc: &Document) -> (i32, i32) {
+    let l = doc.layers.iter().find(|l| l.name == "Paint").unwrap();
+    let b = photocraft_compose::bounds::content_bounds(l.surface().unwrap());
+    (b.x0, b.y0)
+}
+
+#[test]
+fn a_save_and_a_close_right_after_a_develop_rotation_write_the_rotated_layers() {
+    let dir = temp_dir("follow-save");
+    let path = dir.join("turned.studio");
+    let mut h = studio();
+    painted_document(&mut h);
+    h.state_mut().run_with("document.saveAs", &serde_json::json!({"path": path})).unwrap();
+    // rotated in LightCraft, then saved and closed before any frame renders it
+    rotate_left(&mut h);
+    h.state_mut().run("document.save").unwrap();
+    h.state_mut().run("document.close").unwrap();
+    let saved = studio_doc::Document::open(&path).unwrap();
+    assert_ne!(saved.develop.orientation, Default::default(), "the rotated settings");
+    assert_eq!((saved.pixel.size.width, saved.pixel.size.height), (400, 600), "and the rotated canvas");
+    assert_eq!(paint_at(&saved.pixel), (100, 299), "and the layer moved with the photo");
+}
+
+#[test]
+fn pixel_waits_while_develop_renders_a_rotation_and_switching_to_it_lands_the_render_first() {
+    let mut h = studio();
+    painted_document(&mut h);
+    let past = |h: &Harness<'_, crate::StudioShell>| h.state().pixel.as_ref().unwrap().app.session.active().unwrap().history.past_len();
+    let before = past(&h);
+    rotate_left(&mut h);
+    // the frame that sees it starts the render: from now on Pixel waits
+    h.run_steps(1);
+    assert!(h.state().develop_rendering());
+    let e = h.state_mut().run("pixel.layer.new.layer").unwrap_err();
+    assert_eq!(e, studio_doc::history::RENDERING, "a Pixel command is refused");
+    assert!(h.get_by_label("Develop rendering\u{2026}").rect().width() > 0.0, "the top bar's busy mark");
+    // switching to Pixel lands the render on the way: one state, the layer rotated
+    h.state_mut().run("persona.pixel").unwrap();
+    assert!(!h.state().develop_rendering());
+    assert_eq!(past(&h), before + 1);
+    let doc = &h.state().pixel.as_ref().unwrap().app.session.active().unwrap().doc;
+    assert_eq!(paint_at(doc), (100, 299));
+    h.run_steps(2);
+    assert!(h.query_by_label("Develop rendering\u{2026}").is_none(), "the mark is gone");
+    // now Pixel edits again
+    h.state_mut().run("pixel.layer.new.layer").unwrap();
+}
+
+#[test]
+fn photocrafts_logic_doesnt_run_while_a_develop_rotation_renders() {
+    let mut h = studio();
+    painted_document(&mut h);
+    h.state_mut().run("persona.pixel").unwrap();
+    h.run_steps(3);
+    // a scripted rotation while Pixel shows (as MCP will do it)
+    rotate_left(&mut h);
+    let mut waited = 0;
+    let t0 = std::time::Instant::now();
+    loop {
+        let frames = h.state().pixel.as_ref().unwrap().frames();
+        h.run_steps(1);
+        if !h.state().develop_rendering() {
+            break;
+        }
+        assert_eq!(h.state().pixel.as_ref().unwrap().frames(), frames, "PhotoCraft's logic ran while the rotation rendered");
+        waited += 1;
+        assert!(t0.elapsed().as_secs() < 300, "the render never landed");
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert!(waited >= 1, "at least the frame that started the render");
+    let frames = h.state().pixel.as_ref().unwrap().frames();
+    h.run_steps(1);
+    assert_eq!(h.state().pixel.as_ref().unwrap().frames(), frames + 1, "and it runs again once it landed");
+}

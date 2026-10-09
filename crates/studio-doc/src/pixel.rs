@@ -8,33 +8,62 @@
 //! restores whole documents: a state from before a render comes back with that render's pixels
 //! and size. Every render written is kept in a register (weakly: an entry goes once no state
 //! holds its pixels), so a base showing an earlier one is known to come from history, and the
-//! current render goes back in. Pixel layers stay on the same photo pixels when a Develop crop
-//! moves the frame: each render has an [`Anchor`], and the layers move by the difference.
+//! current render goes back in. Pixel layers stay on the same photo pixels when Develop changes
+//! the frame: each render has an [`Anchor`] (the settings it was made with), and a Develop
+//! geometry change moves the layers with the photo as one recorded state paired with the Develop
+//! step ([`crate::follow`]). A render that lands outside such a step (an exposure, a render of
+//! undone settings) only ever shifts them by whole pixels, never resamples.
 
 use std::sync::{Arc, Weak};
 
+use lightcraft_engine::develop::{DevelopSettings, EmbeddedLens};
 use photocraft_doc::{DocId, Layer, LayerContent};
 use photocraft_engine::{DocState, Session};
 use photocraft_geom::Size;
 use photocraft_raster::{Surface, Tile};
 
 use crate::Document;
+use crate::follow::{Map, map};
 
-/// Where a render puts the photo, which Pixel layers are anchored to.
+/// Where a render puts the photo, which Pixel layers are anchored to: everything the frame
+/// mapping needs.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Anchor {
-    /// Everything that frames the photo but the crop rectangle (orientation, lens and transform
-    /// corrections, straighten, flips): two renders with the same frame differ only in where the
-    /// crop sits.
-    pub frame: u64,
-    /// The crop's top-left, in pixels of the uncropped frame at the source's resolution.
-    pub origin: [f64; 2],
-    /// Render pixels per source pixel.
-    pub scale: f64,
+    /// The settings the render was made with.
+    pub settings: Arc<DevelopSettings>,
+    /// `settings.hash64()`: which settings the render shows.
+    pub hash: u64,
+    /// The source's (EXIF-oriented) size in pixels.
+    pub src: (usize, usize),
+    /// The source's embedded lens corrections, as the render applied them.
+    pub lens: Option<EmbeddedLens>,
 }
 
-/// What a Develop rotation (or any other change of the frame) does to Pixel layers for now.
-pub const LAYERS_STAY: &str = "Pixel layers don\u{2019}t follow Develop rotation yet (milestone 5): they stayed where they were";
+impl Anchor {
+    pub fn new(settings: Arc<DevelopSettings>, src: (usize, usize), lens: Option<EmbeddedLens>) -> Anchor {
+        let hash = settings.hash64();
+        Anchor { settings, hash, src, lens }
+    }
+
+    /// The two renders frame the photo the same way (only what isn't geometry differs).
+    pub fn same_frame(&self, other: &Anchor) -> bool {
+        self.src == other.src && self.lens == other.lens && framing(&self.settings) == framing(&other.settings)
+    }
+}
+
+/// Everything in `s` that frames the photo: orientation, crop (rectangle, straighten, flips),
+/// lens and perspective corrections. Two settings with the same framing render the same frame.
+pub fn framing(s: &DevelopSettings) -> u64 {
+    use std::hash::{DefaultHasher, Hash, Hasher};
+    let text = serde_json::to_string(&(&s.orientation, &s.crop, &s.optics, &s.geometry)).unwrap_or_default();
+    let mut hasher = DefaultHasher::new();
+    text.hash(&mut hasher);
+    hasher.finish()
+}
+
+/// What a render that changes the frame outside a Develop step does to Pixel layers.
+pub const LAYERS_STAY: &str =
+    "Pixel layers didn\u{2019}t follow a change of the Develop frame made outside a Develop step: they stayed where they were";
 
 /// What happened when PhotoCraft closed the open document by its own means.
 pub const REOPENED: &str = "PhotoCraft closed the document: it was opened again as it was, without its Pixel undo history";
@@ -87,6 +116,7 @@ impl Document {
     /// ever holds the open document), and this one goes in as last copied.
     pub fn attach(&mut self, session: &mut Session) {
         close_all(session);
+        self.generation += 1;
         let i = session.add_document(self.pixel.clone(), None);
         let st = session.documents().get(i);
         let written = self.base_layer().and_then(Layer::surface).map(|s| Written::of(s, None)).into_iter().collect();
@@ -145,6 +175,9 @@ impl Document {
         }
         let unmarked = self.link.unmarked(&st.doc);
         let doc = unmarked.as_ref().unwrap_or(&st.doc);
+        // a state from history showing the render of the settings now current (undone to the
+        // other side of a geometry change) is right as it is: its render is the current one
+        self.link.adopt(doc, self.develop.hash64());
         if let Some(doc) = self.link.restored(doc).or(unmarked) {
             st.doc = Arc::new(doc);
             st.revision += 1;
@@ -185,10 +218,19 @@ impl Document {
         Ok(())
     }
 
-    /// What to tell the user about the document, once (layers that stayed when a Develop rotation
-    /// moved the frame; a history that had to start over).
+    /// What to tell the user about the document, once (layers that couldn't follow a Develop
+    /// change; a history that had to start over).
     pub fn take_notice(&mut self) -> Option<String> {
         self.link.notice.take().or_else(|| self.history.take_notice())
+    }
+
+    /// Which settings the base layer's pixels show (none before the first render).
+    pub fn shown_hash(&self) -> Option<u64> {
+        self.link.current.as_ref()?.2.as_ref().map(|a| a.hash)
+    }
+
+    pub(crate) fn set_notice(&mut self, why: String) {
+        self.link.notice = Some(why);
     }
 
     /// Take back the edit that made PhotoCraft's document break the lock (`why`): PhotoCraft's own
@@ -222,7 +264,7 @@ impl Document {
     }
 
     /// The document's state in PhotoCraft (made the active one: the session only has this one).
-    fn state<'s>(&self, session: &'s mut Session) -> Option<&'s mut DocState> {
+    pub(crate) fn state<'s>(&self, session: &'s mut Session) -> Option<&'s mut DocState> {
         state_of(session, self.link.id?)
     }
 }
@@ -295,8 +337,40 @@ impl Link {
 
     /// The anchor of the render `surface` shows: a written one, or none (unknown, or the empty
     /// base before the first render).
-    fn anchor_of(&self, surface: &Surface) -> Option<Anchor> {
+    pub(crate) fn anchor_of(&self, surface: &Surface) -> Option<Anchor> {
         self.written.iter().rev().find(|w| w.shows(surface)).and_then(|w| w.anchor.clone())
+    }
+
+    /// A render went into PhotoCraft's document `doc` (a follow's recorded state): the register
+    /// and the last copy take it.
+    pub(crate) fn landed(&mut self, doc: Arc<photocraft_doc::Document>, surface: Surface, size: Size, anchor: Anchor) {
+        self.written.push(Written::of(&surface, Some(anchor.clone())));
+        self.current = Some((surface, size, Some(anchor)));
+        self.copied = Some(doc);
+        self.written.retain(|w| !w.gone());
+    }
+
+    /// `doc` (PhotoCraft's current document) shows a written render of the settings `want`: it
+    /// becomes the current render, so nothing is put back and nothing renders (an undo or redo
+    /// landed on the other side of a geometry change). One of other settings is put right by
+    /// `restored` (the current render back in, the layers shifted by whole pixels for a crop),
+    /// unless that would take more than a shift (the current render is in another frame: the
+    /// state is from the other side of a geometry change, whose render was replaced since). Then
+    /// the document stays as it is and has no current render: the next render of `want` lands
+    /// into it, in the state's own frame, and nothing is resampled.
+    fn adopt(&mut self, doc: &photocraft_doc::Document, want: u64) {
+        let Some(shown) = doc.layers.iter().find(|l| crate::is_base(l)).and_then(Layer::surface) else { return };
+        let Some(anchor) = self.written.iter().rev().find(|w| w.shows(shown)).and_then(|w| w.anchor.clone()) else { return };
+        if anchor.hash == want {
+            self.current = Some((shown.clone(), doc.size, Some(anchor)));
+            return;
+        }
+        let shifts = |(_, size, to): &(Surface, Size, Option<Anchor>)| {
+            to.as_ref().is_none_or(|to| matches!(map(&anchor, doc.size, to, *size), Map::Same | Map::Shift(..)))
+        };
+        if self.current.as_ref().is_some_and(|c| !shifts(c)) {
+            self.current = None;
+        }
     }
 
     /// `doc` from history showing an earlier render, with the current one put back: none when it
@@ -315,8 +389,9 @@ impl Link {
     }
 
     /// Put a render into `doc` (base pixels and size), moving the other layers from where `from`
-    /// framed the photo to where `to` does. When the frame changed in another way than the crop
-    /// (or the scale did), they stay, and the notice says so.
+    /// framed the photo to where `to` does: by whole pixels only (a crop), exactly. A frame change
+    /// that needs more is a Develop step's follow ([`crate::follow`]), never a plain render; one
+    /// that arrives here anyway leaves the layers where they are, and the notice says so.
     fn place(
         &mut self,
         doc: &mut photocraft_doc::Document,
@@ -325,14 +400,11 @@ impl Link {
         surface: Surface,
         size: Size,
     ) -> Result<(), String> {
-        let others: Vec<_> = doc.walk().into_iter().map(|(_, _, l)| l).filter(|l| !crate::is_base(l)).map(|l| l.id).collect();
+        let others = top_level_others(doc);
         if let (Some(from), Some(to), false) = (from, to, others.is_empty()) {
-            // ponytail: whole pixels, same scale only (the base renders at the source's own size
-            // outside tests); a scale change would need the layers resampled
-            if from.frame == to.frame && (from.scale - to.scale).abs() < 1e-9 {
-                let d = |i: usize| ((from.origin[i] - to.origin[i]) * to.scale).round() as i32;
-                let (dx, dy) = (d(0), d(1));
-                if (dx, dy) != (0, 0) {
+            match map(from, doc.size, to, size) {
+                Map::Same => {}
+                Map::Shift(dx, dy) => {
                     let targets = photocraft_engine::layer_multi_cmds::move_targets(doc, &others);
                     // a layer the user locked in place stops the move: all of them stay, and say so
                     match photocraft_engine::layer_multi_cmds::moved(doc, &targets, dx, dy) {
@@ -340,15 +412,24 @@ impl Link {
                         Err(e) => self.notice = Some(format!("Pixel layers didn\u{2019}t follow the Develop crop: {e}")),
                     }
                 }
-            } else if from != to {
-                self.notice = Some(LAYERS_STAY.into());
+                Map::Affine(_) | Map::Warped(_) => self.notice = Some(LAYERS_STAY.into()),
             }
         }
-        let base = doc.layers.iter_mut().find(|l| crate::is_base(l)).ok_or("the document has no base layer")?;
-        base.content = LayerContent::Raster(surface);
-        doc.size = size;
-        Ok(())
+        put_base(doc, surface, size)
     }
+}
+
+/// The layers above the base, at the root (groups move as one).
+pub(crate) fn top_level_others(doc: &photocraft_doc::Document) -> Vec<photocraft_doc::LayerId> {
+    doc.layers.iter().filter(|l| !crate::is_base(l)).map(|l| l.id).collect()
+}
+
+/// The render's pixels into the base layer, and its size onto the canvas.
+pub(crate) fn put_base(doc: &mut photocraft_doc::Document, surface: Surface, size: Size) -> Result<(), String> {
+    let base = doc.layers.iter_mut().find(|l| crate::is_base(l)).ok_or("the document has no base layer")?;
+    base.content = LayerContent::Raster(surface);
+    doc.size = size;
+    Ok(())
 }
 
 /// Close every document PhotoCraft holds (the open document's pixels go with it: `pixel` keeps
@@ -469,8 +550,16 @@ pub(crate) mod tests {
         (s, Size { width: w, height: h })
     }
 
+    /// An anchor for a 64 × 48 source: `frame` 1 upright, 2 rotated left; the crop's top-left at
+    /// (`x`, `y`) source pixels.
     pub(crate) fn anchor(frame: u64, x: f64, y: f64) -> Option<Anchor> {
-        Some(Anchor { frame, origin: [x, y], scale: 1.0 })
+        let mut s = DevelopSettings::default();
+        if frame == 2 {
+            s.orientation = s.orientation.rotated(false);
+        }
+        s.crop.geometry.rect.x0 = x / 64.0;
+        s.crop.geometry.rect.y0 = y / 48.0;
+        Some(Anchor::new(Arc::new(s), (64, 48), None))
     }
 
     /// A Pixel edit: a layer with one painted pixel at (x, y).
@@ -589,7 +678,11 @@ pub(crate) mod tests {
         // Develop crops 4 px off the left, 2 off the top: the layers stay on the same photo pixels
         let rev = doc.revision;
         let (r, cropped) = render_sized(60, 46);
-        doc.write_base(&mut session, r, cropped, anchor(1, 4.0, 2.0)).unwrap();
+        let crop = anchor(1, 4.0, 2.0);
+        // the render is of the document's settings, as `Base` makes it (an undo to a state showing
+        // a render of the current settings would adopt it instead)
+        doc.develop = (*crop.as_ref().unwrap().settings).clone();
+        doc.write_base(&mut session, r, cropped, crop).unwrap();
         assert_eq!((at(&doc.pixel, "Paint"), at(&doc.pixel, "Later")), ((6, 8), (26, 28)));
         assert_eq!(at(&session.active().unwrap().doc, "Paint"), (6, 8), "in PhotoCraft too");
         doc.copy_back(&mut session);
@@ -606,7 +699,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn after_a_develop_rotation_pixel_layers_stay_and_a_notice_says_so() {
+    fn a_frame_change_written_outside_a_develop_step_leaves_layers_and_says_so() {
         let (mut session, mut doc) = attached();
         let (r, s) = render_sized(64, 48);
         doc.write_base(&mut session, r, s, anchor(1, 0.0, 0.0)).unwrap();

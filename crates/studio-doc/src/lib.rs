@@ -9,6 +9,7 @@ pub mod base;
 #[cfg(test)]
 mod bench;
 pub mod file;
+pub mod follow;
 pub mod history;
 pub mod open;
 pub mod pixel;
@@ -64,6 +65,9 @@ pub struct Document {
     /// Where pixel lives while the document is open: PhotoCraft's session (see [pixel]).
     pub(crate) link: pixel::Link,
     pub history: history::History,
+    /// Bumped whenever the pixels get a new home ([`Document::attach`]): a render started for an
+    /// earlier generation lands nowhere.
+    pub generation: u64,
 }
 
 /// `document.json`: everything but the layer tree (which is a `.pcraft` bundle next to it).
@@ -113,6 +117,7 @@ impl Document {
             saved_revision: 0,
             link: Default::default(),
             history: Default::default(),
+            generation: 0,
         })
     }
 

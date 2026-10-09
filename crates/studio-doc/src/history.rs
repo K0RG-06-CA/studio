@@ -38,7 +38,7 @@ use photocraft_doc::DocId;
 use photocraft_engine::{DocState, Session as PixelSession};
 
 use crate::Document;
-use crate::pixel::state_of;
+use crate::pixel::{framing, state_of};
 
 /// Pixel memory the history may hold (PhotoCraft's states and Studio's own steps), by default.
 pub const HISTORY_BYTES: usize = 1 << 30;
@@ -48,6 +48,9 @@ pub const HISTORY_STEPS: usize = 1000;
 /// What the history says when it had to start over.
 pub const RESET_PIXEL: &str = "History reset: PhotoCraft changed it in a way Studio can\u{2019}t follow";
 pub const RESET_LIBRARY: &str = "History reset: the library changed";
+
+/// Why PhotoCraft and the history wait while a Develop geometry change renders.
+pub const RENDERING: &str = "Develop is rendering: Pixel follows once it has landed";
 
 /// A PhotoCraft state, by identity. Weak: the register never keeps pixels alive, but the
 /// allocation stays, so no other state can get its address while Studio remembers it.
@@ -124,6 +127,11 @@ pub struct History {
     clear_pixel_redo: bool,
     requested: Option<Jump>,
     notice: Option<String>,
+    /// The newest step is a Develop step that changed the frame, and waits for its render to land
+    /// as its Pixel half (the follow, [`crate::follow`]): the hash of the settings it waits for.
+    /// Until then PhotoCraft is barred (the shell skips its logic and refuses its commands), and
+    /// every further Develop change joins the step.
+    pending: Option<u64>,
 }
 
 impl Default for History {
@@ -141,6 +149,7 @@ impl Default for History {
             clear_pixel_redo: false,
             requested: None,
             notice: None,
+            pending: None,
         }
     }
 }
@@ -201,11 +210,45 @@ impl History {
         self.redo_docs.clear();
         self.clear_pixel_redo = true;
         self.requested = None;
+        self.pending = None;
         self.notice = Some(why.to_owned());
     }
 
     pub(crate) fn take_notice(&mut self) -> Option<String> {
         self.notice.take()
+    }
+
+    /// A Develop step waits for its render to land as its Pixel half (see `pending`).
+    pub fn pending_follow(&self) -> bool {
+        self.pending.is_some()
+    }
+
+    /// The label of the step waiting for its follow.
+    pub(crate) fn pending_label(&self) -> Option<&str> {
+        self.pending.and_then(|_| self.steps.last()).map(|s| s.label.as_str())
+    }
+
+    /// The follow landed and was reconciled as a Pixel step of its own: it joins the Develop step
+    /// waiting for it (one step, Develop and Pixel). Anything else there is a history Studio
+    /// can't name.
+    pub(crate) fn absorb_follow(&mut self) {
+        if self.pending.take().is_none() {
+            return;
+        }
+        let n = self.steps.len();
+        let paired = n >= 2
+            && self.steps[n - 1].pixel_only()
+            && self.steps[n - 1].pixel.len() == 1
+            && !self.steps[n - 2].pixel_only()
+            && self.steps[n - 2].pixel.is_empty();
+        match self.steps.pop().filter(|_| paired) {
+            Some(follow) => {
+                if let Some(step) = self.steps.last_mut() {
+                    step.pixel = follow.pixel;
+                }
+            }
+            None => self.clear(RESET_PIXEL),
+        }
     }
 
     // ---------------------------------------------------------------- Develop
@@ -239,8 +282,22 @@ impl History {
             // a drag: the live base follows, the step is recorded at release
             return Some(now);
         }
-        let label = lr.undo.last().filter(|e| touches(&e.op, photo)).map_or("Develop", |e| e.label.as_str()).to_owned();
         let history_after = Arc::new(p.history.clone());
+        if self.pending.is_some() {
+            // while the step waits for its render, every Develop change joins it: `after` moves,
+            // `before` stays the checkpoint; one render lands, one state is recorded
+            let Some(d) = self.steps.last_mut().and_then(|s| s.develop.as_mut()) else {
+                self.clear(RESET_PIXEL);
+                return Some(now);
+            };
+            d.after = now.clone();
+            d.history_after = history_after.clone();
+            self.pending = (framing(&d.before) != framing(&now)).then(|| now.hash64());
+            self.develop_base = Some((now.clone(), history_after));
+            return Some(now);
+        }
+        let label = lr.undo.last().filter(|e| touches(&e.op, photo)).map_or("Develop", |e| e.label.as_str()).to_owned();
+        let pending = (framing(&base) != framing(&now)).then(|| now.hash64());
         let develop = Develop { before: base, after: now.clone(), history_before: list, history_after: history_after.clone() };
         self.steps.push(Step { label, develop: Some(develop), pixel: Vec::new() });
         self.redo.clear();
@@ -248,6 +305,7 @@ impl History {
         self.redo_docs.clear();
         self.clear_pixel_redo = true;
         self.develop_base = Some((now.clone(), history_after));
+        self.pending = pending;
         self.prune(None);
         Some(now)
     }
@@ -479,8 +537,12 @@ fn states(st: &DocState) -> Vec<Pointer> {
     (0..st.history.past_len()).filter_map(|i| st.history.state(i)).map(|d| Arc::downgrade(&d)).collect()
 }
 
-/// PhotoCraft can move `step`'s states now (no background job holds its document).
-fn ready(px: &PixelSession, step: &Step) -> Result<(), String> {
+/// Both halves of `step` can move now: no background job holds PhotoCraft's document, no slider
+/// drag is open on the photo.
+fn ready(lr: &Session, px: &PixelSession, photo: PhotoId, step: &Step) -> Result<(), String> {
+    if step.develop.is_some() && lr.interaction.as_ref().is_some_and(|i| i.photo == photo) {
+        return Err("a Develop slider is still being dragged: nothing was undone".into());
+    }
     match px.active_job() {
         Some(job) if !step.pixel.is_empty() => Err(format!("PhotoCraft is busy ({}): nothing was undone", job.label)),
         _ => Ok(()),
@@ -526,12 +588,17 @@ impl Document {
 
     /// Settle everything before a decision on the history: a slider drag open on the photo ends
     /// (and is its step), PhotoCraft's edits are copied back and reconciled. Before every undo,
-    /// redo, jump, save and close.
+    /// redo, jump, save and close. A Develop step still waiting for its render to land as its
+    /// Pixel half ([`RENDERING`]) stops it: the caller waits for that render first
+    /// ([`crate::base::Base::finish`]), so a geometry change is never undone half way.
     pub fn flush(&mut self, lr: &mut Session, px: &mut PixelSession) -> Result<(), String> {
         if lr.interaction.as_ref().is_some_and(|i| i.photo == self.source.photo) {
             lr.end_interaction().map_err(|e| e.to_string())?;
         }
         self.note_develop(lr);
+        if self.history.pending_follow() {
+            return Err(RENDERING.into());
+        }
         self.reconcile(lr, px)
     }
 
@@ -563,71 +630,124 @@ impl Document {
         Ok(())
     }
 
-    /// Commit a Develop half to LightCraft (journaled: it survives a restart).
+    /// Commit a Develop half to LightCraft (journaled: it survives a restart). A failure leaves
+    /// LightCraft as it was (`commit` applies the op or nothing).
     fn commit_develop(&mut self, lr: &mut Session, label: &str, settings: &Arc<DevelopSettings>, list: &Arc<Vec<HistoryStep>>) -> Result<(), String> {
         let id = self.source.photo;
         let edited = lr.catalog.photo(id).and_then(|p| p.edited.clone());
         let ops =
             vec![Op::SetDevelop { id, settings: settings.clone(), label: label.into(), edited }, Op::SetHistory { id, history: (**list).clone() }];
-        if let Err(e) = lr.commit(label, Op::Batch { ops }) {
-            self.history.clear(&format!("History reset: {e}"));
-            return Err(e.to_string());
-        }
+        lr.commit(label, Op::Batch { ops }).map_err(|e| e.to_string())?;
         self.history.develop_base = Some((settings.clone(), list.clone()));
         self.develop = (**settings).clone();
         Ok(())
     }
 
-    /// One step back: its Pixel states undone in PhotoCraft (newest first), then its Develop
-    /// half committed. No copy-back here (a jump copies once at the end).
+    /// The render for the pending Develop step failed: the step is dropped, the settings and the
+    /// photo's History go back to the checkpoint before it (the Pixel document is untouched: no
+    /// state was recorded), and the notice says so.
+    pub fn follow_failed(&mut self, lr: &mut Session, why: &str) {
+        if self.history.pending.take().is_none() {
+            return;
+        }
+        let Some(step) = self.history.steps.pop() else { return };
+        if let Some(d) = &step.develop
+            && let Err(e) = self.commit_develop(lr, &format!("Undo {}", step.label), &d.before, &d.history_before)
+        {
+            self.history.clear(&format!("History reset: {e}"));
+            return;
+        }
+        self.revision += 1;
+        self.history.notice = Some(format!("Develop couldn\u{2019}t render \u{201c}{}\u{201d}: the edit was undone ({why})", step.label));
+    }
+
+    /// One of a step's Pixel states undone in PhotoCraft, the register following.
+    fn pixel_undo(&mut self, px: &mut PixelSession) -> Result<(), String> {
+        if !px.undo() {
+            return Err("PhotoCraft is busy: nothing was undone".into());
+        }
+        let Some(st) = self.link.id().and_then(|id| state_of(px, id)) else { return Err("PhotoCraft lost the document".into()) };
+        let h = &mut self.history;
+        h.redo_docs.extend(h.current.take());
+        h.seen.pop();
+        h.current = Some(Arc::downgrade(&st.doc));
+        Ok(())
+    }
+
+    /// The mirror of [`Document::pixel_undo`]. A redone state is the document that was current,
+    /// which a host write may have replaced since the step recorded it: `p` takes the pointer
+    /// afresh.
+    fn pixel_redo(&mut self, px: &mut PixelSession, p: &mut Pointer) -> Result<(), String> {
+        if !px.redo() {
+            return Err("PhotoCraft is busy: nothing was redone".into());
+        }
+        let Some(st) = self.link.id().and_then(|id| state_of(px, id)) else { return Err("PhotoCraft lost the document".into()) };
+        let h = &mut self.history;
+        if let Some(pushed) = h.current.take() {
+            *p = pushed.clone();
+            h.seen.push(pushed);
+        }
+        h.redo_docs.pop();
+        h.current = Some(Arc::downgrade(&st.doc));
+        Ok(())
+    }
+
+    /// One step back, once both halves can move: its Pixel states undone in PhotoCraft (newest
+    /// first), then its Develop half committed. If that commit fails, the Pixel half is redone
+    /// back, so both halves stay at the step, which is kept; the notice says why. No copy-back
+    /// here (a jump copies once at the end).
     fn undo_one(&mut self, lr: &mut Session, px: &mut PixelSession) -> Result<bool, String> {
-        let Some(step) = self.history.steps.pop() else { return Ok(false) };
-        if let Err(e) = ready(px, &step) {
+        let Some(mut step) = self.history.steps.pop() else { return Ok(false) };
+        if let Err(e) = ready(lr, px, self.source.photo, &step) {
             self.history.steps.push(step);
             return Err(e);
         }
         for _ in 0..step.pixel.len() {
-            if !px.undo() {
-                return Err("PhotoCraft is busy: nothing was undone".into());
-            }
-            let Some(st) = self.link.id().and_then(|id| state_of(px, id)) else { return Err("PhotoCraft lost the document".into()) };
-            let h = &mut self.history;
-            h.redo_docs.extend(h.current.take());
-            h.seen.pop();
-            h.current = Some(Arc::downgrade(&st.doc));
+            self.pixel_undo(px)?;
         }
-        if let Some(d) = step.develop.clone() {
-            self.commit_develop(lr, &format!("Undo {}", step.label), &d.before, &d.history_before)?;
+        if let Some(d) = step.develop.clone()
+            && let Err(e) = self.commit_develop(lr, &format!("Undo {}", step.label), &d.before, &d.history_before)
+        {
+            if step.pixel.is_empty() {
+                self.history.clear(&format!("History reset: {e}"));
+                return Err(e);
+            }
+            for p in &mut step.pixel {
+                self.pixel_redo(px, p)?;
+            }
+            self.history.notice = Some(format!("Couldn\u{2019}t undo \u{201c}{}\u{201d}: {e}", step.label));
+            self.history.steps.push(step);
+            return Err(e);
         }
         self.revision += 1;
         self.history.redo.push(step);
         Ok(true)
     }
 
-    /// The mirror of [`Document::undo_one`]: Develop half first, then the states redone. A redone
-    /// state is the document that was current, which a host write may have replaced since the
-    /// step recorded it: the step takes the pointer afresh.
+    /// The mirror of [`Document::undo_one`]: the states redone (oldest first), then the Develop
+    /// half; a failed commit undoes them back and keeps the step on the redo side.
     fn redo_one(&mut self, lr: &mut Session, px: &mut PixelSession) -> Result<bool, String> {
         let Some(mut step) = self.history.redo.pop() else { return Ok(false) };
-        if let Err(e) = ready(px, &step) {
+        if let Err(e) = ready(lr, px, self.source.photo, &step) {
             self.history.redo.push(step);
             return Err(e);
         }
-        if let Some(d) = step.develop.clone() {
-            self.commit_develop(lr, &format!("Redo {}", step.label), &d.after, &d.history_after)?;
-        }
         for p in &mut step.pixel {
-            if !px.redo() {
-                return Err("PhotoCraft is busy: nothing was redone".into());
+            self.pixel_redo(px, p)?;
+        }
+        if let Some(d) = step.develop.clone()
+            && let Err(e) = self.commit_develop(lr, &format!("Redo {}", step.label), &d.after, &d.history_after)
+        {
+            if step.pixel.is_empty() {
+                self.history.clear(&format!("History reset: {e}"));
+                return Err(e);
             }
-            let Some(st) = self.link.id().and_then(|id| state_of(px, id)) else { return Err("PhotoCraft lost the document".into()) };
-            let h = &mut self.history;
-            if let Some(pushed) = h.current.take() {
-                *p = pushed.clone();
-                h.seen.push(pushed);
+            for _ in 0..step.pixel.len() {
+                self.pixel_undo(px)?;
             }
-            h.redo_docs.pop();
-            h.current = Some(Arc::downgrade(&st.doc));
+            self.history.notice = Some(format!("Couldn\u{2019}t redo \u{201c}{}\u{201d}: {e}", step.label));
+            self.history.redo.push(step);
+            return Err(e);
         }
         self.revision += 1;
         self.history.steps.push(step);
@@ -636,7 +756,7 @@ impl Document {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::pixel::tests::{TILE, anchor, attached, names, paint, render_sized};
 
@@ -729,7 +849,7 @@ mod tests {
     ];
 
     /// A library on disk with one imported PNG, and a session on it.
-    fn on_disk(tag: &str) -> (std::path::PathBuf, Session, PhotoId) {
+    pub(crate) fn on_disk(tag: &str) -> (std::path::PathBuf, Session, PhotoId) {
         let dir = std::env::temp_dir().join(format!("studio-history-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
@@ -1199,6 +1319,32 @@ mod tests {
         assert_eq!(doc.redo(&mut lr, &mut px), Ok(false));
         assert_eq!(doc.take_notice(), None);
         assert_eq!(layers(&doc), ["Develop"]);
+    }
+
+    /// Task 2: a step with a Develop half moves only once both halves can: with a slider drag
+    /// open on the photo nothing moves in either engine, and the step stays (the way PhotoCraft's
+    /// own jump reaches `undo_one`, past `flush`, which would have ended the drag).
+    #[test]
+    fn a_step_with_a_develop_half_waits_for_a_drag_on_the_photo_and_moves_neither_engine() {
+        let (mut lr, mut px, mut doc) = open();
+        let id = doc.source.photo;
+        paint(&mut px, "Brush", 1, 1);
+        tick(&mut doc, &lr, &mut px);
+        set_exposure(&mut lr, id, 1.0);
+        tick(&mut doc, &lr, &mut px);
+        // a step owning both halves (what a geometry change records)
+        let p = doc.history.steps.remove(0).pixel;
+        doc.history.steps[0].pixel = p;
+        let pixels = px.active().unwrap().doc.clone();
+        lr.selection.active = Some(id);
+        lr.begin_interaction("Exposure").unwrap();
+        assert!(doc.undo_one(&mut lr, &mut px).unwrap_err().contains("dragged"));
+        assert!(Arc::ptr_eq(&px.active().unwrap().doc, &pixels) && exposure(&lr, id) == 1.0, "neither half moved");
+        assert_eq!((doc.history.position(), doc.history.can_redo()), (1, false));
+        lr.end_interaction().unwrap();
+        assert!(doc.undo_one(&mut lr, &mut px).unwrap());
+        doc.copy_back(&mut px);
+        assert_eq!((layers(&doc).len(), exposure(&lr, id)), (1, 0.0));
     }
 
     /// Review: PhotoCraft's own undo is taken as Studio's only when the steps it undid are all

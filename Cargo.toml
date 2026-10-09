@@ -17,6 +17,7 @@ studio-doc = { path = "crates/studio-doc" }
 lightcraft-ui-egui = { git = "https://github.com/storytold/lightcraft", rev = "eeb136b9eec179805307c4626596f0ccc074368b" }
 lightcraft-engine = { git = "https://github.com/storytold/lightcraft", rev = "eeb136b9eec179805307c4626596f0ccc074368b" }
 lightcraft-catalog = { git = "https://github.com/storytold/lightcraft", rev = "eeb136b9eec179805307c4626596f0ccc074368b" }
+lightcraft-geom = { git = "https://github.com/storytold/lightcraft", rev = "eeb136b9eec179805307c4626596f0ccc074368b" }
 
 # storytold PhotoCraft, pinned (milestone 3: its layer tree and .pcraft bundle are the pixel half
 # of Studio's document). Update = change every rev.

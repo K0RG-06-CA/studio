@@ -158,7 +158,39 @@ See [`PRD.md`](PRD.md) → *Milestones for Claude Code*.
     redo going away takes Studio's with it. The shell doesn't call `flush`,
     `undo`, `reconcile` yet (task 3): Pixel steps are recorded through `copy_back`, Develop steps
     through `mirror`; Ctrl+Z in Pixel is still PhotoCraft's own, which the history accepts.
-  - [ ] 2. Pixel layers follow a Develop rotate / straighten / flip / crop / scale, as a paired step
+  - [x] 2. Pixel layers follow a Develop rotate / straighten / flip / crop / scale, as a paired step
+    (2026-10-09). `studio_doc::follow`: a Develop step that changes the framing (orientation,
+    crop, straighten, flips, lens, perspective) waits for its render (`History::pending_follow`),
+    and the render lands as **one** recorded PhotoCraft state ("Develop: Rotate Left") joined to
+    the step (Develop + Pixel). The map goes through LightCraft's `Frame` (output → normalised →
+    lens-corrected → stored → new orientation → new output), 5 × 5 grid, affine fit on three
+    points, 0.25 px; whole-pixel shift → `moved`; else `edit.transform` per top-level layer
+    (nearest for right angles/flips, bicubic otherwise, `target: pixels`) under a cloned history
+    that is put back, so `past_len` grows by exactly one; any error → whole document back,
+    notice; a position-locked layer or a non-affine change (perspective/lens) → layers stay,
+    base + size still recorded, notice; the selection is dropped (`ponytail:`). `Anchor` now
+    carries the map's inputs (settings `Arc`, its hash, source size, embedded lens); a render
+    landing in a state of the target settings is adopted (no render), one of other settings is
+    put back by a whole-pixel shift or else left as the state has it and re-rendered (a host
+    replacement). Barrier: while pending, Develop changes coalesce into the step; `flush` refuses
+    (`RENDERING`); `Base::finish` waits (30 s ceiling) and lands it; a render that fails undoes
+    the step (settings + photo History to the checkpoint, Pixel untouched, notice). Renders carry
+    `Document.generation` (bumped by `attach`): another generation's lands nowhere. Shell:
+    PhotoCraft's logic skipped and `pixel.*` refused while pending, `persona.*` and every
+    `document.*` / the quit prompt (through `unsaved()`) wait for it first, busy mark in the top
+    bar. **Paired undo/redo (user, 2026-10-09):** both halves checked first (no PhotoCraft job, no
+    drag open on the photo); the Pixel half moves, then the Develop commit; if the commit fails,
+    the Pixel half is redone/undone back, the step is kept, notice ("Couldn't undo X: …"); tested
+    with a forced commit failure on both sides (mutation-checked). Tests: `follow.rs` (14),
+    `history::a_step_with_a_develop_half_waits_*`, three shell barrier tests. Deviations, small:
+    the wait is `Base::finish` (the render channel is `Base`'s), and `Document::flush` refuses
+    while pending instead of blocking (task 3's `edit.undo` calls `finish` first); the plan's
+    "rotate → exposure → goto before both → redo" case exercises the re-render path (the
+    exposure render replaced the post-follow document in place), so adoption is tested with an
+    undo/redo of the rotation alone. A Develop-only step whose commit fails still resets the
+    history (task 1's tested behaviour). Not done here: `bench.rs` peak bytes during a follow and
+    the memory test for k geometry steps (design §5); a single-channel Channels-panel restriction
+    on `edit.transform` during a follow is untested.
   - [ ] 3. Shell: commands, shortcuts, Studio's History panel, reconcile points
   - [ ] 4. A document without a photo: PNG/JPEG/TIFF/PSD straight into Pixel
   - [ ] 5. Save/close flush and render identity
