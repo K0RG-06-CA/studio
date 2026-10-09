@@ -227,7 +227,8 @@ mod tests {
             if base.up_to_date(doc) {
                 return;
             }
-            assert!(t0.elapsed() < Duration::from_secs(60), "render never finished");
+            // a native 24 MP render on a 2-core CI runner can take a minute or more
+            assert!(t0.elapsed() < Duration::from_secs(300), "render never finished");
             std::thread::sleep(Duration::from_millis(5));
         }
     }
