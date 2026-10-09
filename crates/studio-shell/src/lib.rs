@@ -206,7 +206,7 @@ impl StudioShell {
     fn replace(&mut self, doc: Document) -> Result<(), String> {
         self.document_path = doc.path.clone();
         self.document = Some(doc);
-        self.base = Base::new();
+        self.base = self.base.renewed();
         self.base_error = None;
         Ok(())
     }

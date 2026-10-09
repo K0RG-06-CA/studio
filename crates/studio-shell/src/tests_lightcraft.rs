@@ -126,7 +126,11 @@ use crate::{Persona, StudioShell};
 pub(crate) fn demo_shell() -> StudioShell {
     let mut app = LightcraftApp::new(lightcraft_engine::Session::with_demo(), Services::default());
     app.ui.settings.gpu = false;
-    StudioShell { lightroom: Some(Lightroom::new(app)), ..Default::default() }
+    let mut shell = StudioShell { lightroom: Some(Lightroom::new(app)), ..Default::default() };
+    // the demo photos are 24 MP: a document's base renders at 600 px here (CI's runners take a
+    // minute or more for the full size on the CPU)
+    shell.base.max_edge = Some(600);
+    shell
 }
 
 /// Studio's theme applied once, at the start, as the app does.
@@ -646,7 +650,7 @@ fn settle_base(h: &mut Harness<'_, StudioShell>) {
     let t0 = std::time::Instant::now();
     h.run_steps(1);
     while !h.state().base_up_to_date() {
-        assert!(t0.elapsed().as_secs() < 60, "the base never rendered: {:?}", h.state().base_error);
+        assert!(t0.elapsed().as_secs() < 60, "the base never rendered in {:?}: {:?}", t0.elapsed(), h.state().base_error);
         h.run_steps(1);
         std::thread::sleep(std::time::Duration::from_millis(5));
     }
@@ -750,6 +754,7 @@ fn a_saved_document_comes_back_after_a_relaunch() {
     let mut shell = StudioShell::restore(Some(ron::from_str(&saved).unwrap()));
     assert!(shell.document.is_none() && shell.document_path.is_some());
     shell.lightroom = demo_shell().lightroom;
+    shell.base.max_edge = Some(600);
     shell.reopen().unwrap();
     let doc = shell.document.as_ref().unwrap();
     assert_eq!((doc.name.as_str(), doc.develop.light.exposure, doc.path.as_deref()), (name.as_str(), 1.0, Some(path.as_path())));

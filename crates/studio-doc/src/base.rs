@@ -38,11 +38,19 @@ pub struct Base {
     failed: Option<(u64, String)>,
     /// Renders started so far.
     started: u64,
+    /// Render no larger than this on the long side (the crop's native size otherwise): draft
+    /// renders, and tests that shouldn't develop 24 MP on the CPU.
+    pub max_edge: Option<usize>,
 }
 
 impl Base {
     pub fn new() -> Self {
         Base::default()
+    }
+
+    /// A fresh base (nothing mirrored, shown or pending) with the same render cap.
+    pub fn renewed(&self) -> Self {
+        Base { max_edge: self.max_edge, ..Base::default() }
     }
 
     /// A render is in flight.
@@ -105,7 +113,9 @@ impl Base {
         // the size the crop has at the source's own resolution (rotation swaps the sides; a fit
         // into the photo's box would scale a crop up and a rotated photo down)
         let (nw, nh) = lightcraft_engine::pipeline::native_output_size(w, h, &doc.develop);
-        let (nw, nh) = (nw.round().max(1.0) as usize, nh.round().max(1.0) as usize);
+        // only ever smaller: LightCraft's fit would scale a small frame up to the box
+        let scale = self.max_edge.map_or(1.0, |m| (m as f64 / nw.max(nh)).min(1.0));
+        let (nw, nh) = ((nw * scale).round().max(1.0) as usize, (nh * scale).round().max(1.0) as usize);
         let mut job = session.preview_job(id, nw, nh, true, &doc.develop).ok_or_else(|| format!("photo {} can't be rendered", id.0))?;
         // 16 bits: LightCraft renders deep output on the CPU (its GPU kernel writes 8-bit)
         job.request.depth = OutputDepth::U16;
@@ -193,7 +203,16 @@ mod tests {
     use crate::tests::demo;
     use lightcraft_engine::catalog::model::PhotoId;
 
+    /// A document on the first demo photo, its base capped at 600 px (the demo scenes are 24 MP,
+    /// and CI's runners develop that on the CPU in a minute or more).
     fn open() -> (Session, Document, Base) {
+        let (session, doc, mut base) = open_native();
+        base.max_edge = Some(600);
+        (session, doc, base)
+    }
+
+    /// The same, rendering at the crop's native size.
+    fn open_native() -> (Session, Document, Base) {
         lightcraft_engine::gpu::set_enabled(false);
         let (session, id) = demo();
         let doc = Document::from_photo(&session, id).unwrap();
@@ -225,6 +244,7 @@ mod tests {
         assert!(doc.base_layer().unwrap().surface().unwrap().tile_count() == 0);
         settle(&mut base, &mut session, &mut doc);
         let (w, h) = (doc.pixel.size.width as usize, doc.pixel.size.height as usize);
+        assert_eq!((w, h), (600, 400), "capped at 600 on the long side, never scaled up");
         let theirs = session.render_now(doc.source.photo, w, h).unwrap().image;
         assert_eq!((theirs.width, theirs.height), (w, h));
         let ours = photocraft_compose::flatten(&doc.pixel);
@@ -332,9 +352,11 @@ mod tests {
 
     #[test]
     fn a_crop_resizes_the_document_with_the_base() {
-        let (mut session, mut doc, mut base) = open();
+        let (mut session, mut doc, mut base) = open_native();
         settle(&mut base, &mut session, &mut doc);
         let full = doc.pixel.size;
+        let photo = session.catalog.photo(doc.source.photo).unwrap();
+        assert_eq!((full.width, full.height), (photo.width, photo.height), "native size");
         let id = doc.source.photo;
         let mut s = (*session.develop_of(id).unwrap()).clone();
         s.crop.geometry.rect.x1 = 0.5;

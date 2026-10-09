@@ -152,5 +152,7 @@ From the code review of milestone 3 (HIGH/MEDIUM were fixed, one commit each, wi
   straighten), and rendering isn't an edit (no `*`). The file is one STORE zip (`document.json` +
   `pixel.pcraft`, PhotoCraft's own zip code); the default path is beside the source file
   (`<file>.studio`, keeping the photo's extension so a RAW+JPEG pair gets two documents).
+  `Base.max_edge` caps the render's long side (M4's draft renders; the tests set 600 px, since the
+  demo photos are 24 MP and CI's runners develop that on the CPU in a minute or more).
   Reserved, not built: `film` settings (PRD-halation order), one undo history (M5: `revision`),
   the command bus (M6: `run_with(id, params)`).
