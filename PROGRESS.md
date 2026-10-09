@@ -117,7 +117,11 @@ Former hand checks and the tests that replaced them:
     decode 1.6–2.0 s; full after an edit ~0.9 s (LightCraft ~0.67 s + 16-bit → surface ~0.21 s);
     **with a StageCache ~0.43 s**; draft 2560 ~0.17 s, 1280 ~0.055 s; GPU 8-bit full ~1.1 s (no
     faster than the CPU). Dev profile: full after an edit ~1.1 s. The 60 s was CI's 2-core runners.
-  - [ ] Fix: decision pending review (proposed: StageCache, no draft)
+  - [x] Fix: the base re-renders through LightCraft's `StageCache` (warm full size ~0.43 s), one
+    render in flight, edits made meanwhile coalesce into one render of the newest settings, a
+    stale result is dropped; `Base::current` hands out the layer tree only when the base is up to
+    date. No draft. GPU 8-bit is slower than the CPU here (~1.1 s vs ~0.9 s), so no upstream
+    request for a GPU 16-bit path. Future option if Pixel feels laggy: a 1280 px draft (~55 ms).
 
 ## Review (milestone 3): LOW findings left open
 

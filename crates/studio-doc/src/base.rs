@@ -9,7 +9,7 @@ use std::sync::mpsc::{Receiver, TryRecvError, channel};
 use lightcraft_engine::Session;
 use lightcraft_engine::develop::DevelopSettings;
 use lightcraft_engine::media::RenderResult;
-use lightcraft_engine::pipeline::{DeepImage, DeepSamples, OutputDepth, Rendered};
+use lightcraft_engine::pipeline::{DeepImage, DeepSamples, OutputDepth, Rendered, StageCache};
 use photocraft_color::PixelFormat;
 use photocraft_doc::LayerContent;
 use photocraft_geom::{Rect, Size};
@@ -38,9 +38,12 @@ pub struct Base {
     failed: Option<(u64, String)>,
     /// Renders started so far.
     started: u64,
-    /// Render no larger than this on the long side (the crop's native size otherwise): draft
-    /// renders, and tests that shouldn't develop 24 MP on the CPU.
+    /// Render no larger than this on the long side (the crop's native size otherwise): tests that
+    /// shouldn't develop 24 MP on the CPU.
     pub max_edge: Option<usize>,
+    /// LightCraft's stages kept between this photo's renders: a re-render after an edit redoes only
+    /// what the edit changed (24 MP: ~0.9 s → ~0.43 s, see `bench.rs`).
+    stages: Arc<StageCache>,
 }
 
 impl Base {
@@ -66,6 +69,13 @@ impl Base {
     /// The base shows the current settings (and nothing is in flight).
     pub fn up_to_date(&self, doc: &Document) -> bool {
         self.pending.is_none() && self.shown == Some(doc.develop.hash64())
+    }
+
+    /// The document's layer tree, for anything that flattens it or reads the base's pixels
+    /// (exports, the canvas): only once the base shows the current settings, never a stale or
+    /// half-way render.
+    pub fn current<'d>(&self, doc: &'d Document) -> Result<&'d photocraft_doc::Document, String> {
+        if self.up_to_date(doc) { Ok(&doc.pixel) } else { Err("the base layer is still rendering the current settings".into()) }
     }
 
     /// Once per frame: mirror the catalog's settings into `doc`, take a finished render into the
@@ -116,7 +126,10 @@ impl Base {
         // only ever smaller: LightCraft's fit would scale a small frame up to the box
         let scale = self.max_edge.map_or(1.0, |m| (m as f64 / nw.max(nh)).min(1.0));
         let (nw, nh) = ((nw * scale).round().max(1.0) as usize, (nh * scale).round().max(1.0) as usize);
-        let mut job = session.preview_job(id, nw, nh, true, &doc.develop).ok_or_else(|| format!("photo {} can't be rendered", id.0))?;
+        let mut job = session
+            .preview_job(id, nw, nh, true, &doc.develop)
+            .ok_or_else(|| format!("photo {} can't be rendered", id.0))?
+            .with_stages(self.stages.clone());
         // 16 bits: LightCraft renders deep output on the CPU (its GPU kernel writes 8-bit)
         job.request.depth = OutputDepth::U16;
         let (tx, rx) = channel();
@@ -134,7 +147,9 @@ impl Base {
     }
 
     /// A finished render goes into the base layer; the document takes the render's size (crop,
-    /// straighten and rotation change it).
+    /// straighten and rotation change it). One for settings edited since it started is dropped,
+    /// pixels or error: the next `sync` renders the newest settings (edits made meanwhile
+    /// coalesce into that one render).
     fn take(&mut self, session: &mut Session, doc: &mut Document) -> Result<(), String> {
         let Some((want, rx)) = &self.pending else { return Ok(()) };
         let (result, converted) = match rx.try_recv() {
@@ -148,6 +163,9 @@ impl Base {
         let want = *want;
         self.pending = None;
         session.accept(&result);
+        if want != doc.develop.hash64() {
+            return Ok(());
+        }
         let (surface, size) = converted?;
         let base = doc.base_layer_mut().ok_or("the document has no base layer")?;
         base.content = LayerContent::Raster(surface);
@@ -237,6 +255,109 @@ mod tests {
     fn mean_rgb(doc: &Document) -> f32 {
         let b = photocraft_compose::flatten(&doc.pixel);
         b.px.iter().map(|p| (p[0] + p[1] + p[2]) / 3.0).sum::<f32>() / b.px.len() as f32
+    }
+
+    fn set_exposure(session: &mut Session, id: PhotoId, exposure: f64) {
+        let mut s = (*session.develop_of(id).unwrap()).clone();
+        s.light.exposure = exposure;
+        session.set_develop(id, s, "Exposure").unwrap();
+    }
+
+    #[test]
+    fn a_re_render_through_the_stage_cache_matches_a_plain_one_within_1_lsb() {
+        let (mut session, doc, _) = open();
+        let id = doc.source.photo;
+        let render = |session: &mut Session, stages: Option<&Arc<StageCache>>| {
+            let s = (*session.develop_of(id).unwrap()).clone();
+            let mut job = session.preview_job(id, 600, 600, true, &s).unwrap();
+            job.request.depth = OutputDepth::U16;
+            if let Some(st) = stages {
+                job = job.with_stages(st.clone());
+            }
+            let r = job.run();
+            session.accept(&r);
+            match r.rendered.unwrap().deep.unwrap().samples {
+                DeepSamples::U16(v) => v,
+                DeepSamples::F32(_) => panic!("not 16-bit"),
+            }
+        };
+        let stages = Arc::new(StageCache::default());
+        render(&mut session, Some(&stages));
+        // edits late and early in the pipeline, and one that changes the frame
+        let edits: [fn(&mut DevelopSettings); 3] = [
+            |s| s.light.exposure = 1.0,
+            |s| s.light.contrast = 40.0,
+            |s| {
+                s.crop.geometry.rect.x1 = 0.6;
+                s.crop.geometry.rect.y1 = 0.7;
+            },
+        ];
+        for (i, edit) in edits.into_iter().enumerate() {
+            let mut s = (*session.develop_of(id).unwrap()).clone();
+            edit(&mut s);
+            session.set_develop(id, s, "Edit").unwrap();
+            let (cached, plain) = (render(&mut session, Some(&stages)), render(&mut session, None));
+            assert_eq!(cached.len(), plain.len(), "edit {i}");
+            let worst = cached.iter().zip(&plain).map(|(a, b)| a.abs_diff(*b)).max().unwrap();
+            assert!(worst <= 1, "edit {i}: off by {worst}/65535");
+        }
+    }
+
+    #[test]
+    fn edits_during_a_render_coalesce_and_its_stale_result_is_dropped() {
+        let (mut session, mut doc, mut base) = open();
+        let id = doc.source.photo;
+        base.sync(&mut session, &mut doc).unwrap();
+        assert!(base.rendering());
+        // three edits while the first render runs: no second render alongside it
+        for e in [0.5, 1.0, 1.5] {
+            set_exposure(&mut session, id, e);
+            base.sync(&mut session, &mut doc).unwrap();
+            assert_eq!((doc.develop.light.exposure, base.started()), (e, 1));
+        }
+        // the first finishes for superseded settings: dropped, and the newest renders next
+        let t0 = Instant::now();
+        while base.started() == 1 {
+            assert!(t0.elapsed() < Duration::from_secs(300), "the first render never finished");
+            base.sync(&mut session, &mut doc).unwrap();
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        assert_eq!(doc.base_layer().unwrap().surface().unwrap().tile_count(), 0, "the stale render never reached the base");
+        settle(&mut base, &mut session, &mut doc);
+        assert_eq!(base.started(), 2, "one render for all three edits");
+        // the same pixels as a base rendered straight at the newest settings
+        let (mut other_session, mut other, mut other_base) = open();
+        set_exposure(&mut other_session, id, 1.5);
+        settle(&mut other_base, &mut other_session, &mut other);
+        let (ours, theirs) =
+            (photocraft_compose::flatten(base.current(&doc).unwrap()), photocraft_compose::flatten(other_base.current(&other).unwrap()));
+        assert_eq!(ours.px.len(), theirs.px.len());
+        let worst = ours.px.iter().zip(&theirs.px).flat_map(|(a, b)| (0..4).map(move |c| (a[c] - b[c]).abs())).fold(0.0, f32::max);
+        assert!(worst <= 1.5 / 65535.0, "off by {} LSB", worst * 65535.0);
+    }
+
+    #[test]
+    fn reading_the_base_waits_until_it_shows_the_current_settings() {
+        let (mut session, mut doc, mut base) = open();
+        let id = doc.source.photo;
+        assert!(base.current(&doc).is_err(), "nothing rendered yet");
+        base.sync(&mut session, &mut doc).unwrap();
+        assert!(base.rendering() && base.current(&doc).is_err(), "in flight");
+        settle(&mut base, &mut session, &mut doc);
+        let before = photocraft_compose::flatten(base.current(&doc).unwrap()).px;
+        // an edit: stale from the sync that sees it until its render is in
+        set_exposure(&mut session, id, 2.0);
+        base.sync(&mut session, &mut doc).unwrap();
+        let e = base.current(&doc).unwrap_err();
+        assert!(e.contains("still rendering"), "{e}");
+        settle(&mut base, &mut session, &mut doc);
+        let after = photocraft_compose::flatten(base.current(&doc).unwrap()).px;
+        assert!(after.len() == before.len() && after != before, "the new render, not the old one");
+        // a render that fails leaves the base stale: never readable as if current
+        doc.source.photo = PhotoId(u64::MAX);
+        doc.develop.light.exposure = -1.0;
+        assert!(base.sync(&mut session, &mut doc).is_err());
+        assert!(base.current(&doc).is_err());
     }
 
     #[test]

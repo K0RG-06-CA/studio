@@ -658,7 +658,8 @@ fn settle_base(h: &mut Harness<'_, StudioShell>) {
 
 /// Mean brightness of the document as PhotoCraft composites it.
 fn base_brightness(h: &Harness<'_, StudioShell>) -> f32 {
-    let b = photocraft_compose::flatten(&h.state().document.as_ref().unwrap().pixel);
+    let s = h.state();
+    let b = photocraft_compose::flatten(s.base.current(s.document.as_ref().unwrap()).unwrap());
     b.px.iter().map(|p| (p[0] + p[1] + p[2]) / 3.0).sum::<f32>() / b.px.len() as f32
 }
 
