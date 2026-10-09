@@ -308,6 +308,159 @@ fn a_change_to_the_develop_layer_is_taken_back_and_says_why() {
     h.state_mut().run("document.dismissError").unwrap();
 }
 
+// --- Task 7: commands and shortcuts ---
+
+use crate::tests_lightcraft::{Window, ctrl_q, prompt_shown, run_window};
+
+/// A rendered document saved to `path`, open in Pixel, and a Pixel edit on it (not saved).
+fn pixel_edited(h: &mut Harness<'_, crate::StudioShell>, path: &std::path::Path) {
+    h.run_steps(3);
+    pick_first(h);
+    h.state_mut().run("document.new").unwrap();
+    settle_base(h);
+    h.state_mut().run_with("document.saveAs", &serde_json::json!({"path": path})).unwrap();
+    h.state_mut().run("persona.pixel").unwrap();
+    h.run_steps(3);
+    h.state_mut().run("pixel.layer.new.layer").unwrap();
+    h.run_steps(1);
+    assert!(h.state().document.as_ref().unwrap().unsaved(), "a Pixel edit is unsaved");
+    assert_eq!(layer_names(h.state().document.as_ref().unwrap()).len(), 2);
+}
+
+/// Press a key with modifiers for the next frame (straight into the input: see `ctrl_q`).
+fn press(h: &mut Harness<'_, crate::StudioShell>, modifiers: egui::Modifiers, key: egui::Key) {
+    h.input_mut().events.push(egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers });
+    h.run_steps(1);
+    h.input_mut().events.push(egui::Event::Key { key, physical_key: None, pressed: false, repeat: false, modifiers });
+    h.run_steps(1);
+}
+
+#[test]
+fn pixel_commands_run_photocraft_and_a_change_to_the_develop_layer_says_why() {
+    let mut h = studio();
+    h.run_steps(3);
+    assert!(h.state_mut().run("pixel.layer.new.layer").unwrap_err().contains("no document"));
+    h.state_mut().run_with("pixel.tool", &serde_json::json!({"name": "brush"})).unwrap();
+    assert_eq!(h.state().pixel.as_ref().unwrap().app.ui.tool, photocraft_ui_egui::state::Tool::Brush);
+    assert!(h.state_mut().run_with("pixel.tool", &serde_json::json!({"name": "wand of plenty"})).unwrap_err().contains("unknown tool"));
+    pick_first(&mut h);
+    h.state_mut().run("document.new").unwrap();
+    settle_base(&mut h);
+    h.state_mut().run("pixel.layer.new.layer").unwrap();
+    assert_eq!(layer_names(h.state().document.as_ref().unwrap()).len(), 2, "copied at once");
+    let base = h.state().document.as_ref().unwrap().base_layer().unwrap().id.0;
+    let e = h.state_mut().run_with("pixel.layer.setProps", &serde_json::json!({"layer": base, "opacity": 0.5})).unwrap_err();
+    assert_eq!(e, studio_doc::pixel::LOCKED);
+    assert_eq!(h.state().document.as_ref().unwrap().base_layer().unwrap().opacity, 1.0);
+    assert!(h.state_mut().run("pixel.no.such.command").is_err());
+}
+
+#[test]
+fn a_pixel_edit_asks_before_the_document_is_closed_replaced_or_the_window_closes() {
+    let dir = temp_dir("pixel-prompt");
+    let path = dir.join("trip.studio");
+    let mut h = studio();
+    pixel_edited(&mut h, &path);
+    // closing, replacing: the prompt
+    assert!(h.state_mut().run("document.close").unwrap_err().contains("unsaved"));
+    h.run_steps(2);
+    assert!(prompt_shown(&h));
+    h.state_mut().run("document.prompt.cancel").unwrap();
+    assert!(h.state_mut().run("document.new").unwrap_err().contains("unsaved"));
+    h.state_mut().run("document.prompt.cancel").unwrap();
+    // the window's close button and Ctrl+Q: stopped, the prompt asks
+    assert_eq!(run_window(&mut h, 3, true), Window { closes: 0, cancels: 1, closed: false });
+    assert_eq!(h.state().prompt, Some(crate::Pending::Quit));
+    h.state_mut().run("document.prompt.cancel").unwrap();
+    h.run_steps(2);
+    ctrl_q(&mut h);
+    // one Close (Studio's Ctrl+Q, not PhotoCraft's), stopped once
+    assert_eq!(run_window(&mut h, 6, false), Window { closes: 1, cancels: 1, closed: false });
+    assert_eq!(h.state().prompt, Some(crate::Pending::Quit));
+    // Save writes the Pixel edit, then closes
+    h.state_mut().run("document.prompt.save").unwrap();
+    assert_eq!(layer_names(&studio_doc::Document::open(&path).unwrap()).len(), 2);
+}
+
+#[test]
+fn photoshops_document_keys_act_on_studios_document_in_pixel() {
+    let dir = temp_dir("pixel-keys");
+    let path = dir.join("trip.studio");
+    let mut h = studio();
+    pixel_edited(&mut h, &path);
+    let cmd = egui::Modifiers::COMMAND;
+    // Ctrl+S saves the .studio file (PhotoCraft's own save never sees it)
+    press(&mut h, cmd, egui::Key::S);
+    assert!(!h.state().document.as_ref().unwrap().unsaved());
+    assert_eq!(layer_names(&studio_doc::Document::open(&path).unwrap()).len(), 2);
+    // Ctrl+O and Shift+Ctrl+S do nothing yet (no dialogs); PhotoCraft still holds one document
+    press(&mut h, cmd, egui::Key::O);
+    press(&mut h, cmd | egui::Modifiers::SHIFT, egui::Key::S);
+    assert_eq!(h.state().pixel.as_ref().unwrap().app.session.documents().len(), 1);
+    // Ctrl+W closes the document (saved: no prompt)
+    press(&mut h, cmd, egui::Key::W);
+    assert!(h.state().document.is_none());
+    assert!(h.state().pixel.as_ref().unwrap().app.session.documents().is_empty());
+    // Ctrl+1..4 still switch personas from Pixel
+    press(&mut h, cmd, egui::Key::Num2);
+    assert_eq!(h.state().persona, crate::Persona::Develop);
+}
+
+#[test]
+fn ctrl_z_in_pixel_undoes_pixel_edits_and_leaves_develops_history_alone() {
+    let dir = temp_dir("pixel-undo");
+    let path = dir.join("trip.studio");
+    let mut h = studio();
+    pixel_edited(&mut h, &path);
+    let develop = |h: &Harness<'_, crate::StudioShell>| {
+        let lr = h.state().lightroom.as_ref().unwrap();
+        let id = h.state().document.as_ref().unwrap().source.photo;
+        (lr.app.session.develop_of(id).unwrap().light.exposure, lr.app.session.undo.len())
+    };
+    let before = develop(&h);
+    press(&mut h, egui::Modifiers::COMMAND, egui::Key::Z);
+    assert_eq!(layer_names(h.state().document.as_ref().unwrap()), [studio_doc::BASE_LAYER], "the Pixel edit is undone");
+    assert_eq!(develop(&h), before, "Develop's settings and history are untouched");
+    press(&mut h, egui::Modifiers::COMMAND | egui::Modifiers::SHIFT, egui::Key::Z);
+    assert_eq!(layer_names(h.state().document.as_ref().unwrap()).len(), 2, "and redone");
+}
+
+#[test]
+fn files_dropped_on_pixel_dont_open_in_photocraft() {
+    let dir = temp_dir("pixel-drop");
+    let png = dir.join("dropped.png");
+    // a 1×1 PNG
+    std::fs::write(
+        &png,
+        [
+            0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
+            0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4, 0x89, 0x00, 0x00, 0x00, 0x0A, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x63, 0x00, 0x01,
+            0x00, 0x00, 0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
+        ],
+    )
+    .unwrap();
+    // PhotoCraft as Studio sets it up (no import service, its own document area not drawn)
+    // neither opens dropped files nor places them as layers (opening a PNG or PSD in Pixel is
+    // milestone 5's)
+    let mut h = studio();
+    h.state_mut().run("persona.pixel").unwrap();
+    h.run_steps(3);
+    let drop = |h: &mut Harness<'_, crate::StudioShell>| {
+        h.input_mut().dropped_files.push(std::sync::Arc::new(crate::tests_lightcraft::Dropped(png.clone())));
+        h.run_steps(3);
+    };
+    drop(&mut h);
+    assert!(h.state().pixel.as_ref().unwrap().app.session.documents().is_empty());
+    pick_first(&mut h);
+    h.state_mut().run("document.new").unwrap();
+    settle_base(&mut h);
+    h.state_mut().run("persona.pixel").unwrap();
+    h.run_steps(3);
+    drop(&mut h);
+    assert_eq!(h.state().pixel.as_ref().unwrap().app.session.documents().len(), 1);
+    assert_eq!(layer_names(h.state().document.as_ref().unwrap()), [studio_doc::BASE_LAYER]);
+}
+
 fn harness_app() -> PhotocraftApp {
     let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Services::default());
     app.session.add_document(pixel_doc(), None);

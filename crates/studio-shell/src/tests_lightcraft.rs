@@ -582,7 +582,7 @@ const PNG: [u8; 67] = [
 
 /// A file dropped on the window (what the windowing integration hands egui).
 #[derive(Debug)]
-struct Dropped(std::path::PathBuf);
+pub(crate) struct Dropped(pub(crate) std::path::PathBuf);
 
 impl egui::DroppedFile for Dropped {
     fn path(&self) -> &std::path::Path {
@@ -830,7 +830,7 @@ fn edited_document(h: &mut Harness<'_, StudioShell>, path: &std::path::Path) {
     edit(h, 1.5);
 }
 
-fn prompt_shown(h: &Harness<'_, StudioShell>) -> bool {
+pub(crate) fn prompt_shown(h: &Harness<'_, StudioShell>) -> bool {
     h.query_by_label("Don't Save").is_some()
 }
 
@@ -895,23 +895,23 @@ fn replacing_an_unsaved_document_asks_save_dont_save_or_cancel() {
 /// What happened while running frames as a window does: a `Close` command makes the next frame's
 /// close request, which closes the window unless that frame sends `CancelClose`.
 #[derive(Debug, Default, PartialEq)]
-struct Window {
+pub(crate) struct Window {
     /// `Close` commands sent.
-    closes: usize,
+    pub(crate) closes: usize,
     /// Close requests stopped.
-    cancels: usize,
-    closed: bool,
+    pub(crate) cancels: usize,
+    pub(crate) closed: bool,
 }
 
 /// Press Ctrl+Q (Cmd+Q on macOS) for the next frame. Straight into the input, not kittest's
 /// queue: that runs one pass per event and keeps only the last pass's output, so the `Close` sent
 /// on the press would never be seen.
-fn ctrl_q(h: &mut Harness<'_, StudioShell>) {
+pub(crate) fn ctrl_q(h: &mut Harness<'_, StudioShell>) {
     let (key, modifiers) = (egui::Key::Q, egui::Modifiers::COMMAND);
     h.input_mut().events.push(egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers });
 }
 
-fn run_window(h: &mut Harness<'_, StudioShell>, frames: usize, mut requested: bool) -> Window {
+pub(crate) fn run_window(h: &mut Harness<'_, StudioShell>, frames: usize, mut requested: bool) -> Window {
     let mut w = Window::default();
     for _ in 0..frames {
         if requested {

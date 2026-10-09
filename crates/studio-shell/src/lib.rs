@@ -151,9 +151,14 @@ impl StudioShell {
     ///   `document.prompt.save` (save, then go ahead), `document.prompt.discard` (go ahead) and
     ///   `document.prompt.cancel` answer. A save that fails shows why until
     ///   `document.dismissError`.
+    /// - Pixel (PhotoCraft): `pixel.tool {name}`, and `pixel.<PhotoCraft command id>` with its
+    ///   params (see [`Self::run_pixel`]).
     pub fn run_with(&mut self, id: &str, params: &Value) -> Result<(), String> {
         if let Some(cmd) = id.strip_prefix("document.") {
             return self.run_document(cmd, params);
+        }
+        if let Some(cmd) = id.strip_prefix("pixel.") {
+            return self.run_pixel(cmd, params);
         }
         if let Some(&(_, _, persona, view)) = LIGHTROOM_KEYS.iter().find(|k| k.1 == id) {
             self.run(&persona.command())?;
@@ -266,6 +271,24 @@ impl StudioShell {
             }
             other => Err(format!("unknown command `document.{other}`")),
         }
+    }
+
+    /// `pixel.tool {name}` (a Photoshop tool: "brush", "move", "rectMarquee"…), and any PhotoCraft
+    /// command as `pixel.<its id>` with its params (`pixel.layer.new.layer`, `pixel.edit.undo`…)
+    /// on the open document. It's copied back at once, so a change to the locked Develop layer is
+    /// taken back now and the command returns why.
+    fn run_pixel(&mut self, cmd: &str, params: &Value) -> Result<(), String> {
+        let px = self.pixel.as_mut().ok_or("PhotoCraft isn't running")?;
+        if cmd == "tool" {
+            let name = params.get("name").and_then(Value::as_str).ok_or("pixel.tool needs a `name`")?;
+            px.app.ui.tool = photocraft_ui_egui::state::Tool::from_name(name).ok_or_else(|| format!("unknown tool `{name}`"))?;
+            return Ok(());
+        }
+        let doc = self.document.as_mut().ok_or("no document is open")?;
+        let params = if params.is_null() { serde_json::json!({}) } else { params.clone() };
+        px.app.run(cmd, params)?;
+        doc.copy_back(&mut px.app.session);
+        doc.take_notice().map_or(Ok(()), Err)
     }
 
     /// `document.save` / `document.saveAs {path}` (`to`).
@@ -578,6 +601,28 @@ impl StudioShell {
         let quit = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Q);
         if !self.persona.lightroom() && ui.input_mut(|i| i.consume_shortcut(&quit)) {
             let _ = self.run("app.quit");
+        }
+        // Pixel: PhotoCraft's own file shortcuts would act on its session, not on the document.
+        // Photoshop's keys for Studio's document commands instead; Open and Save As have no
+        // dialog yet, so they do nothing.
+        if self.persona == Persona::Pixel {
+            let (cmd, shift) = (egui::Modifiers::COMMAND, egui::Modifiers::COMMAND | egui::Modifiers::SHIFT);
+            // Shift+Ctrl+S first: Ctrl+S would match it too
+            let keys = [
+                (shift, egui::Key::S, None),
+                (cmd, egui::Key::S, Some("document.save")),
+                (cmd, egui::Key::N, Some("document.new")),
+                (cmd, egui::Key::W, Some("document.close")),
+                (cmd, egui::Key::O, None),
+            ];
+            for (mods, key, id) in keys {
+                if ui.input_mut(|i| i.consume_shortcut(&egui::KeyboardShortcut::new(mods, key)))
+                    && let Some(id) = id
+                {
+                    // failures show themselves (a save's error, the prompt)
+                    let _ = self.run(id);
+                }
+            }
         }
         // Lightroom's single keys belong to the Lightroom personas (in Pixel, G and E are Photoshop
         // tools), never while typing, and only bare: Shift+E and the like stay LightCraft's.

@@ -81,7 +81,16 @@ See [`PRD.md`](PRD.md) → *Milestones for Claude Code*.
     placeholder tabs. Test harnesses report an 8192 px texture limit (kittest's headless 2048
     trips egui's debug assert on PhotoCraft's CPU canvas). Renders `pixel-document.png`,
     `pixel-locked.png` checked.
-  - [ ] 7. Commands and shortcuts (`pixel.*`, Studio's keys first, drops ignored, prompt)
+  - [x] 7. Commands and shortcuts: `pixel.tool {name}` and `pixel.<PhotoCraft command>` (copied
+    back at once; a change to the Develop layer returns `LOCKED`). PhotoCraft's own shortcuts
+    run inside its `logic`, only in Pixel, after Studio's: Ctrl+1..7 and Ctrl+Q stay Studio's,
+    and Studio takes Photoshop's document keys there (Ctrl+S `document.save`, Ctrl+N
+    `document.new`, Ctrl+W `document.close`; Ctrl+O and Shift+Ctrl+S do nothing until their
+    dialogs) so PhotoCraft's file commands never act on its session. Ctrl+Z / Shift+Ctrl+Z are
+    PhotoCraft's undo: Pixel edits only, Develop's history untouched. Tests: a Pixel edit asks
+    before close, replace, the window's close button and Ctrl+Q, and Save writes it; Ctrl+S
+    saves the `.studio`; files dropped on Pixel open nothing (PhotoCraft as Studio sets it up
+    has no import service), so no guard was needed.
   - [ ] 8. Overlays, History panel (L4)
   - [ ] 9. App wiring, smoke script, renders, NOTICE
 - [ ] **5. Round trip** — Library → Develop → Pixel and back on one document, one undo history across personas.
