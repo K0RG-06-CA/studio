@@ -332,7 +332,14 @@ impl History {
             let added = &now[old.len()..];
             if added.is_empty() {
                 // the same states, another current document: a host replacement or PhotoCraft's own
-                // coalescing of the current step, not an edit; redo stays
+                // coalescing of the current step, not an edit; redo stays. Unless PhotoCraft let
+                // its redo go (its own `clear_redo`): then Studio's redo leads nowhere and goes too
+                if redo_count < self.redo_docs.len() {
+                    self.redo.clear();
+                    self.redo_docs.clear();
+                } else if redo_count > self.redo_docs.len() {
+                    return false;
+                }
                 if before.is_none_or(|b| !same(b, cur))
                     && let Some(label) = state_of(px, id).and_then(|st| st.history.undo_label().map(str::to_owned))
                     && let Some(s) =
@@ -1174,5 +1181,23 @@ mod tests {
         }
         assert_eq!(doc.take_notice(), None);
         assert_eq!(labels(&doc), ["Original", "Paint 2"]);
+    }
+
+    /// Review: PhotoCraft's redo can go away without its states changing (its own `clear_redo`
+    /// after a failed compound command): Studio's redo goes with it, and redo does nothing
+    /// rather than fail.
+    #[test]
+    fn photocrafts_redo_going_away_takes_studios_with_it() {
+        let (mut lr, mut px, mut doc) = open();
+        paint(&mut px, "Brush", 1, 1);
+        tick(&mut doc, &lr, &mut px);
+        assert!(doc.undo(&mut lr, &mut px).unwrap());
+        assert!(doc.history.can_redo());
+        px.active_mut().unwrap().history.clear_redo();
+        tick(&mut doc, &lr, &mut px);
+        assert!(!doc.history.can_redo());
+        assert_eq!(doc.redo(&mut lr, &mut px), Ok(false));
+        assert_eq!(doc.take_notice(), None);
+        assert_eq!(layers(&doc), ["Develop"]);
     }
 }
