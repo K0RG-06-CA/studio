@@ -117,7 +117,9 @@ impl Document {
         if self.link.copied.as_ref().is_some_and(|c| Arc::ptr_eq(c, &st.doc)) {
             return;
         }
-        if let Some(doc) = self.link.restored(&st.doc) {
+        let unmarked = self.link.unmarked(&st.doc);
+        let doc = unmarked.as_ref().unwrap_or(&st.doc);
+        if let Some(doc) = self.link.restored(doc).or(unmarked) {
             st.doc = Arc::new(doc);
             st.revision += 1;
             st.saved_revision = st.revision;
@@ -196,6 +198,23 @@ impl Document {
 }
 
 impl Link {
+    /// `doc` without the base's mark (and lock) on any layer but the base: a Duplicate Layer of
+    /// it is an ordinary layer, as Photoshop's `"Background copy`". None when there is none.
+    fn unmarked(&self, doc: &photocraft_doc::Document) -> Option<photocraft_doc::Document> {
+        let base = self.copied.as_ref()?.layers.iter().find(|l| crate::is_base(l))?.id;
+        let copies: Vec<_> = doc.walk().into_iter().filter(|(_, _, l)| crate::is_base(l) && l.id != base).map(|(_, _, l)| l.id).collect();
+        if copies.is_empty() {
+            return None;
+        }
+        let mut out = doc.clone();
+        for id in copies {
+            if let Some(l) = out.layer_mut(id) {
+                crate::unmark(l);
+            }
+        }
+        Some(out)
+    }
+
     /// Why `doc` (new in PhotoCraft) can't stand: an edit changed the base layer or the canvas.
     /// The base must be the one marked layer, at the bottom of the root; keep everything as it
     /// was but its visibility (hiding it is fine, as hiding a locked layer is in Photoshop); show
@@ -205,8 +224,8 @@ impl Link {
     fn refusal(&self, doc: &photocraft_doc::Document) -> Option<&'static str> {
         let good = self.copied.as_ref()?;
         let good_base = good.layers.iter().find(|l| crate::is_base(l))?;
-        let marked = doc.walk().into_iter().filter(|(_, _, l)| crate::is_base(l)).count();
-        let Some(base) = doc.layers.first().filter(|l| crate::is_base(l) && marked == 1) else { return Some(LOCKED) };
+        // by its id: a duplicate of it carries its mark too, and is an ordinary layer (see `unmarked`)
+        let Some(base) = doc.layers.first().filter(|l| l.id == good_base.id && crate::is_base(l)) else { return Some(LOCKED) };
         // everything but visibility and the pixels
         let plain =
             |l: &Layer| Layer { visible: true, content: LayerContent::Raster(Surface::new(photocraft_color::PixelFormat::RGBA16)), ..l.clone() };
@@ -624,6 +643,36 @@ mod tests {
         // ordinary edits still go through
         assert!(!refused(&mut session, &mut doc, "layer.delete", serde_json::json!({"layer": paint})));
         assert_eq!(names(&doc.pixel), [crate::BASE_LAYER]);
+    }
+
+    /// Review H2: Duplicate Layer on the Develop layer makes an ordinary layer (Photoshop's
+    /// "Background copy"), not a second, locked base.
+    #[test]
+    fn duplicating_the_develop_layer_makes_an_ordinary_layer() {
+        let (mut session, mut doc) = painted();
+        let base = base_id(&doc);
+        assert!(!refused(&mut session, &mut doc, "layer.duplicate", serde_json::json!({"layer": base})));
+        assert_eq!(doc.pixel.layers.len(), 3);
+        let marked: Vec<_> = doc.pixel.walk().into_iter().filter(|(_, _, l)| crate::is_base(l)).map(|(_, _, l)| l.id.0).collect();
+        assert_eq!(marked, [base], "only the Develop layer is the base");
+        let copy = doc.pixel.layers.iter().find(|l| l.id.0 != base && l.name != "Paint").unwrap();
+        assert!(!copy.locks.all, "the copy can be edited");
+        let copy = copy.id;
+        assert!(doc.unsaved());
+        // in PhotoCraft too, and the next render goes into the Develop layer, not the copy
+        assert_eq!(session.active().unwrap().doc.walk().into_iter().filter(|(_, _, l)| crate::is_base(l)).count(), 1);
+        let (r, s) = render_sized(64, 48);
+        doc.write_base(&mut session, r, s, anchor(1, 0.0, 0.0)).unwrap();
+        assert!(shows_current(&doc, &session) && base_id(&doc) == base);
+        // and painting into the copy is an ordinary edit
+        session
+            .edit("Paint copy", |d, _| {
+                d.layer_mut(copy).unwrap().surface_mut().unwrap().write_region(photocraft_geom::Rect::from_xywh(0, 0, 1, 1), &[1.0; 4]);
+                Ok(())
+            })
+            .unwrap();
+        doc.copy_back(&mut session);
+        assert_eq!(doc.take_notice(), None);
     }
 
     #[test]

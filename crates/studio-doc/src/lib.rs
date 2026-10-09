@@ -141,6 +141,12 @@ pub(crate) fn is_base(l: &Layer) -> bool {
     l.psd_blocks.iter().any(|(key, _)| *key == BASE_MARK)
 }
 
+/// Make a layer carrying the base's mark (a copy of it) an ordinary, unlocked one.
+pub(crate) fn unmark(l: &mut Layer) {
+    l.psd_blocks.retain(|(key, _)| *key != BASE_MARK);
+    l.locks = Default::default();
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
