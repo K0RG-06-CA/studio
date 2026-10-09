@@ -185,7 +185,15 @@ impl Document {
     /// background job running, or the step undone to still breaks it), the document as last
     /// copied goes back in. Its notice says why.
     fn refuse(&mut self, session: &mut Session, why: &'static str) {
-        let undone = session.undo();
+        // back to the first state that stands: a good edit made on the bad one goes too, so no
+        // step is left that undoes to nothing (the history is finite, so is this)
+        let mut undone = false;
+        while session.undo() {
+            undone = true;
+            if self.state(session).is_none_or(|st| self.link.refusal(&st.doc).is_none()) {
+                break;
+            }
+        }
         if let Some(st) = self.state(session) {
             if undone {
                 st.history.clear_redo();
@@ -724,6 +732,26 @@ mod tests {
         assert_eq!(names(&doc.pixel), [crate::BASE_LAYER, "Paint", "Good"]);
         assert!(undo(&mut session, &mut doc), "the good one undoes as usual");
         assert_eq!(names(&doc.pixel), [crate::BASE_LAYER, "Paint"]);
+    }
+
+    /// Review: a bad edit followed by a good one in the same frame (built on the bad state, so it
+    /// goes too) leaves the history as it was before both: no step that undoes to nothing.
+    #[test]
+    fn a_good_edit_after_a_bad_one_in_the_same_frame_goes_with_it_and_leaves_no_step() {
+        let (mut session, mut doc) = painted();
+        let entries = session.active().unwrap().history.entries();
+        let base = base_id(&doc);
+        session.execute("layer.setProps", serde_json::json!({"layer": base, "opacity": 0.5})).unwrap();
+        paint(&mut session, "Built on it", 5, 5);
+        doc.copy_back(&mut session);
+        assert_eq!(doc.take_notice().as_deref(), Some(LOCKED));
+        assert_eq!(names(&doc.pixel), [crate::BASE_LAYER, "Paint"]);
+        assert_eq!(doc.base_layer().unwrap().opacity, 1.0);
+        assert_eq!(session.active().unwrap().history.entries(), entries, "the history as before both");
+        // so the next undo takes back the edit before them
+        assert!(undo(&mut session, &mut doc));
+        assert_eq!(names(&doc.pixel), [crate::BASE_LAYER]);
+        assert_eq!(doc.take_notice(), None);
     }
 
     #[test]
