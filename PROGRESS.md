@@ -38,6 +38,7 @@ See [`PRD.md`](PRD.md) → *Milestones for Claude Code*.
 ## Side tracks
 
 - [ ] **RW2 decoding** — report why LightCraft marks S9 RW2 files preview-only, propose and build the `studio-raw-rw2` decoder.
+  - [x] Investigation (`docs/rw2-investigation.md`, 2026-10-08): LightCraft `eeb136b` already decodes the S9 (format 8, landed upstream 2026-10-07); all 5 samples decode bit-identical to Adobe DNG Converter 18.3, and Studio's import path marks none preview-only. No decoder to build; the remaining gap is colour (RW2 carries no matrix: per-file JPEG fit with relative WB vs the DNG's calibrated matrices). Proposes a per-camera colour table + decode-parity golden test instead, an engine `file_loader` wrap (no patch) and a ~10-line upstream fallback hook if ever needed, and a PRD rewording (not applied).
 - [ ] **Real Time LUT** — inspect S9 RAW+JPEG pairs for LUT / Photo Style metadata; .vlt import; apply detected LUT as an editable profile.
   - [ ] Before starting, shoot labelled RAW+JPEG pairs (one per LUT plus one without) into `samples/lut/` (gitignored).
 - [ ] **Film effects**
