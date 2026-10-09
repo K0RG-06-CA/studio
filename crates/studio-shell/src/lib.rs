@@ -610,7 +610,6 @@ impl StudioShell {
         // dialog yet, so they do nothing.
         if self.persona == Persona::Pixel {
             let (cmd, shift) = (egui::Modifiers::COMMAND, egui::Modifiers::COMMAND | egui::Modifiers::SHIFT);
-            // Shift+Ctrl+S first: Ctrl+S would match it too
             let keys = [
                 (shift, egui::Key::S, None),
                 (cmd, egui::Key::S, Some("document.save")),
@@ -619,7 +618,7 @@ impl StudioShell {
                 (cmd, egui::Key::O, None),
             ];
             for (mods, key, id) in keys {
-                if ui.input_mut(|i| i.consume_shortcut(&egui::KeyboardShortcut::new(mods, key)))
+                if ui.input_mut(|i| consume_exact(i, mods, key))
                     && let Some(id) = id
                 {
                     // failures show themselves (a save's error, the prompt)
@@ -639,6 +638,14 @@ impl StudioShell {
             }
         }
     }
+}
+
+/// Take a press of `key` with exactly `mods` (egui's `consume_shortcut` ignores extra Shift and
+/// Alt, so Ctrl+N would take PhotoCraft's Shift+Ctrl+N New Layer).
+fn consume_exact(i: &mut egui::InputState, mods: egui::Modifiers, key: egui::Key) -> bool {
+    let before = i.events.len();
+    i.events.retain(|e| !matches!(e, egui::Event::Key { key: k, pressed: true, modifiers: m, .. } if *k == key && m.matches_exact(mods)));
+    i.events.len() != before
 }
 
 fn shortcut_text(ui: &egui::Ui, p: Persona) -> String {

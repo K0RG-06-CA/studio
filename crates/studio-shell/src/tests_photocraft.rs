@@ -406,6 +406,30 @@ fn photoshops_document_keys_act_on_studios_document_in_pixel() {
     assert_eq!(h.state().persona, crate::Persona::Develop);
 }
 
+/// Review H1: Studio's document keys match exactly; PhotoCraft's chords that share their letter
+/// (Shift+Ctrl+N New Layer, Alt+Ctrl+W Close All, Shift+Ctrl+W, Alt+Ctrl+S Save a Copy) are not
+/// taken for them.
+#[test]
+fn chords_sharing_a_letter_with_studios_document_keys_stay_photocrafts() {
+    let dir = temp_dir("pixel-chords");
+    let path = dir.join("trip.studio");
+    let mut h = studio();
+    pixel_edited(&mut h, &path);
+    h.state_mut().run("document.save").unwrap();
+    let (cmd, shift, alt) = (egui::Modifiers::COMMAND, egui::Modifiers::SHIFT, egui::Modifiers::ALT);
+    for (mods, key) in [(cmd | shift, egui::Key::N), (cmd | alt, egui::Key::W), (cmd | shift, egui::Key::W), (cmd | alt, egui::Key::N)] {
+        press(&mut h, mods, key);
+        h.run_steps(2);
+        let s = h.state();
+        assert!(s.document.as_ref().is_some_and(|d| d.path.as_deref() == Some(path.as_path())), "{mods:?}+{key:?} replaced or closed the document");
+        assert!(s.prompt.is_none(), "{mods:?}+{key:?} asked to save");
+    }
+    // Alt+Ctrl+S isn't Save: a Pixel edit stays unsaved
+    h.state_mut().run("pixel.layer.new.layer").unwrap();
+    press(&mut h, cmd | alt, egui::Key::S);
+    assert!(h.state().document.as_ref().unwrap().unsaved());
+}
+
 #[test]
 fn ctrl_z_in_pixel_undoes_pixel_edits_and_leaves_develops_history_alone() {
     let dir = temp_dir("pixel-undo");
