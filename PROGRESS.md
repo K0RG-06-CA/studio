@@ -202,7 +202,15 @@ See [`PRD.md`](PRD.md) → *Milestones for Claude Code*.
     was joined to its waiting Develop step only after the budget's prune, which took the step
     for a Develop-only one (reset); and a follow whose own trim took every older state drained
     the waiting step too. The diff now joins the follow to its step directly, and a lost prefix
-    keeps the waiting step (both mutation-checked). Not done here: `bench.rs` peak bytes during
+    keeps the waiting step (both mutation-checked). Review of task 2 (Antigravity, 2026-10-09):
+    HIGH fixed: a Pixel move failing during an undo or redo (or during the rollback after a
+    failed Develop commit, the review's LOW) returned with the step popped and lost; now what
+    moved is moved back and the step kept with a notice, or, if that fails too, the history
+    starts over with a notice (replaces the planned task 3 item "fail-safe clear when
+    PhotoCraft's undo/redo returns false mid-loop"); tests: PhotoCraft's history gone behind
+    Studio's back, and injected move failures (`History::fail_moves`, tests only). MEDIUM not
+    applicable: no step ever owns more than one PhotoCraft state (a Pixel step is made with one,
+    a Develop step gets at most its follow), so a kept step can't point at a pruned state. Not done here: `bench.rs` peak bytes during
     a follow (waits for the slow-frame fix); a single-channel Channels-panel restriction
     on `edit.transform` during a follow is untested.
   - [ ] 3. Shell: commands, shortcuts, Studio's History panel, reconcile points

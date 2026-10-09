@@ -133,6 +133,9 @@ pub struct History {
     /// Until then PhotoCraft is barred (the shell skips its logic and refuses its commands), and
     /// every further Develop change joins the step.
     pending: Option<u64>,
+    /// Tests: each Pixel move of an undo or redo takes one entry; `true` makes it fail.
+    #[cfg(test)]
+    pub(crate) fail_moves: std::collections::VecDeque<bool>,
 }
 
 impl Default for History {
@@ -151,6 +154,8 @@ impl Default for History {
             requested: None,
             notice: None,
             pending: None,
+            #[cfg(test)]
+            fail_moves: Default::default(),
         }
     }
 }
@@ -663,6 +668,10 @@ impl Document {
 
     /// One of a step's Pixel states undone in PhotoCraft, the register following.
     fn pixel_undo(&mut self, px: &mut PixelSession) -> Result<(), String> {
+        #[cfg(test)]
+        if self.history.fail_moves.pop_front() == Some(true) {
+            return Err("PhotoCraft refused the move (test)".into());
+        }
         if !px.undo() {
             return Err("PhotoCraft is busy: nothing was undone".into());
         }
@@ -678,6 +687,10 @@ impl Document {
     /// which a host write may have replaced since the step recorded it: `p` takes the pointer
     /// afresh.
     fn pixel_redo(&mut self, px: &mut PixelSession, p: &mut Pointer) -> Result<(), String> {
+        #[cfg(test)]
+        if self.history.fail_moves.pop_front() == Some(true) {
+            return Err("PhotoCraft refused the move (test)".into());
+        }
         if !px.redo() {
             return Err("PhotoCraft is busy: nothing was redone".into());
         }
@@ -693,39 +706,53 @@ impl Document {
     }
 
     /// One step back, once both halves can move: its Pixel states undone in PhotoCraft (newest
-    /// first), then its Develop half committed. If that commit fails, the Pixel half is redone
-    /// back, so both halves stay at the step, which is kept; the notice says why. No copy-back
-    /// here (a jump copies once at the end).
+    /// first), then its Develop half committed. Any of that failing never loses the step: see
+    /// [`Document::keep_undo`]. No copy-back here (a jump copies once at the end).
     fn undo_one(&mut self, lr: &mut Session, px: &mut PixelSession) -> Result<bool, String> {
         // a jump PhotoCraft began reaches here past `flush`: never into a step half recorded
         if self.history.pending_follow() {
             return Err(RENDERING.into());
         }
-        let Some(mut step) = self.history.steps.pop() else { return Ok(false) };
+        let Some(step) = self.history.steps.pop() else { return Ok(false) };
         if let Err(e) = ready(lr, px, self.source.photo, &step) {
             self.history.steps.push(step);
             return Err(e);
         }
-        for _ in 0..step.pixel.len() {
-            self.pixel_undo(px)?;
+        for moved in 0..step.pixel.len() {
+            if let Err(e) = self.pixel_undo(px) {
+                return self.keep_undo(px, step, moved, e);
+            }
         }
         if let Some(d) = step.develop.clone()
             && let Err(e) = self.commit_develop(lr, &format!("Undo {}", step.label), &d.before, &d.history_before)
         {
-            for p in &mut step.pixel {
-                self.pixel_redo(px, p)?;
-            }
-            self.history.notice = Some(format!("Couldn\u{2019}t undo \u{201c}{}\u{201d}: {e}", step.label));
-            self.history.steps.push(step);
-            return Err(e);
+            let moved = step.pixel.len();
+            return self.keep_undo(px, step, moved, e);
         }
         self.revision += 1;
         self.history.redo.push(step);
         Ok(true)
     }
 
+    /// The undo of `step` failed (`why`) with its `moved` newest states undone (its Develop half
+    /// never moved: it goes last). They are redone, so both engines are back at the step, which
+    /// is kept, and the notice says why; if they can't be, no step can say where the engines are,
+    /// and the history starts over (fail safe), with a notice. Either way, `why` is the error.
+    fn keep_undo(&mut self, px: &mut PixelSession, mut step: Step, moved: usize, why: String) -> Result<bool, String> {
+        let from = step.pixel.len().saturating_sub(moved);
+        for p in &mut step.pixel[from..] {
+            if let Err(e) = self.pixel_redo(px, p) {
+                self.history.clear(&format!("History reset: \u{201c}{}\u{201d} couldn\u{2019}t be undone ({why}) nor put back ({e})", step.label));
+                return Err(why);
+            }
+        }
+        self.history.notice = Some(format!("Couldn\u{2019}t undo \u{201c}{}\u{201d}: {why}", step.label));
+        self.history.steps.push(step);
+        Err(why)
+    }
+
     /// The mirror of [`Document::undo_one`]: the states redone (oldest first), then the Develop
-    /// half; a failed commit undoes them back and keeps the step on the redo side.
+    /// half; any of that failing never loses the step: see [`Document::keep_redo`].
     fn redo_one(&mut self, lr: &mut Session, px: &mut PixelSession) -> Result<bool, String> {
         if self.history.pending_follow() {
             return Err(RENDERING.into());
@@ -735,22 +762,34 @@ impl Document {
             self.history.redo.push(step);
             return Err(e);
         }
-        for p in &mut step.pixel {
-            self.pixel_redo(px, p)?;
+        for moved in 0..step.pixel.len() {
+            if let Err(e) = self.pixel_redo(px, &mut step.pixel[moved]) {
+                return self.keep_redo(px, step, moved, e);
+            }
         }
         if let Some(d) = step.develop.clone()
             && let Err(e) = self.commit_develop(lr, &format!("Redo {}", step.label), &d.after, &d.history_after)
         {
-            for _ in 0..step.pixel.len() {
-                self.pixel_undo(px)?;
-            }
-            self.history.notice = Some(format!("Couldn\u{2019}t redo \u{201c}{}\u{201d}: {e}", step.label));
-            self.history.redo.push(step);
-            return Err(e);
+            let moved = step.pixel.len();
+            return self.keep_redo(px, step, moved, e);
         }
         self.revision += 1;
         self.history.steps.push(step);
         Ok(true)
+    }
+
+    /// The redo of `step` failed (`why`) with its `moved` oldest states redone: they are undone,
+    /// and the step stays on the redo side, with a notice; failing that, the history starts over.
+    fn keep_redo(&mut self, px: &mut PixelSession, step: Step, moved: usize, why: String) -> Result<bool, String> {
+        for _ in 0..moved {
+            if let Err(e) = self.pixel_undo(px) {
+                self.history.clear(&format!("History reset: \u{201c}{}\u{201d} couldn\u{2019}t be redone ({why}) nor put back ({e})", step.label));
+                return Err(why);
+            }
+        }
+        self.history.notice = Some(format!("Couldn\u{2019}t redo \u{201c}{}\u{201d}: {why}", step.label));
+        self.history.redo.push(step);
+        Err(why)
     }
 }
 
@@ -1362,6 +1401,76 @@ pub(crate) mod tests {
         assert!(doc.undo_one(&mut lr, &mut px).unwrap());
         doc.copy_back(&mut px);
         assert_eq!((layers(&doc).len(), exposure(&lr, id)), (1, 0.0));
+    }
+
+    /// A step owning both halves (what a geometry change records): Brush's state, Exposure's
+    /// settings. PhotoCraft's history: "Open", "Brush".
+    fn paired() -> (Session, PixelSession, Document) {
+        let (mut lr, mut px, mut doc) = open();
+        let id = doc.source.photo;
+        paint(&mut px, "Brush", 1, 1);
+        tick(&mut doc, &lr, &mut px);
+        set_exposure(&mut lr, id, 1.0);
+        tick(&mut doc, &lr, &mut px);
+        let p = doc.history.steps.remove(0).pixel;
+        doc.history.steps[0].pixel = p;
+        (lr, px, doc)
+    }
+
+    /// Review (HIGH): a Pixel move that fails never loses the step. PhotoCraft can't undo (its
+    /// history went behind Studio's back; the way a jump PhotoCraft began reaches `undo_one`,
+    /// past `flush`): nothing moved, so the step stays, and says why. The redo side the same.
+    #[test]
+    fn a_pixel_move_that_fails_keeps_the_step_where_it_was() {
+        let (mut lr, mut px, mut doc) = open();
+        paint(&mut px, "Brush", 1, 1);
+        tick(&mut doc, &lr, &mut px);
+        px.active_mut().unwrap().history.clear();
+        let e = doc.undo_one(&mut lr, &mut px).unwrap_err();
+        assert_eq!((labels(&doc), doc.history.position(), doc.history.can_redo()), (vec!["Original".to_owned(), "Brush".into()], 1, false));
+        assert_eq!(doc.take_notice().unwrap(), format!("Couldn\u{2019}t undo \u{201c}Brush\u{201d}: {e}"));
+        // the redo side
+        let (mut lr, mut px, mut doc) = open();
+        paint(&mut px, "Brush", 1, 1);
+        tick(&mut doc, &lr, &mut px);
+        assert!(doc.undo(&mut lr, &mut px, &mut Base::new()).unwrap());
+        px.active_mut().unwrap().history.clear_redo();
+        let e = doc.redo_one(&mut lr, &mut px).unwrap_err();
+        assert_eq!((doc.history.position(), doc.history.can_redo()), (0, true), "still on the redo side");
+        assert_eq!(doc.take_notice().unwrap(), format!("Couldn\u{2019}t redo \u{201c}Brush\u{201d}: {e}"));
+    }
+
+    /// Review (HIGH): a paired step whose Develop commit fails puts its Pixel half back; when
+    /// that fails too, the history starts over (fail safe) rather than keep a step the engines no
+    /// longer match. Undo and redo (the review's LOW: the rollback inside `redo_one`).
+    #[test]
+    fn a_rollback_that_fails_too_starts_the_history_over() {
+        let (mut lr, mut px, mut doc) = paired();
+        let id = doc.source.photo;
+        doc.source.photo = PhotoId(u64::MAX);
+        // the Pixel half undoes, the commit fails, putting the Pixel half back fails
+        doc.history.fail_moves = [false, true].into();
+        let e = doc.undo_one(&mut lr, &mut px).unwrap_err();
+        assert!(!e.is_empty());
+        assert_eq!((doc.history.position(), doc.history.can_redo()), (0, false), "no step the engines don't match");
+        assert!(doc.take_notice().unwrap().starts_with("History reset: \u{201c}Exposure\u{201d} couldn\u{2019}t be undone"));
+        assert_eq!(exposure(&lr, id), 1.0, "the Develop half never moved");
+        // redo: the Pixel half redoes, the commit fails, putting it back fails
+        let (mut lr, mut px, mut doc) = paired();
+        assert!(doc.undo(&mut lr, &mut px, &mut Base::new()).unwrap());
+        doc.source.photo = PhotoId(u64::MAX);
+        doc.history.fail_moves = [false, true].into();
+        assert!(doc.redo_one(&mut lr, &mut px).is_err());
+        assert_eq!((doc.history.position(), doc.history.can_redo()), (0, false));
+        assert!(doc.take_notice().unwrap().starts_with("History reset: \u{201c}Exposure\u{201d} couldn\u{2019}t be redone"));
+        assert_eq!(exposure(&lr, id), 0.0);
+        // and a rollback that works keeps the step, as before
+        let (mut lr, mut px, mut doc) = paired();
+        let pixels = px.active().unwrap().doc.clone();
+        doc.source.photo = PhotoId(u64::MAX);
+        assert!(doc.undo_one(&mut lr, &mut px).is_err());
+        assert!(Arc::ptr_eq(&px.active().unwrap().doc, &pixels));
+        assert_eq!((doc.history.position(), doc.take_notice().unwrap().starts_with("Couldn\u{2019}t undo")), (1, true));
     }
 
     /// Review: PhotoCraft's own undo is taken as Studio's only when the steps it undid are all
