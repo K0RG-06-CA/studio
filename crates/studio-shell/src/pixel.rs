@@ -127,6 +127,10 @@ impl Pixel {
             return;
         };
         self.show(ui, |app, ui| {
+            // what its own document area does around the canvas: where it is (the Navigator,
+            // floating panels, zoom and paste read it) and Free Transform's undo steps
+            app.last_canvas_rect = rect;
+            photocraft_ui_egui::transform_tool::track_steps(app, ui.ctx());
             let view = app.ui.views[idx].clone();
             app.ui.views[idx] = canvas::canvas_view(app, ui, idx, rect, view, true);
         });

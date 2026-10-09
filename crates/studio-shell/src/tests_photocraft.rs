@@ -474,6 +474,44 @@ fn clicking_pixel_after_a_document_was_made_elsewhere_draws_it() {
     assert!(!painted_text(h.output()).contains("No document"));
 }
 
+/// Review: Pixel's canvas does PhotoCraft's document-area bookkeeping: its canvas rectangle (the
+/// Navigator, floating panels, zoom and paste use it) and Free Transform's undo steps.
+#[test]
+fn pixels_canvas_tells_photocraft_where_it_is_and_records_free_transform_steps() {
+    let dir = temp_dir("pixel-canvas-rect");
+    let mut h = studio();
+    pixel_edited(&mut h, &dir.join("trip.studio"));
+    let tab = pixel_leaf(&h, &crate::dock::Tab::Canvas);
+    let canvas = h.state().pixel.as_ref().unwrap().app.last_canvas_rect;
+    assert!(tab.expand(1.0).contains_rect(canvas) && canvas.width() > tab.width() * 0.8, "{canvas:?} in {tab:?}");
+    // Free Transform on a painted layer (an empty one has nothing to transform), nudged with an
+    // arrow key: each nudge is a step
+    let session = &mut h.state_mut().pixel.as_mut().unwrap().app.session;
+    session
+        .edit("Paint", |d, active| {
+            let mut l = Layer::raster("Painted", PixelFormat::RGBA16);
+            l.surface_mut().unwrap().write_region(photocraft_geom::Rect::from_xywh(10, 10, 20, 20), &[1.0, 0.0, 0.0, 1.0].repeat(400));
+            *active = Some(l.id);
+            d.layers.push(l);
+            Ok(())
+        })
+        .unwrap();
+    h.run_steps(2);
+    let left = |h: &Harness<'_, crate::StudioShell>| h.state().pixel.as_ref().unwrap().app.ui.transform.as_ref().map(|t| t.quad[0][0]);
+    press(&mut h, egui::Modifiers::COMMAND, egui::Key::T);
+    h.run_steps(2);
+    let start = left(&h).expect("Free Transform is open");
+    // two nudges, a pause after each: two steps; Ctrl+Z takes back only the second
+    for _ in 0..2 {
+        press(&mut h, egui::Modifiers::NONE, egui::Key::ArrowRight);
+        h.run_steps(3);
+    }
+    assert_eq!(left(&h), Some(start + 2.0));
+    press(&mut h, egui::Modifiers::COMMAND, egui::Key::Z);
+    h.run_steps(2);
+    assert_eq!(left(&h), Some(start + 1.0), "one nudge undone, not the whole transform");
+}
+
 #[test]
 fn ctrl_z_in_pixel_undoes_pixel_edits_and_leaves_develops_history_alone() {
     let dir = temp_dir("pixel-undo");
