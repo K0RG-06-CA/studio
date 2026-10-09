@@ -87,6 +87,26 @@ Former hand checks and the tests that replaced them:
   halation on scene-linear light before the tone curve, which its render API doesn't expose (its
   `F32Linear` output is after the curve and clamped). The document only reserves `Film` settings.
 
+## Review (milestone 3): LOW findings left open
+
+From the code review of milestone 3 (HIGH/MEDIUM were fixed, one commit each, with tests):
+
+- `serde_json::json!({"path": path})` (shell `reopen`, smoke `params`) panics on a non-UTF-8 path; build the
+  value from `to_string_lossy` instead.
+- `Document::from_bytes` accepts any pixel mode/depth/size from the file and more than one base-marked
+  layer; normalise or reject (RGB/U16, a size cap, exactly one `stdv` layer).
+- `open_into` falls back to the source path even when the stored content hash differs (a photo replaced
+  on disk opens with the old document); a deleted catalog entry makes `library.import` report nothing
+  imported, giving the opaque "couldn't be imported".
+- `document.close` keeps the last `base_error`; undo/redo re-mirrors and bumps `revision`, so a document
+  can't return to "saved" (track the saved settings hash instead).
+- A never-saved document is dropped silently on exit; a failed exit save only goes to stderr. Fine while
+  the document holds only develop settings (they live in the library); a prompt comes with M4's layers.
+- `session.interaction` is global: a drag left open on another photo blocks base renders.
+- Errors are `String` throughout `studio-doc`; a small error enum would let callers tell transient from
+  permanent failures.
+- `lightcraft_engine::gpu::set_enabled(false)` in tests is process-global (all tests want the CPU, so harmless).
+
 ## Known untested
 
 - Native file dialogs (Import Photos, Import Presets, Open Library): OS dialogs need a person to pick a file. The document commands take paths; their dialogs and menu come with the Pixel persona (M4).
