@@ -15,7 +15,9 @@ use studio_shell::StudioShell;
 /// The script: one command every [`STEP`] seconds. Ends in Develop, so the next run starts there.
 /// The document is saved as `smoke.studio` in the data folder, closed and opened again, edited
 /// (`lightcraft:` runs a LightCraft command), and quit with: the quit must stop at the "save
-/// changes?" prompt, which is cancelled before saving. The next run opens it at launch.
+/// changes?" prompt, which is cancelled before saving. Then Pixel (PhotoCraft) adds a layer, undoes
+/// and redoes it, and the quit must ask again before it is saved. The next run opens it at launch,
+/// with its Pixel layer.
 const SCRIPT: &[&str] = &[
     "persona.develop",
     "window.resetWorkspace",
@@ -28,6 +30,14 @@ const SCRIPT: &[&str] = &[
     "document.close",
     "document.open",
     "lightcraft:develop.set",
+    "app.quit",
+    "document.prompt.cancel",
+    "document.save",
+    "persona.pixel",
+    "pixel.tool",
+    "pixel.layer.new.layer",
+    "pixel.edit.undo",
+    "pixel.edit.redo",
     "app.quit",
     "document.prompt.cancel",
     "document.save",
@@ -46,6 +56,7 @@ const DOCUMENT: &str = "smoke.studio";
 fn params(id: &str) -> serde_json::Value {
     match id {
         "document.saveAs" | "document.open" => serde_json::json!({"path": dir().join(DOCUMENT)}),
+        "pixel.tool" => serde_json::json!({"name": "brush"}),
         _ => serde_json::Value::Null,
     }
 }
@@ -111,6 +122,9 @@ impl Script {
         println!("smoke: restored persona {}", shell.persona.id());
         let doc = shell.document_path.as_ref().and_then(|p| p.file_name()).map(|n| n.to_string_lossy().into_owned());
         println!("smoke: restored document {}", doc.unwrap_or_else(|| "none".into()));
+        if let Some(d) = &shell.document {
+            println!("smoke: restored pixel layers {}", d.pixel.layers.len());
+        }
         Script { start: None, next: 0, closing: false }
     }
 

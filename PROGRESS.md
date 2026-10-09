@@ -97,7 +97,35 @@ See [`PRD.md`](PRD.md) → *Milestones for Claude Code*.
     Studio's) and Timeline windows (private module: L7 doctest). L4 test: the History footer's
     Delete state / New snapshot / New document buttons do nothing (found as the one row of three
     24-pt buttons; their tooltips don't show headless; the same clicks on a History row do act).
-  - [ ] 9. App wiring, smoke script, renders, NOTICE
+  - [x] 9. App wiring (`main.rs`: `PhotocraftApp` with its GPU canvas on eframe's wgpu state;
+    PhotoCraft's own undo cap applies: 50 states / 8 GB, its Memory Usage default, so Studio
+    adds none), smoke script (Pixel: tool, new layer, undo, redo; the quit must stop at the
+    prompt; save; the relaunch reopens the document with its Pixel layer), NOTICE (PhotoCraft's
+    engine and editor).
+  - [ ] Smoke test on DX12 (opens a real window: run when the user isn't studying)
+
+  **PhotoCraft limitations (`d836e34`), each with a test that fails once upstream fixes it:**
+  - L1 Layers / History / Properties panels are private: Pixel shows PhotoCraft's whole right dock
+    in one Studio tab (`pixel.rs` `compile_fail` doctest).
+  - L2 Its engine and menus don't stop delete, arrange, move-below, layer properties, merge-down
+    into or flatten on a fully locked layer (`studio_doc::pixel::tests::l2_*`,
+    `tests_photocraft::l2_*`); Studio's lock guard takes them back.
+  - L3 Its undo restores whole documents, layers the host wrote outside history included
+    (`l3_*`); Studio's render register puts the current Develop render back.
+  - L4 History footer: Delete state / New snapshot / New document from state do nothing
+    (`tests_photocraft::l4_*`).
+  - L5 Its editor runs only as an `eframe::App` (`logic`/`ui` take an `eframe::Frame` they don't
+    use): Studio passes eframe's hidden test frame (`Frame::_new_kittest`, eframe 0.36.2). No
+    test can name the API upstream would add; an eframe bump breaks the build if it goes.
+  - L7 Its Timeline windows are a private module: not shown in Pixel (`compile_fail` doctest).
+  (L6 from the plan, a hard-coded violet wash in the tool bar, doesn't show in the Pro theme
+  Studio uses: `pixel-document.png`, so no limitation.)
+
+  **Left for later (not M4):** opening a PNG/PSD straight into Pixel (M5, agreed); Ctrl+O and
+  Shift+Ctrl+S in Pixel do nothing until there are open/save-as dialogs; Pixel layers don't follow
+  a Develop rotate/straighten/flip yet (they stay, with a notice; M5) or a crop that changes the
+  render scale (only tests render at a capped size); the Lightroom filmstrip under Pixel is still
+  a placeholder; Pixel's undo is PhotoCraft's own, one shared history is M5.
 - [ ] **5. Round trip** — Library → Develop → Pixel and back on one document, one undo history across personas.
 - [ ] **6. MCP** — one MCP server exposing commands from every persona.
 - [ ] **7. ARM64 + Linux builds** — CI on Windows ARM64/x64 and Linux ARM64/x64; downloadable .exe and AppImage/.deb.
