@@ -188,6 +188,9 @@ Former hand checks and the tests that replaced them:
   in sync): LightCraft `eeb136b` has no way to register an extra develop step, and `PRD-halation.md` needs
   halation on scene-linear light before the tone curve, which its render API doesn't expose (its
   `F32Linear` output is after the curve and clamped). The document only reserves `Film` settings.
+- **MEDIUM: Pixel has frames over 0.4 s, source unknown.** Suspect: writing the 24 MP Develop render
+  into the PhotoCraft session on the UI thread (full canvas redraw, `last_damage = None`). Measure
+  headless first, before any window test.
 
 ## Must fix before milestone 4 (done)
 
