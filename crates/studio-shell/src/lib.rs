@@ -279,6 +279,10 @@ impl StudioShell {
     /// taken back now and the command returns why.
     fn run_pixel(&mut self, cmd: &str, params: &Value) -> Result<(), String> {
         let px = self.pixel.as_mut().ok_or("PhotoCraft isn't running")?;
+        // its documents are Studio's to open, save and close
+        if cmd.starts_with("file.") {
+            return Err(format!("PhotoCraft's {cmd} isn't used in Studio: use the document.* commands"));
+        }
         if cmd == "tool" {
             let name = params.get("name").and_then(Value::as_str).ok_or("pixel.tool needs a `name`")?;
             px.app.ui.tool = photocraft_ui_egui::state::Tool::from_name(name).ok_or_else(|| format!("unknown tool `{name}`"))?;
@@ -353,7 +357,7 @@ impl StudioShell {
             doc.copy_back(&mut px.app.session);
             // what the copy said (a change to the locked base taken back, layers that stayed)
             if let Some(why) = doc.take_notice() {
-                let title = if why == studio_doc::pixel::LOCKED { "Couldn\u{2019}t change the Develop layer" } else { "Pixel layers" };
+                let title = if why == studio_doc::pixel::LOCKED { "Couldn\u{2019}t change the Develop layer" } else { "Pixel" };
                 self.error = Some((title.to_owned(), why));
             }
         }

@@ -512,6 +512,40 @@ fn pixels_canvas_tells_photocraft_where_it_is_and_records_free_transform_steps()
     assert_eq!(left(&h), Some(start + 1.0), "one nudge undone, not the whole transform");
 }
 
+/// Review: PhotoCraft holds Studio's document and nothing else. Its own file commands are
+/// refused (Studio's are `document.*`); a document it makes some other way (its command palette)
+/// is closed; and if it closes Studio's, that is opened again from Studio's copy and said, since
+/// its undo history went with it.
+#[test]
+fn photocraft_holds_studios_document_and_nothing_else() {
+    let dir = temp_dir("pixel-files");
+    let mut h = studio();
+    pixel_edited(&mut h, &dir.join("trip.studio"));
+    let pc =
+        |h: &Harness<'_, crate::StudioShell>| h.state().pixel.as_ref().unwrap().app.session.documents().iter().map(|d| d.doc.id).collect::<Vec<_>>();
+    let ours = pc(&h);
+    for id in ["pixel.file.close", "pixel.file.closeAll", "pixel.file.new"] {
+        let e = h.state_mut().run(id).unwrap_err();
+        assert!(e.contains("document."), "{id}: {e}");
+        h.run_steps(1);
+        assert_eq!(pc(&h), ours, "{id}");
+    }
+    assert!(h.state().pixel.as_ref().unwrap().app.session.active().unwrap().history.can_undo(), "its history is intact");
+    // another document in PhotoCraft (its palette's New): closed on the next frame
+    let session = &mut h.state_mut().pixel.as_mut().unwrap().app.session;
+    session.add_document(pixel_doc(), None);
+    h.run_steps(2);
+    assert_eq!(pc(&h), ours);
+    // PhotoCraft closes Studio's (its palette's Close): opened again from Studio's copy, and said
+    let session = &mut h.state_mut().pixel.as_mut().unwrap().app.session;
+    session.close(0);
+    h.run_steps(2);
+    assert_eq!(h.state().pixel.as_ref().unwrap().app.session.documents().len(), 1);
+    assert_eq!(layer_names(h.state().document.as_ref().unwrap()).len(), 2, "nothing lost");
+    let text = painted_text(h.output());
+    assert!(text.contains("undo history"), "{text}");
+}
+
 #[test]
 fn ctrl_z_in_pixel_undoes_pixel_edits_and_leaves_develops_history_alone() {
     let dir = temp_dir("pixel-undo");

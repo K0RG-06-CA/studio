@@ -36,6 +36,9 @@ pub struct Anchor {
 /// What a Develop rotation (or any other change of the frame) does to Pixel layers for now.
 pub const LAYERS_STAY: &str = "Pixel layers don\u{2019}t follow Develop rotation yet (milestone 5): they stayed where they were";
 
+/// What happened when PhotoCraft closed the open document by its own means.
+pub const REOPENED: &str = "PhotoCraft closed the document: it was opened again as it was, without its Pixel undo history";
+
 /// Why an edit of the base layer (or of the canvas size, which follows its render) was taken back.
 pub const LOCKED: &str = "The Develop layer is locked: change it in Develop";
 
@@ -99,11 +102,24 @@ impl Document {
     /// layer, an undo), so `revision` moves; selecting a layer isn't one. A state from history
     /// that shows an earlier render gets the current one back first (and its size; the layers
     /// move with the crop), without a history step. PhotoCraft's own "unsaved" is kept clear,
-    /// since saving is Studio's: its close guard and autosave stay quiet. A document PhotoCraft no
-    /// longer holds is attached again, as last copied.
+    /// since saving is Studio's: its close guard and autosave stay quiet. PhotoCraft holds this
+    /// document only: another one (made by its palette, say) is closed; if it closed this one, it
+    /// is attached again as last copied, and the notice says its undo history went.
     pub fn copy_back(&mut self, session: &mut Session) {
+        if let Some(id) = self.link.id {
+            while let Some(i) = session.documents().iter().position(|s| s.doc.id != id) {
+                session.close(i);
+            }
+        }
         let Some(st) = self.state(session) else {
+            let (was, current, written) = (self.link.id.is_some(), self.link.current.take(), std::mem::take(&mut self.link.written));
             self.attach(session);
+            if was {
+                // the pixels are the ones it last had: the renders it showed still stand
+                self.link.current = current;
+                self.link.written.extend(written);
+                self.link.notice = Some(REOPENED.into());
+            }
             return;
         };
         st.saved_revision = st.revision;
@@ -137,10 +153,8 @@ impl Document {
     /// including edits not yet copied back, is kept, and copied into `pixel` with the render;
     /// Pixel layers move with the crop ([`Anchor`]).
     pub(crate) fn write_base(&mut self, session: &mut Session, surface: Surface, size: Size, anchor: Option<Anchor>) -> Result<(), String> {
-        if !self.attached(session) {
-            self.attach(session);
-        }
-        // an edit made there since the last copy is copied as one, before the render goes in
+        // an edit made there since the last copy is copied as one, before the render goes in (and
+        // a document PhotoCraft doesn't hold yet is attached)
         self.copy_back(session);
         let st = self.state(session).ok_or("PhotoCraft lost the document")?;
         let mut doc = (*st.doc).clone();
