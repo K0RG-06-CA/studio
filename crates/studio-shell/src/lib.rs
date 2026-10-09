@@ -204,7 +204,7 @@ impl StudioShell {
     fn run_document(&mut self, cmd: &str, params: &Value) -> Result<(), String> {
         let path = |key: &str| params.get(key).and_then(Value::as_str).map(PathBuf::from);
         let discard = params.get("discard").and_then(Value::as_bool).unwrap_or(false);
-        let unsaved = self.document.as_ref().is_some_and(Document::unsaved);
+        let unsaved = self.unsaved();
         match cmd {
             "new" | "open" | "close" if unsaved && !discard => {
                 self.prompt = Some(match cmd {
@@ -317,6 +317,16 @@ impl StudioShell {
         }
     }
 
+    /// The open document has unsaved changes, counting an edit LightCraft made since the last sync
+    /// (its panels edit after it, later in the frame): mirrored first, so a close or a replace
+    /// right after an edit still asks.
+    fn unsaved(&mut self) -> bool {
+        if let (Some(doc), Some(lr)) = (&mut self.document, &self.lightroom) {
+            self.base.mirror(&lr.app.session, doc);
+        }
+        self.document.as_ref().is_some_and(Document::unsaved)
+    }
+
     /// The base layer shows the document's current settings (nothing stale, nothing in flight).
     pub fn base_up_to_date(&self) -> bool {
         self.document.as_ref().is_some_and(|d| self.base.up_to_date(d))
@@ -338,7 +348,7 @@ impl StudioShell {
         }
         // Every way of closing the window (its close button, Ctrl+Q, LightCraft's Quit) arrives
         // here: an unsaved document stops it and asks.
-        if ui.input(|i| i.viewport().close_requested()) && self.document.as_ref().is_some_and(Document::unsaved) {
+        if ui.input(|i| i.viewport().close_requested()) && self.unsaved() {
             ui.ctx().send_viewport_cmd(egui::ViewportCommand::CancelClose);
             self.prompt = Some(Pending::Quit);
         }

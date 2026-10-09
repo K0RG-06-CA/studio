@@ -1057,6 +1057,31 @@ fn exiting_with_unsaved_changes_anyway_saves_them_never_over_an_earlier_recovery
 }
 
 #[test]
+fn an_edit_made_just_before_closing_still_asks() {
+    let dir = temp_dir("prompt-same-frame");
+    let path = dir.join("trip.studio");
+    let mut h = studio();
+    edited_document(&mut h, &path);
+    h.state_mut().run("document.save").unwrap();
+    // an edit, and the close in the very next frame (before any sync has mirrored the edit)
+    let edit_now = |h: &mut Harness<'_, StudioShell>, value: f64| {
+        let lr = h.state_mut().lightroom.as_mut().unwrap();
+        lr.app.run("develop.set", serde_json::json!({"control": "light.exposure", "value": value})).unwrap();
+    };
+    edit_now(&mut h, -0.5);
+    assert_eq!(run_window(&mut h, 2, true), Window { closes: 0, cancels: 1, closed: false });
+    assert_eq!(h.state().prompt, Some(crate::Pending::Quit));
+    answer(&mut h, "Cancel");
+    h.run_steps(2);
+    // the same through the commands
+    h.state_mut().run("document.save").unwrap();
+    edit_now(&mut h, 0.75);
+    assert!(h.state_mut().run("document.close").unwrap_err().contains("unsaved"));
+    assert!(h.state().document.is_some());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn ctrl_q_asks_exactly_once_in_every_persona() {
     let dir = temp_dir("prompt-quit");
     let path = dir.join("trip.studio");
