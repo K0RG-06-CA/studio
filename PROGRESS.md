@@ -46,7 +46,17 @@ See [`PRD.md`](PRD.md) → *Milestones for Claude Code*.
     PhotoCraft, no history step, not an edit). PhotoCraft's own "unsaved" is kept clear (its close
     guard and autosave stay quiet). `document.new/open` attach, `close` takes it out;
     `unsaved()` copies first, so saves, the prompt and `save_for_exit` see Pixel edits.
-  - [ ] 3. Render register (pruned), undo restore, Pixel layers anchored across crops
+  - [x] 3. The base stays out of PhotoCraft's undo, which restores whole documents: every render
+    written is kept in a register by weak tile pointers (an entry goes once no state holds its
+    pixels), so a state from history showing an earlier render is recognised and gets the current
+    one back (pixels and size, no history step) on the next copy-back; undo/redo, the history cap
+    (`max_states`/`max_bytes`) and pruning don't depend on step counts. Pixel layers stay on the
+    same photo pixels across a Develop crop: each render carries an `Anchor` (frame hash without
+    the crop rectangle, crop origin in source pixels, scale) and the layers move by the origin's
+    change (PhotoCraft's `move_targets`/`moved`), through undo too. Another frame change
+    (rotate, straighten, flip, lens/transform) leaves them where they were, with a notice
+    (`Document::take_notice`; shown from task 6); a position-locked user layer stops the move,
+    with a notice.
   - [ ] 4. Lock guard (everything but `visible`)
   - [ ] 5. Renders held during a gesture
   - [ ] 6. Shell wiring (`pixel.rs`, layout, badge, empty state)

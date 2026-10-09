@@ -16,6 +16,7 @@ use photocraft_geom::{Rect, Size};
 use photocraft_raster::Surface;
 
 use crate::Document;
+use crate::pixel::Anchor;
 
 /// Rows written per band, so a 24 MP render never needs a full-size float copy.
 const BAND_ROWS: usize = 256;
@@ -32,7 +33,7 @@ pub struct Base {
     /// Hash of the settings the base pixels show; none until the first render.
     shown: Option<u64>,
     /// The render in flight: the settings hash it renders, and where its result arrives.
-    pending: Option<(u64, Receiver<Done>)>,
+    pending: Option<(u64, Anchor, Receiver<Done>)>,
     /// A render that failed: the settings hash and why. Not tried again until the settings change
     /// (a photo whose file is gone would otherwise be re-decoded every frame).
     failed: Option<(u64, String)>,
@@ -126,6 +127,7 @@ impl Base {
         let (nw, nh) = lightcraft_engine::pipeline::native_output_size(w, h, &doc.develop);
         // only ever smaller: LightCraft's fit would scale a small frame up to the box
         let scale = self.max_edge.map_or(1.0, |m| (m as f64 / nw.max(nh)).min(1.0));
+        let anchor = anchor(w, h, &doc.develop, scale);
         let (nw, nh) = ((nw * scale).round().max(1.0) as usize, (nh * scale).round().max(1.0) as usize);
         let mut job = session
             .preview_job(id, nw, nh, true, &doc.develop)
@@ -142,7 +144,7 @@ impl Base {
                 let _ = tx.send((r, surface));
             })
             .map_err(|e| format!("no thread for the render: {e}"))?;
-        self.pending = Some((want, rx));
+        self.pending = Some((want, anchor, rx));
         self.started += 1;
         Ok(())
     }
@@ -152,7 +154,7 @@ impl Base {
     /// pixels or error: the next `sync` renders the newest settings (edits made meanwhile
     /// coalesce into that one render).
     fn take(&mut self, session: &mut Session, pixel: &mut PixelSession, doc: &mut Document) -> Result<(), String> {
-        let Some((want, rx)) = &self.pending else { return Ok(()) };
+        let Some((want, anchor, rx)) = &self.pending else { return Ok(()) };
         let (result, converted) = match rx.try_recv() {
             Ok(r) => r,
             Err(TryRecvError::Empty) => return Ok(()),
@@ -161,7 +163,7 @@ impl Base {
                 return Err("the render thread stopped without a result".into());
             }
         };
-        let want = *want;
+        let (want, anchor) = (*want, anchor.clone());
         self.pending = None;
         session.accept(&result);
         if want != doc.develop.hash64() {
@@ -170,10 +172,27 @@ impl Base {
         let (surface, size) = converted?;
         // into PhotoCraft, the pixels' one home: derived pixels, not an edit (the revision, and so
         // "unsaved", doesn't move)
-        doc.write_base(pixel, surface, size)?;
+        doc.write_base(pixel, surface, size, Some(anchor))?;
         self.shown = Some(want);
         Ok(())
     }
+}
+
+/// Where a render of `s` (of a `w × h` source, at `scale`) puts the photo: Pixel layers follow
+/// its crop (see [`Anchor`]).
+fn anchor(w: usize, h: usize, s: &DevelopSettings, scale: f64) -> Anchor {
+    use std::hash::{DefaultHasher, Hash, Hasher};
+    // the crop rectangle is normalised to the frame without it (rotated by the straighten angle)
+    let mut whole = s.clone();
+    whole.crop.geometry = Default::default();
+    whole.crop.geometry.angle = s.crop.geometry.angle;
+    let (uw, uh) = lightcraft_engine::pipeline::native_output_size(w, h, &whole);
+    let frame =
+        serde_json::to_string(&(&s.orientation, &s.optics, &s.geometry, s.crop.geometry.angle, s.crop.flip_h, s.crop.flip_v)).unwrap_or_default();
+    let mut hasher = DefaultHasher::new();
+    frame.hash(&mut hasher);
+    let r = s.crop.geometry.rect;
+    Anchor { frame: hasher.finish(), origin: [r.x0 * uw, r.y0 * uh], scale }
 }
 
 /// The base surface from a render: its 16-bit image, or why there is none.
@@ -509,6 +528,47 @@ mod tests {
         settle(&mut base, &mut session, &mut pixel, &mut doc);
         let turned = doc.pixel.size;
         assert!(turned.width.abs_diff(full.height) <= 1 && turned.height.abs_diff(full.width) <= 1, "{full:?} → {turned:?}");
+    }
+
+    /// The base layer's pixel at (x, y).
+    fn base_px(doc: &Document, x: i32, y: i32) -> [f32; 4] {
+        let mut px = [[0.0; 4]];
+        doc.base_layer().unwrap().surface().unwrap().read_rgba_into(Rect::from_xywh(x, y, 1, 1), &mut px);
+        px[0]
+    }
+
+    #[test]
+    fn a_pixel_layer_stays_on_its_photo_pixel_when_develop_crops() {
+        let (mut session, mut doc, mut base) = open();
+        let mut pixel = PixelSession::new();
+        settle(&mut base, &mut session, &mut pixel, &mut doc);
+        assert_eq!((doc.pixel.size.width, doc.pixel.size.height), (600, 400));
+        // a Pixel edit: one painted pixel over photo pixel P = (300, 250)
+        pixel
+            .edit("Paint", |d, active| {
+                let mut l = photocraft_doc::Layer::raster("Paint", PixelFormat::RGBA16);
+                l.surface_mut().unwrap().write_region(Rect::from_xywh(300, 250, 1, 1), &[1.0, 0.0, 0.0, 1.0]);
+                *active = Some(l.id);
+                d.layers.push(l);
+                Ok(())
+            })
+            .unwrap();
+        doc.copy_back(&mut pixel);
+        let p = base_px(&doc, 300, 250);
+        // Develop crops a quarter off the top and the bottom (the long side, so the scale, stays)
+        let id = doc.source.photo;
+        let mut s = (*session.develop_of(id).unwrap()).clone();
+        (s.crop.geometry.rect.y0, s.crop.geometry.rect.y1) = (0.25, 0.75);
+        session.set_develop(id, s, "Crop").unwrap();
+        settle(&mut base, &mut session, &mut pixel, &mut doc);
+        assert_eq!((doc.pixel.size.width, doc.pixel.size.height), (600, 200));
+        let layer = doc.pixel.layers.iter().find(|l| l.name == "Paint").unwrap();
+        let b = photocraft_compose::bounds::content_bounds(layer.surface().unwrap());
+        assert_eq!((b.x0, b.y0), (300, 150), "moved up by the 100 px the crop took off");
+        // and the photo pixel under it is P's
+        let q = base_px(&doc, b.x0, b.y0);
+        assert!((0..3).all(|c| (p[c] - q[c]).abs() < 0.02), "{p:?} vs {q:?}");
+        assert_eq!(doc.take_notice(), None);
     }
 
     fn deep(width: usize, height: usize, samples: Vec<u16>) -> DeepImage {
