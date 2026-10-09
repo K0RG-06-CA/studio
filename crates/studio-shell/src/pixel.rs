@@ -20,16 +20,148 @@
 //! }
 //! ```
 
-use photocraft_ui_egui::PhotocraftApp;
+use std::sync::Arc;
+
+use egui::{Rect, Ui, UiBuilder};
+use photocraft_ui_egui::theme::{ThemeKind, Tokens};
+use photocraft_ui_egui::{PhotocraftApp, canvas, panels};
+
+use crate::theme::TOKENS;
+
+/// The width of PhotoCraft's icon rail beside its right dock, and the dock's narrowest.
+const RAIL_W: f32 = 36.0;
+const DOCK_MIN_W: f32 = 250.0;
 
 pub struct Pixel {
     /// PhotoCraft's editor; its session holds the open document's pixels (see
     /// `studio_doc::pixel`).
     pub app: PhotocraftApp,
+    /// PhotoCraft runs only as an `eframe::App`; its `logic` takes a frame it doesn't use.
+    frame: eframe::Frame,
+    /// Frames its `logic` has run; its fonts can be used from the second one on.
+    frames: u32,
+    /// PhotoCraft's style (sizes, spacing) in Studio's colours, for its pieces; the rest of
+    /// Studio keeps Studio's theme, which is put back right after its `logic`.
+    style: Option<Arc<egui::Style>>,
 }
 
 impl Pixel {
-    pub fn new(app: PhotocraftApp) -> Self {
-        Pixel { app }
+    /// PhotoCraft in Photoshop's grammar (its Pro theme: tab strips, flat panels, Properties in
+    /// the dock), with Navigator (and Histogram), Properties, History and Layers in its right
+    /// dock, as the PRD's Pixel column; its Color group stays off for Layers' room.
+    pub fn new(mut app: PhotocraftApp) -> Self {
+        app.ui.theme = ThemeKind::Pro;
+        app.ui.panels.color = false;
+        app.ui.panels.navigator = true;
+        app.ui.panels.layers = true;
+        app.ui.panels.properties = true;
+        app.ui.panels.history = true;
+        Pixel { app, frame: eframe::Frame::_new_kittest(), frames: 0, style: None }
+    }
+
+    /// PhotoCraft's per-frame work (its shortcuts, background jobs, views of the documents).
+    /// Run it once per frame before drawing, and only while Pixel is showing.
+    pub fn logic(&mut self, ctx: &egui::Context) {
+        let studio = ctx.global_style();
+        eframe::App::logic(&mut self.app, ctx, &mut self.frame);
+        let theirs = ctx.global_style();
+        if !Arc::ptr_eq(&theirs, &studio) {
+            // it set its theme (fonts too, which stay: its panels need its families)
+            let mut style = (*theirs).clone();
+            style.visuals = studio.visuals.clone();
+            self.style = Some(Arc::new(style));
+            ctx.set_global_style(studio);
+        }
+        ctx.data_mut(|d| d.insert_temp(egui::Id::new("photocraft-theme"), tokens()));
+        self.frames = self.frames.saturating_add(1);
+    }
+
+    /// PhotoCraft's fonts are installed, so its pieces can be drawn.
+    pub fn ready(&self) -> bool {
+        self.frames >= 2
+    }
+
+    /// Draw a piece of PhotoCraft into `ui`, in its style.
+    fn show(&mut self, ui: &mut Ui, add: impl FnOnce(&mut PhotocraftApp, &mut Ui)) {
+        if !self.ready() {
+            return;
+        }
+        if let Some(style) = &self.style {
+            ui.set_style(style.clone());
+        }
+        add(&mut self.app, ui);
+    }
+
+    /// Photoshop's tool bar, on the left.
+    pub fn tool_bar(&mut self, ui: &mut Ui) {
+        self.show(ui, panels::toolbar);
+    }
+
+    /// Photoshop's options bar, under the top bar.
+    pub fn options_bar(&mut self, ui: &mut Ui) {
+        self.show(ui, panels::options_bar);
+    }
+
+    /// The canvas tab: the open document's canvas, with "Rendering…" over it while its base
+    /// layer is behind Develop; without a document, how to get one.
+    pub fn canvas(&mut self, ui: &mut Ui, rendering: bool) {
+        let rect = ui.available_rect_before_wrap();
+        let Some(idx) = self.app.session.active_index().filter(|i| *i < self.app.ui.views.len()) else {
+            ui.centered_and_justified(|ui| ui.label(crate::theme::placeholder("No document: pick a photo in Library, then New Document")));
+            return;
+        };
+        self.show(ui, |app, ui| {
+            let view = app.ui.views[idx].clone();
+            app.ui.views[idx] = canvas::canvas_view(app, ui, idx, rect, view, true);
+        });
+        if rendering {
+            let at = rect.left_top() + egui::vec2(8.0, 8.0);
+            ui.painter().text(at, egui::Align2::LEFT_TOP, "Rendering Develop\u{2026}", egui::FontId::proportional(TOKENS.font_size), TOKENS.text_dim);
+        }
+    }
+
+    /// The panels tab: PhotoCraft's right dock (Layers, Properties, History, and its icon rail)
+    /// filling it. Its panels are private, so they come as one (see the module docs). Too narrow
+    /// a tab shows the dock's narrowest, clipped; its own resize handle is clipped away (the
+    /// Studio dock sets the width).
+    pub fn panels(&mut self, ui: &mut Ui) {
+        let tab = ui.available_rect_before_wrap();
+        let width = (tab.width() - RAIL_W).max(DOCK_MIN_W);
+        panels::request_dock_width(ui.ctx(), width);
+        let rect = Rect::from_min_max(egui::pos2(tab.max.x - width - RAIL_W, tab.min.y), tab.max);
+        let mut child = ui.new_child(UiBuilder::new().max_rect(rect));
+        let grab = child.style().interaction.resize_grab_radius_side;
+        child.set_clip_rect(tab.with_min_x(tab.min.x + grab).intersect(ui.clip_rect()));
+        self.show(&mut child, panels::right_dock);
+        ui.allocate_rect(tab, egui::Sense::hover());
+    }
+}
+
+/// PhotoCraft's Pro tokens in Studio's colours.
+fn tokens() -> Tokens {
+    let t = TOKENS;
+    Tokens {
+        chrome: t.chrome,
+        canvas: t.canvas,
+        canvas_dot: t.canvas,
+        dock: t.divider,
+        card: t.inset,
+        card_border: t.divider,
+        field: t.field,
+        field_border: t.field_border,
+        hover: t.hover,
+        pressed: t.pressed,
+        text: t.text,
+        text_dim: t.text_label,
+        text_faint: t.text_dim,
+        icon: t.text_label,
+        accent: t.accent,
+        accent_border: t.accent,
+        primary_bg: t.accent,
+        separator: t.divider,
+        tab_strip: t.chrome,
+        row_selected: t.active,
+        histogram_bg: t.canvas,
+        ..Tokens::for_kind(ThemeKind::Pro)
     }
 }

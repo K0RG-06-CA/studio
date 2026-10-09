@@ -146,7 +146,7 @@ pub(crate) fn studio() -> Harness<'static, StudioShell> {
 pub(crate) fn studio_with(builder: egui_kittest::HarnessBuilder<StudioShell>) -> Harness<'static, StudioShell> {
     let shell = demo_shell();
     let mut themed = false;
-    builder.build_ui_state(
+    let mut h = builder.build_ui_state(
         move |ui, shell: &mut StudioShell| {
             if !std::mem::replace(&mut themed, true) {
                 crate::theme::apply(ui.ctx());
@@ -154,7 +154,15 @@ pub(crate) fn studio_with(builder: egui_kittest::HarnessBuilder<StudioShell>) ->
             shell.ui(ui);
         },
         shell,
-    )
+    );
+    real_gpu_textures(&mut h);
+    h
+}
+
+/// A real GPU's texture size limit (8192, what wgpu promises), not kittest's headless 2048:
+/// PhotoCraft's CPU canvas uploads the document at its display size, up to 3000 px here.
+pub(crate) fn real_gpu_textures<S>(h: &mut Harness<'_, S>) {
+    h.input_mut().max_texture_side = Some(8192);
 }
 
 fn assert_studio_style(h: &Harness<'_, StudioShell>, when: &str) {

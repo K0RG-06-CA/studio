@@ -29,29 +29,6 @@ mod tests_lightcraft;
 #[cfg(test)]
 mod tests_photocraft;
 
-/// Photoshop's tool bar, top to bottom: (shortcut, tool). Placeholders until milestone 4.
-const TOOLS: [(&str, &str); 19] = [
-    ("V", "Move"),
-    ("M", "Rectangular Marquee"),
-    ("L", "Lasso"),
-    ("W", "Object Selection"),
-    ("C", "Crop"),
-    ("I", "Eyedropper"),
-    ("J", "Spot Healing Brush"),
-    ("B", "Brush"),
-    ("S", "Clone Stamp"),
-    ("Y", "History Brush"),
-    ("E", "Eraser"),
-    ("G", "Gradient"),
-    ("O", "Dodge"),
-    ("P", "Pen"),
-    ("T", "Type"),
-    ("A", "Path Selection"),
-    ("U", "Rectangle"),
-    ("H", "Hand"),
-    ("Z", "Zoom"),
-];
-
 /// Lightroom Classic's module keys: (key, command, persona, what LightCraft shows).
 const LIGHTROOM_KEYS: [(egui::Key, &str, Persona, lightroom::Go); 4] = [
     (egui::Key::G, "view.grid", Persona::Library, lightroom::Go::Grid),
@@ -147,7 +124,7 @@ impl StudioShell {
         let Some(mut shell) = saved.filter(|s| s.persona.enabled()) else { return StudioShell::default() };
         for p in Persona::ALL {
             let layout = &mut shell.layouts[p as usize];
-            if !dock::layout_is_usable(layout) {
+            if !dock::layout_is_usable(layout) || !dock::tabs_known(p, layout) {
                 *layout = dock::default_layout(p);
             }
         }
@@ -351,6 +328,11 @@ impl StudioShell {
                 self.base_error = Some(e);
             }
             doc.copy_back(&mut px.app.session);
+            // what the copy said (a change to the locked base taken back, layers that stayed)
+            if let Some(why) = doc.take_notice() {
+                let title = if why == studio_doc::pixel::LOCKED { "Couldn\u{2019}t change the Develop layer" } else { "Pixel layers" };
+                self.error = Some((title.to_owned(), why));
+            }
         }
     }
 
@@ -407,6 +389,9 @@ impl StudioShell {
         }
         if let Some(lr) = self.lightroom.as_mut().filter(|_| self.persona.lightroom()) {
             lr.logic(ui.ctx());
+        }
+        if let Some(px) = self.pixel.as_mut().filter(|_| self.persona == Persona::Pixel) {
+            px.logic(ui.ctx());
         }
         self.top_bar(ui);
         self.persona_area(ui);
@@ -511,12 +496,12 @@ impl StudioShell {
         let t = theme::TOKENS;
         let p = self.persona;
         let chrome = egui::Frame::NONE.fill(t.chrome);
-        if p.photoshop_layout() {
-            egui::Panel::top("studio.options_bar")
-                .exact_size(t.options_bar_h)
-                .resizable(false)
-                .frame(chrome.inner_margin(egui::Margin::symmetric(8, 0)))
-                .show(ui, |ui| ui.horizontal_centered(|ui| ui.label(theme::placeholder("Tool options"))));
+        // Pixel: PhotoCraft's own options bar and tool bar (Photoshop's), once its fonts are in
+        let photocraft = self.pixel.as_ref().is_some_and(|px| p == Persona::Pixel && px.ready());
+        if let Some(px) = self.pixel.as_mut().filter(|_| photocraft) {
+            px.options_bar(ui);
+        } else if p.photoshop_layout() {
+            egui::Panel::top("studio.options_bar").exact_size(t.options_bar_h).resizable(false).frame(chrome).show(ui, |_| {});
         }
         let lightroom = self.lightroom.as_mut().filter(|_| p.lightroom());
         // LightCraft draws its own filmstrip under the loupe
@@ -527,21 +512,15 @@ impl StudioShell {
                 .frame(egui::Frame::NONE.fill(t.canvas))
                 .show(ui, |ui| ui.centered_and_justified(|ui| ui.label(theme::placeholder("Filmstrip"))));
         }
-        if p.photoshop_layout() {
-            egui::Panel::left("studio.tools")
-                .exact_size(t.tool_strip_w)
-                .resizable(false)
-                .frame(chrome.inner_margin(egui::Margin::symmetric(3, 6)))
-                .show(ui, |ui| {
-                    ui.vertical_centered_justified(|ui| {
-                        for (key, name) in TOOLS {
-                            ui.add_enabled(false, egui::Button::new(key).frame_when_inactive(false))
-                                .on_disabled_hover_text(format!("{name} ({key}) arrives in milestone 4"));
-                        }
-                    });
-                });
+        if let Some(px) = self.pixel.as_mut().filter(|_| photocraft) {
+            px.tool_bar(ui);
+        } else if p.photoshop_layout() {
+            egui::Panel::left("studio.tools").exact_size(t.tool_strip_w).resizable(false).frame(chrome).show(ui, |_| {});
         }
-        let mut viewer = dock::Viewer { persona: p, lightroom, reset_requested: false };
+        let pixel = self.pixel.as_mut().filter(|_| p == Persona::Pixel);
+        let rendering = self.document.as_ref().is_some_and(|d| !self.base.up_to_date(d));
+        let document = self.document.as_ref().map(|d| d.name.clone());
+        let mut viewer = dock::Viewer { persona: p, lightroom, pixel, rendering, document, reset_requested: false };
         egui::CentralPanel::default().frame(egui::Frame::NONE.fill(t.divider)).show(ui, |ui| {
             DockArea::new(&mut self.layouts[p as usize])
                 .id(egui::Id::new(("studio.dock", p.id())))
@@ -651,14 +630,14 @@ mod tests {
     #[test]
     fn each_persona_keeps_its_own_layout_and_reset_restores_only_the_current_one() {
         let mut s = StudioShell::default();
-        remove_panel(&mut s, Persona::Pixel, "History");
+        remove_panel(&mut s, Persona::Film, "History");
         remove_panel(&mut s, Persona::Library, "Folders");
-        s.run("persona.pixel").unwrap();
+        s.run("persona.film").unwrap();
         s.run("persona.library").unwrap();
-        s.run("persona.pixel").unwrap();
-        assert!(!has_panel(&s, Persona::Pixel, "History"), "layout survives switching personas");
+        s.run("persona.film").unwrap();
+        assert!(!has_panel(&s, Persona::Film, "History"), "layout survives switching personas");
         s.run("window.resetWorkspace").unwrap();
-        assert!(has_panel(&s, Persona::Pixel, "History"));
+        assert!(has_panel(&s, Persona::Film, "History"));
         assert!(!has_panel(&s, Persona::Library, "Folders"), "other personas are untouched");
     }
 
@@ -680,6 +659,14 @@ mod tests {
         // Only reachable through a hand-edited or future save.
         let s = StudioShell { persona: Persona::Vector, ..Default::default() };
         assert_eq!(StudioShell::restore(Some(s)).persona, Persona::Library);
+        // A layout saved before Pixel ran PhotoCraft (its placeholder panels) goes back to default;
+        // the other personas' layouts are kept.
+        let mut old = StudioShell::default();
+        old.layouts[Persona::Pixel as usize] = dock::default_layout(Persona::Vector);
+        remove_panel(&mut old, Persona::Library, "Folders");
+        let back = StudioShell::restore(Some(old));
+        assert!(has_panel(&back, Persona::Pixel, "Layers") && !has_panel(&back, Persona::Pixel, "Histogram"));
+        assert!(!has_panel(&back, Persona::Library, "Folders"));
         // A save with the wrong number of layouts doesn't parse, so the app falls back to defaults.
         assert!(ron::from_str::<StudioShell>("(persona: pixel, layouts: [])").is_err());
     }

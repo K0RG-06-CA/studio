@@ -69,7 +69,18 @@ See [`PRD.md`](PRD.md) → *Milestones for Claude Code*.
     pixels under a stroke don't change halfway, the base reads as not current meanwhile, nothing
     re-renders, and it goes in (no history step) on the frame the gesture ends, unless the
     settings changed since (then the newest renders).
-  - [ ] 6. Shell wiring (`pixel.rs`, layout, badge, empty state)
+  - [x] 6. Shell wiring (`pixel::Pixel`, as `lightroom.rs`): PhotoCraft's `logic` runs only in
+    Pixel; its style is captured once (its sizes in Studio's visuals) and used only for its
+    pieces, its Pro tokens recoloured to Studio's greys. Its tool bar and options bar replace the
+    placeholders (`TOOLS` gone); its `canvas_view` fills the canvas tab (titled with the
+    document's name; "Rendering Develop…" while the base is behind; "No document…" without one);
+    its right dock (Properties, Navigator/Histogram/Info, History, Layers; Color off for room)
+    fills Pixel's one "Layers" tab, sized by `request_dock_width`, its own resize handle clipped.
+    A saved Pixel layout from before (placeholder tabs) resets to default (`dock::tabs_known`).
+    The copy-back's notices show in the error modal. M1's docking tests moved to Film's
+    placeholder tabs. Test harnesses report an 8192 px texture limit (kittest's headless 2048
+    trips egui's debug assert on PhotoCraft's CPU canvas). Renders `pixel-document.png`,
+    `pixel-locked.png` checked.
   - [ ] 7. Commands and shortcuts (`pixel.*`, Studio's keys first, drops ignored, prompt)
   - [ ] 8. Overlays, History panel (L4)
   - [ ] 9. App wiring, smoke script, renders, NOTICE

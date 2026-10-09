@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::Persona;
 use crate::lightroom::Lightroom;
+use crate::pixel::Pixel;
 use crate::theme::{self, TOKENS};
 
 /// A dock tab: the persona's canvas or a named panel.
@@ -38,8 +39,11 @@ fn spec(p: Persona) -> Spec {
             left: (0.18, &[(0.3, &["Navigator"]), (0.3, &["Film Stocks"]), (0.4, &["History"])]),
             right: (0.2, &[(0.2, &["Histogram"]), (0.8, &["Film Effects"])]),
         },
+        // Photoshop: PhotoCraft's right dock (Layers, Properties, History) in one tab: its panels
+        // can't be drawn one by one (see pixel). Tools and options are fixed chrome.
+        Persona::Pixel => Spec { left: (0.0, &[]), right: (0.24, &[(1.0, &["Layers"])]) },
         // Photoshop: tabbed groups in a right column (tools and options are fixed chrome).
-        Persona::Pixel | Persona::Vector | Persona::Layout | Persona::Export => Spec {
+        Persona::Vector | Persona::Layout | Persona::Export => Spec {
             left: (0.0, &[]),
             right: (
                 0.22,
@@ -117,11 +121,24 @@ pub fn layout_is_usable(dock: &DockState<Tab>) -> bool {
     nodes_ok && windows_ok && canvases == 1
 }
 
+/// Every panel in a saved layout is one the persona still has (a save from before a milestone
+/// changed its panels, e.g. Pixel's placeholders before PhotoCraft, isn't).
+pub fn tabs_known(p: Persona, dock: &DockState<Tab>) -> bool {
+    let known = default_layout(p);
+    dock.iter_all_tabs().all(|(_, t)| known.find_tab(t).is_some())
+}
+
 /// Draws the tabs of one persona's dock.
 pub struct Viewer<'a> {
     pub persona: Persona,
     /// LightCraft, when this persona runs on it; tabs it doesn't fill stay placeholders.
     pub lightroom: Option<&'a mut Lightroom>,
+    /// PhotoCraft, in Pixel: its canvas and its right dock.
+    pub pixel: Option<&'a mut Pixel>,
+    /// The document's base layer is behind its develop settings (the canvas says so).
+    pub rendering: bool,
+    /// The open document's name, Pixel's canvas tab title.
+    pub document: Option<String>,
     /// Set when the user picks Reset Workspace from a tab's right-click menu; the shell then runs
     /// `window.resetWorkspace` after the dock is drawn (the layout can't change while it is).
     pub reset_requested: bool,
@@ -139,15 +156,23 @@ impl TabViewer for Viewer<'_> {
 
     fn title(&mut self, tab: &mut Tab) -> WidgetText {
         match tab {
-            Tab::Canvas => match &self.lightroom {
-                Some(lr) => lr.canvas_title(self.persona).into(),
-                None => self.canvas_title().into(),
+            Tab::Canvas => match (&self.lightroom, &self.document) {
+                (Some(lr), _) => lr.canvas_title(self.persona).into(),
+                (None, Some(name)) if self.persona == Persona::Pixel => name.as_str().into(),
+                _ => self.canvas_title().into(),
             },
             Tab::Panel(name) => name.as_str().into(),
         }
     }
 
     fn ui(&mut self, ui: &mut Ui, tab: &mut Tab) {
+        if let Some(px) = self.pixel.as_deref_mut() {
+            match tab {
+                Tab::Canvas => return px.canvas(ui, self.rendering),
+                Tab::Panel(name) if name == "Layers" => return px.panels(ui),
+                Tab::Panel(_) => {}
+            }
+        }
         if let Some(lr) = self.lightroom.as_deref_mut()
             && lr.tab(ui, self.persona, tab)
         {
@@ -203,7 +228,7 @@ impl TabViewer for Viewer<'_> {
     fn tab_style_override(&self, tab: &Tab, global: &TabStyle) -> Option<TabStyle> {
         let canvas = *tab == Tab::Canvas;
         // LightCraft's panels bring their own padding
-        (canvas || self.lightroom.is_some()).then(|| {
+        (canvas || self.lightroom.is_some() || self.pixel.is_some()).then(|| {
             let mut s = global.clone();
             if canvas {
                 s.tab_body.bg_fill = TOKENS.canvas;
@@ -219,7 +244,6 @@ impl Viewer<'_> {
         match self.persona {
             Persona::Library => "Grid",
             Persona::Develop | Persona::Film => "Loupe",
-            // ponytail: fixed until the shared document exists (milestone 3)
             Persona::Pixel | Persona::Vector | Persona::Layout | Persona::Export => "Untitled",
         }
     }
@@ -243,16 +267,13 @@ mod tests {
         for p in Persona::ALL {
             let n = names(&default_layout(p));
             assert_eq!(n.iter().filter(|t| *t == "Canvas").count(), 1, "{p:?}: {n:?}");
-            if !p.lightroom() {
+            if !p.lightroom() && p != Persona::Pixel {
                 assert!(n.contains(&"Histogram".to_owned()), "{p:?}: {n:?}");
             }
         }
         assert!(names(&default_layout(Persona::Library)).contains(&"Folders".to_owned()));
         assert!(names(&default_layout(Persona::Develop)).contains(&"Edit".to_owned()));
-        let pixel = names(&default_layout(Persona::Pixel));
-        for t in ["Layers", "Properties", "History", "Navigator"] {
-            assert!(pixel.contains(&t.to_owned()), "{pixel:?}");
-        }
+        assert_eq!(names(&default_layout(Persona::Pixel)), ["Canvas", "Layers"]);
     }
 
     #[test]

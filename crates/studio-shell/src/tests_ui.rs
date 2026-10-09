@@ -71,13 +71,11 @@ fn each_persona_shows_its_adobe_layout() {
     h.get_by_label("Film").click();
     h.run();
     h.get_by_label("Halation");
-    // Pixel: tools left, options bar on top, Layers and Properties on the right.
+    // Pixel: one tab for PhotoCraft's right dock (its tools, options bar and panels need
+    // PhotoCraft, see `tests_photocraft::pixel_is_photoshops_layout_on_photocraft`).
     h.get_by_label("Pixel").click();
     h.run();
-    h.get_by_label("Tool options");
     h.get_by_label("Layers");
-    h.get_by_label("Properties");
-    h.get_by_label("B");
     assert!(h.query_by_label("Folders").is_none());
 }
 
@@ -105,21 +103,21 @@ fn mouse_drag(h: &mut Harness<'_, StudioShell>, from: Pos2, to: Pos2) {
 #[test]
 fn dragging_a_panel_tab_regroups_it_and_the_layout_survives_switching() {
     let mut h = harness();
-    h.get_by_label("Pixel").click();
+    h.get_by_label("Film").click();
     h.run();
-    let before = leaf_of(h.state(), Persona::Pixel, "History");
-    assert_ne!(before, leaf_of(h.state(), Persona::Pixel, "Layers"));
-    // Drop History's tab in the middle of the Layers group: it becomes a tab of that group.
-    let from = h.get_by_label("History").rect().center();
-    let to = h.get_by_label("Layers").rect().center() + egui::vec2(60.0, 120.0);
+    let before = leaf_of(h.state(), Persona::Film, "Film Effects");
+    assert_ne!(before, leaf_of(h.state(), Persona::Film, "Histogram"));
+    // Drop Film Effects' tab in the middle of the Histogram group: it becomes a tab of that group.
+    let from = h.get_by_label("Film Effects").rect().center();
+    let to = leaf_rect(h.state(), Persona::Film, "Histogram").center();
     mouse_drag(&mut h, from, to);
-    assert_eq!(leaf_of(h.state(), Persona::Pixel, "History"), leaf_of(h.state(), Persona::Pixel, "Layers"));
+    assert_eq!(leaf_of(h.state(), Persona::Film, "Film Effects"), leaf_of(h.state(), Persona::Film, "Histogram"));
     // Away and back: the dragged layout is still there.
     h.get_by_label("Library").click();
     h.run();
-    h.get_by_label("Pixel").click();
+    h.get_by_label("Film").click();
     h.run();
-    assert_eq!(leaf_of(h.state(), Persona::Pixel, "History"), leaf_of(h.state(), Persona::Pixel, "Layers"));
+    assert_eq!(leaf_of(h.state(), Persona::Film, "Film Effects"), leaf_of(h.state(), Persona::Film, "Histogram"));
 }
 
 #[test]
@@ -205,17 +203,17 @@ fn corrupt_saved_layouts_never_crash_and_unsafe_ones_reset_to_default() {
 #[test]
 fn right_click_reset_workspace_puts_the_panels_back() {
     let mut h = harness();
-    h.get_by_label("Pixel").click();
+    h.get_by_label("Film").click();
     h.run();
-    let from = h.get_by_label("History").rect().center();
-    let to = h.get_by_label("Layers").rect().center() + egui::vec2(60.0, 120.0);
+    let from = h.get_by_label("Film Effects").rect().center();
+    let to = leaf_rect(h.state(), Persona::Film, "Histogram").center();
     mouse_drag(&mut h, from, to);
-    assert_eq!(leaf_of(h.state(), Persona::Pixel, "History"), leaf_of(h.state(), Persona::Pixel, "Layers"));
-    h.get_by_label("Layers").click_secondary();
+    assert_eq!(leaf_of(h.state(), Persona::Film, "Film Effects"), leaf_of(h.state(), Persona::Film, "Histogram"));
+    h.get_by_label("Histogram").click_secondary();
     h.run();
     h.get_by_label("Reset Workspace").click();
     h.run();
-    assert_ne!(leaf_of(h.state(), Persona::Pixel, "History"), leaf_of(h.state(), Persona::Pixel, "Layers"));
+    assert_ne!(leaf_of(h.state(), Persona::Film, "Film Effects"), leaf_of(h.state(), Persona::Film, "Histogram"));
 }
 
 /// Renders each v1 persona to `target/renders/<persona>.png` for a visual check. Needs a GPU, so
@@ -242,6 +240,17 @@ fn render_personas() {
         h.run_steps(1);
         std::thread::sleep(std::time::Duration::from_millis(5));
     }
+    // Pixel on PhotoCraft with the document, a painted layer over the Develop layer
+    crate::tests_photocraft::add_layer(&mut h, "Paint");
+    settle(&mut h);
+    h.render().unwrap().save(dir.join("pixel-document.png")).unwrap();
+    // a change to the Develop layer taken back, and why
+    let base = h.state().document.as_ref().unwrap().base_layer().unwrap().id.0;
+    let session = &mut h.state_mut().pixel.as_mut().unwrap().app.session;
+    session.execute("layer.delete", serde_json::json!({"layer": base})).unwrap();
+    settle(&mut h);
+    h.render().unwrap().save(dir.join("pixel-locked.png")).unwrap();
+    h.state_mut().run("document.dismissError").unwrap();
     let lr = h.state_mut().lightroom.as_mut().unwrap();
     lr.app.run("develop.set", serde_json::json!({"control": "light.exposure", "value": 1.0})).unwrap();
     h.run_steps(1);
@@ -292,18 +301,11 @@ fn tooltip(h: &mut Harness<'_, StudioShell>, at: Pos2, text: &str) -> bool {
 }
 
 #[test]
-fn greyed_out_personas_and_tools_say_when_they_arrive() {
+fn greyed_out_personas_say_when_they_arrive() {
     let mut h = harness();
     for (label, text) in [("Vector", "Vector arrives in v2"), ("Layout", "Layout arrives in v3"), ("Export", "Export arrives in v2")] {
         let at = h.get_by_label(label).rect().center();
         assert!(tooltip(&mut h, at, text), "{label}: no tooltip `{text}`");
-    }
-    h.get_by_label("Pixel").click();
-    h.run();
-    for (key, name) in [("B", "Brush"), ("V", "Move"), ("Z", "Zoom")] {
-        let at = h.get_by_label(key).rect().center();
-        let text = format!("{name} ({key}) arrives in milestone 4");
-        assert!(tooltip(&mut h, at, &text), "tool {key}: no tooltip `{text}`");
     }
 }
 
@@ -333,34 +335,39 @@ fn windows(shell: &StudioShell, p: Persona) -> usize {
 #[test]
 fn dropping_a_tab_on_a_groups_edge_splits_it() {
     let mut h = harness();
-    h.get_by_label("Pixel").click();
+    h.get_by_label("Film").click();
     h.run();
-    let before = leaves(h.state(), Persona::Pixel);
-    // History onto the bottom edge of the Layers group's body
-    let from = h.get_by_label("History").rect().center();
-    let layers = h.get_by_label("Layers").rect();
-    let to = egui::pos2(layers.center().x + 60.0, layers.bottom() + 200.0);
+    let before = leaves(h.state(), Persona::Film);
+    // Film Effects (alone in its group, below Histogram's) onto the top edge of the Histogram
+    // group's body: a split puts it above Histogram
+    let from = h.get_by_label("Film Effects").rect().center();
+    let group = leaf_rect(h.state(), Persona::Film, "Histogram");
+    let body_top = h.get_by_label("Histogram").rect().bottom();
+    let to = egui::pos2(group.center().x, body_top + (group.bottom() - body_top) * 0.1);
     mouse_drag(&mut h, from, to);
-    assert_eq!(leaves(h.state(), Persona::Pixel), before + 1, "a new group");
-    assert_ne!(leaf_of(h.state(), Persona::Pixel, "History"), leaf_of(h.state(), Persona::Pixel, "Layers"));
+    // its own group (its old one is gone, so the count stays)
+    assert_eq!(leaves(h.state(), Persona::Film), before, "one group gone, one made");
+    assert_ne!(leaf_of(h.state(), Persona::Film, "Film Effects"), leaf_of(h.state(), Persona::Film, "Histogram"));
+    let (above, under) = (leaf_rect(h.state(), Persona::Film, "Film Effects"), leaf_rect(h.state(), Persona::Film, "Histogram"));
+    assert!(above.bottom() <= under.top() + 4.0 && above.left() == group.left(), "split: {above:?} over {under:?}");
 }
 
 #[test]
 fn a_panel_dropped_away_from_the_split_buttons_floats_but_the_canvas_never_does() {
     let mut h = harness();
-    h.get_by_label("Pixel").click();
+    h.get_by_label("Film").click();
     h.run();
     // onto the canvas, away from its split buttons (in its middle)
-    let canvas = leaf_rect(h.state(), Persona::Pixel, "Layers");
+    let canvas = leaf_rect(h.state(), Persona::Film, "Histogram");
     let out = egui::pos2(canvas.left() - 500.0, 200.0);
-    let from = h.get_by_label("History").rect().center();
+    let from = h.get_by_label("Film Effects").rect().center();
     mouse_drag(&mut h, from, out);
-    assert_eq!(windows(h.state(), Persona::Pixel), 1, "History floats");
-    // the canvas tab's title (the top bar's document name is "Untitled" too)
-    let from = h.get_all_by_label("Untitled").map(|n| n.rect()).find(|r| r.top() > 40.0).unwrap().center();
+    assert_eq!(windows(h.state(), Persona::Film), 1, "Film Effects floats");
+    // the canvas tab's title
+    let from = h.get_all_by_label("Loupe").map(|n| n.rect()).find(|r| r.top() > 40.0).unwrap().center();
     mouse_drag(&mut h, from, egui::pos2(out.x, 600.0));
-    assert_eq!(windows(h.state(), Persona::Pixel), 1, "the canvas stays docked");
-    assert!(dock::layout_is_usable(&h.state().layouts[Persona::Pixel as usize]));
+    assert_eq!(windows(h.state(), Persona::Film), 1, "the canvas stays docked");
+    assert!(dock::layout_is_usable(&h.state().layouts[Persona::Film as usize]));
 }
 
 /// The rectangle egui_dock laid out for the group holding `panel` (its tab bar and body).
@@ -386,30 +393,30 @@ fn click_at(h: &mut Harness<'_, StudioShell>, at: Pos2) {
 #[test]
 fn the_collapse_button_folds_a_panel_group() {
     let mut h = harness();
-    h.get_by_label("Pixel").click();
+    h.get_by_label("Film").click();
     h.run();
     let collapsed = |s: &StudioShell| {
-        let dock = &s.layouts[Persona::Pixel as usize];
-        let path = dock.find_tab(&Tab::Panel("Layers".to_owned())).unwrap();
+        let dock = &s.layouts[Persona::Film as usize];
+        let path = dock.find_tab(&Tab::Panel("Histogram".to_owned())).unwrap();
         matches!(&dock[path.surface][path.node], egui_dock::Node::Leaf(l) if l.collapsed)
     };
     assert!(!collapsed(h.state()));
     // the ▼ button is the left end of the group's tab bar
-    let group = leaf_rect(h.state(), Persona::Pixel, "Layers");
-    let layers = h.get_by_label("Layers").rect();
+    let group = leaf_rect(h.state(), Persona::Film, "Histogram");
+    let layers = h.get_by_label("Histogram").rect();
     click_at(&mut h, egui::pos2(group.left() + 6.0, layers.center().y));
-    assert!(collapsed(h.state()), "Layers' group is folded");
+    assert!(collapsed(h.state()), "Histogram's group is folded");
 }
 
 #[test]
 fn dragging_a_column_separator_resizes_it() {
     let mut h = harness();
-    h.get_by_label("Pixel").click();
+    h.get_by_label("Film").click();
     h.run();
-    let column = |s: &StudioShell| leaf_rect(s, Persona::Pixel, "Layers").width();
+    let column = |s: &StudioShell| leaf_rect(s, Persona::Film, "Histogram").width();
     let w = column(h.state());
     // the separator runs just left of the right column
-    let x = leaf_rect(h.state(), Persona::Pixel, "Layers").left() - 1.0;
+    let x = leaf_rect(h.state(), Persona::Film, "Histogram").left() - 1.0;
     mouse_drag(&mut h, egui::pos2(x, 450.0), egui::pos2(x - 120.0, 450.0));
     assert!(column(h.state()) > w + 60.0, "{w} → {}", column(h.state()));
 }

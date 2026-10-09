@@ -7,6 +7,7 @@
 
 use egui::{Rect, Ui, UiBuilder, pos2};
 use egui_kittest::Harness;
+use egui_kittest::kittest::Queryable;
 use photocraft_color::{ColorMode, PixelFormat, SampleType};
 use photocraft_doc::{Document, Layer};
 use photocraft_geom::Size;
@@ -221,6 +222,90 @@ fn in_pixel_a_new_render_waits_while_a_button_is_held_and_goes_in_on_release() {
     h.run_steps(2);
     assert_ne!(shown_render(&h), before);
     assert!(h.state().base_up_to_date());
+}
+
+/// The rectangle of the dock group holding `tab` in Pixel.
+fn pixel_leaf(h: &Harness<'_, crate::StudioShell>, tab: &crate::dock::Tab) -> Rect {
+    let dock = &h.state().layouts[crate::Persona::Pixel as usize];
+    let path = dock.find_tab(tab).unwrap();
+    match &dock[path.surface][path.node] {
+        egui_dock::Node::Leaf(l) => l.rect,
+        _ => panic!("{tab:?} isn't in a leaf"),
+    }
+}
+
+#[test]
+fn pixel_is_photoshops_layout_on_photocraft() {
+    let mut h = studio();
+    h.run_steps(3);
+    h.state_mut().run("persona.pixel").unwrap();
+    h.run_steps(4);
+    // no document yet: the canvas says how to get one
+    assert!(painted_text(h.output()).contains("No document"), "{}", painted_text(h.output()));
+    h.state_mut().run("persona.library").unwrap();
+    h.run_steps(2);
+    pick_first(&mut h);
+    h.state_mut().run("document.new").unwrap();
+    h.state_mut().run("persona.pixel").unwrap();
+    // the frame that starts the render (at 600 px it may be done by the next)
+    h.run_steps(1);
+    assert!(painted_text(h.output()).contains("Rendering Develop"), "said while the base renders");
+    settle_base(&mut h);
+    h.run_steps(3);
+    let text = painted_text(h.output());
+    assert!(!text.contains("Rendering Develop"));
+    // PhotoCraft's options bar, Layers panel (with the document's base layer) and History
+    for want in ["Opacity:", "Layers", "Properties", "History", studio_doc::BASE_LAYER] {
+        assert!(text.contains(want), "{want}: {text}");
+    }
+    // its canvas fills Studio's canvas tab, which is titled with the document's name
+    let name = h.state().document.as_ref().unwrap().name.clone();
+    assert_eq!(h.get_all_by_label(name.as_str()).count(), 2, "the top bar's and the canvas tab's");
+    let tab = pixel_leaf(&h, &crate::dock::Tab::Canvas);
+    let images: Vec<Rect> = h
+        .output()
+        .shapes
+        .iter()
+        .filter_map(|c| match &c.shape {
+            egui::Shape::Mesh(m) if m.texture_id != egui::TextureId::default() => Some(m.calc_bounds()),
+            _ => None,
+        })
+        .collect();
+    assert!(images.iter().any(|r| tab.contains_rect(*r) && r.width() > 100.0), "the document's image in {tab:?}: {images:?}");
+    // Photoshop's tool keys pick from their tool's group: V Move, B a brush, M a marquee, E an eraser
+    for (key, group) in [(egui::Key::V, 'V'), (egui::Key::B, 'B'), (egui::Key::M, 'M'), (egui::Key::E, 'E')] {
+        h.key_press(key);
+        h.run_steps(2);
+        let tool = h.state().pixel.as_ref().unwrap().app.ui.tool;
+        assert_eq!(tool.key(), group, "{key:?}: {tool:?}");
+    }
+    // and the theme stays Studio's around it
+    assert_eq!(h.ctx.global_style().visuals.panel_fill, crate::theme::TOKENS.chrome);
+}
+
+#[test]
+fn a_change_to_the_develop_layer_is_taken_back_and_says_why() {
+    let mut h = studio();
+    h.run_steps(3);
+    pick_first(&mut h);
+    h.state_mut().run("document.new").unwrap();
+    settle_base(&mut h);
+    h.state_mut().run("persona.pixel").unwrap();
+    h.run_steps(3);
+    add_layer(&mut h, "Paint");
+    h.run_steps(1);
+    let rev = h.state().document.as_ref().unwrap().revision;
+    // Delete Layer on the Develop layer (PhotoCraft lets it through, see `l2_*`)
+    let base = h.state().document.as_ref().unwrap().base_layer().unwrap().id.0;
+    let session = &mut h.state_mut().pixel.as_mut().unwrap().app.session;
+    session.execute("layer.delete", serde_json::json!({"layer": base})).unwrap();
+    h.run_steps(2);
+    let text = painted_text(h.output());
+    assert!(text.contains("Couldn\u{2019}t change the Develop layer") && text.contains(studio_doc::pixel::LOCKED), "{text}");
+    let doc = h.state().document.as_ref().unwrap();
+    assert_eq!(layer_names(doc), [studio_doc::BASE_LAYER, "Paint"]);
+    assert_eq!(doc.revision, rev, "nothing changed");
+    h.state_mut().run("document.dismissError").unwrap();
 }
 
 fn harness_app() -> PhotocraftApp {
