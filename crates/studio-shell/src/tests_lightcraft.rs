@@ -1008,14 +1008,14 @@ fn a_failed_save_says_why_and_keeps_the_document_and_the_window() {
     answer(&mut h, "Save");
     assert_eq!(run_window(&mut h, 4, false), Window::default(), "the window stays");
     h.get_by_label(format!("Couldn\u{2019}t save \u{201c}{name}\u{201d}").as_str());
-    let why = h.state().save_error.clone().unwrap();
+    let why = h.state().error.clone().unwrap().1;
     assert!(why.contains("blocker"), "{why}");
     h.get_by_label(why.as_str());
     assert_eq!(h.state().prompt, Some(crate::Pending::Quit), "still asking");
     assert!(h.state().document.as_ref().unwrap().unsaved(), "nothing lost");
     answer(&mut h, "OK");
     h.run_steps(2);
-    assert!(h.state().save_error.is_none() && h.query_by_label(why.as_str()).is_none());
+    assert!(h.state().error.is_none() && h.query_by_label(why.as_str()).is_none());
     assert!(prompt_shown(&h), "back to the prompt");
     // a save from anywhere else shows it too
     answer(&mut h, "Cancel");
@@ -1061,6 +1061,26 @@ fn exiting_with_unsaved_changes_anyway_saves_them_never_over_an_earlier_recovery
     let third = h.state_mut().save_for_exit(&recovered).unwrap().unwrap();
     assert_eq!(third, recovered.join(format!("{name} 3.studio")));
     assert_eq!(studio_doc::Document::open(&third).unwrap().develop.light.exposure, 0.25);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn what_fails_after_the_prompt_is_answered_says_why() {
+    let dir = temp_dir("prompt-then-fail");
+    let mut h = studio();
+    edited_document(&mut h, &dir.join("trip.studio"));
+    let bad = dir.join("bad.studio");
+    std::fs::write(&bad, b"not a document").unwrap();
+    assert!(h.state_mut().run_with("document.open", &serde_json::json!({"path": bad})).is_err());
+    h.run_steps(2);
+    answer(&mut h, "Don't Save");
+    h.run_steps(2);
+    h.get_by_label("Couldn\u{2019}t open \u{201c}bad.studio\u{201d}");
+    assert!(h.query_by_label_contains("not a .studio file").is_some(), "and why");
+    assert!(h.state().document.as_ref().unwrap().unsaved(), "the open document is kept");
+    answer(&mut h, "OK");
+    h.run_steps(2);
+    assert!(h.query_by_label_contains("not a .studio file").is_none());
     let _ = std::fs::remove_dir_all(&dir);
 }
 

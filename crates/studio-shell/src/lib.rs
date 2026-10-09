@@ -90,9 +90,10 @@ pub struct StudioShell {
     /// document that has no file yet (none: cancelled). Set by the app; tests put a fake here.
     #[serde(skip)]
     pub pick_save_path: Option<PickSavePath>,
-    /// Why the last save failed, shown until dismissed (`document.dismissError`).
+    /// A document action that failed where no caller sees the error (a save, what follows the
+    /// prompt's answer): (title, why), shown until dismissed (`document.dismissError`).
     #[serde(skip)]
-    pub save_error: Option<String>,
+    pub error: Option<(String, String)>,
 }
 
 /// See [`StudioShell::pick_save_path`].
@@ -121,7 +122,7 @@ impl Default for StudioShell {
             prompt: None,
             close_window: false,
             pick_save_path: None,
-            save_error: None,
+            error: None,
         }
     }
 }
@@ -241,7 +242,7 @@ impl StudioShell {
                 Ok(())
             }
             "dismissError" => {
-                self.save_error = None;
+                self.error = None;
                 Ok(())
             }
             "new" => {
@@ -272,8 +273,9 @@ impl StudioShell {
                     // no file yet: ask where (the dialog may be cancelled)
                     None => self.pick_save_path.as_mut().and_then(|pick| pick(&file)).ok_or("this document has no file yet: use document.saveAs")?,
                 };
-                if let Err(e) = self.document.as_mut().ok_or("no document is open")?.save(&path) {
-                    self.save_error = Some(e.clone());
+                let doc = self.document.as_mut().ok_or("no document is open")?;
+                if let Err(e) = doc.save(&path) {
+                    self.error = Some((format!("Couldn\u{2019}t save \u{201c}{}\u{201d}", doc.name), e.clone()));
                     return Err(e);
                 }
                 self.document_path = Some(path);
@@ -373,17 +375,15 @@ impl StudioShell {
             lr.overlays(ui.ctx());
         }
         self.document_prompt(ui.ctx());
-        self.save_error_notice(ui.ctx());
+        self.error_notice(ui.ctx());
     }
 
-    /// Why a save failed, over everything (and over the prompt it may have come from).
-    fn save_error_notice(&mut self, ctx: &egui::Context) {
-        let Some(why) = &self.save_error else { return };
-        let name = self.document.as_ref().map_or("the document", |d| d.name.as_str());
-        let title = format!("Couldn\u{2019}t save \u{201c}{name}\u{201d}");
+    /// What failed and why, over everything (and over the prompt it may have come from).
+    fn error_notice(&mut self, ctx: &egui::Context) {
+        let Some((title, why)) = &self.error else { return };
         let mut ok = false;
-        let r = egui::Modal::new(egui::Id::new("studio.save_error")).show(ctx, |ui| {
-            ui.strong(title);
+        let r = egui::Modal::new(egui::Id::new("studio.document_error")).show(ctx, |ui| {
+            ui.strong(title.as_str());
             ui.label(why.as_str());
             ui.add_space(8.0);
             ok = ui.button("OK").clicked();
@@ -443,8 +443,25 @@ impl StudioShell {
         if r.should_close() && answer.is_none() {
             answer = Some("document.prompt.cancel");
         }
-        if let Some(cmd) = answer {
-            let _ = self.run(cmd);
+        let Some(cmd) = answer else { return };
+        let pending = self.prompt.clone();
+        // answered (the prompt is gone) but what it let through failed: say so. A failed save
+        // keeps the prompt and has said why; a cancelled save dialog keeps it, silently.
+        if let Err(why) = self.run(cmd)
+            && self.prompt.is_none()
+            && self.error.is_none()
+        {
+            let title = match pending {
+                Some(Pending::Open(path)) => {
+                    format!(
+                        "Couldn\u{2019}t open \u{201c}{}\u{201d}",
+                        path.file_name().map_or_else(|| path.to_string_lossy(), |n| n.to_string_lossy())
+                    )
+                }
+                Some(Pending::New) => "Couldn\u{2019}t make a new document".to_owned(),
+                _ => "That didn\u{2019}t work".to_owned(),
+            };
+            self.error = Some((title, why));
         }
     }
 
