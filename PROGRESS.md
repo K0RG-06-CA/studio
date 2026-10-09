@@ -39,6 +39,7 @@ See [`PRD.md`](PRD.md) → *Milestones for Claude Code*.
 
 - [ ] **RW2 decoding** — report why LightCraft marks S9 RW2 files preview-only, propose and build the `studio-raw-rw2` decoder.
 - [ ] **Real Time LUT** — inspect S9 RAW+JPEG pairs for LUT / Photo Style metadata; .vlt import; apply detected LUT as an editable profile.
+  - [ ] Before starting, shoot labelled RAW+JPEG pairs (one per LUT plus one without) into `samples/lut/` (gitignored).
 - [ ] **Film effects**
   - [ ] Saturation RGB
   - [ ] Lazy Grain
