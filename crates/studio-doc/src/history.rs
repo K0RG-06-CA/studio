@@ -708,10 +708,6 @@ impl Document {
         if let Some(d) = step.develop.clone()
             && let Err(e) = self.commit_develop(lr, &format!("Undo {}", step.label), &d.before, &d.history_before)
         {
-            if step.pixel.is_empty() {
-                self.history.clear(&format!("History reset: {e}"));
-                return Err(e);
-            }
             for p in &mut step.pixel {
                 self.pixel_redo(px, p)?;
             }
@@ -741,10 +737,6 @@ impl Document {
         if let Some(d) = step.develop.clone()
             && let Err(e) = self.commit_develop(lr, &format!("Redo {}", step.label), &d.after, &d.history_after)
         {
-            if step.pixel.is_empty() {
-                self.history.clear(&format!("History reset: {e}"));
-                return Err(e);
-            }
             for _ in 0..step.pixel.len() {
                 self.pixel_undo(px)?;
             }
@@ -1255,16 +1247,34 @@ pub(crate) mod tests {
         assert_eq!(doc.history.entries(), rows, "the rows stay");
     }
 
+    /// A Develop step whose commit fails (here: the photo gone from the library as far as the
+    /// commit is concerned) stays where it was, like a paired one: nothing moved, the step is
+    /// kept, the notice says why, and it undoes once the commit works again. The redo side too.
     #[test]
-    fn a_photo_gone_from_the_library_fails_the_undo_safely() {
+    fn a_develop_step_whose_commit_fails_is_kept_and_says_why() {
         let (mut lr, mut px, mut doc) = open();
         let id = doc.source.photo;
         set_exposure(&mut lr, id, 1.0);
         tick(&mut doc, &lr, &mut px);
+        let rows = labels(&doc);
         doc.source.photo = PhotoId(u64::MAX);
-        assert!(doc.undo(&mut lr, &mut px, &mut Base::new()).is_err());
-        assert!(doc.take_notice().unwrap().starts_with("History reset"));
-        assert_eq!(doc.history.position(), 0);
+        let e = doc.undo(&mut lr, &mut px, &mut Base::new()).unwrap_err();
+        assert_eq!((exposure(&lr, id), doc.develop.light.exposure), (1.0, 1.0), "nothing moved");
+        assert_eq!((labels(&doc), doc.history.position(), doc.history.can_redo()), (rows.clone(), 1, false), "the step is kept");
+        let notice = doc.take_notice().unwrap();
+        assert!(notice.starts_with("Couldn\u{2019}t undo \u{201c}Exposure\u{201d}") && notice.contains(&e), "{notice}");
+        doc.source.photo = id;
+        assert!(doc.undo(&mut lr, &mut px, &mut Base::new()).unwrap());
+        assert_eq!(exposure(&lr, id), 0.0);
+        // and on the redo side
+        doc.source.photo = PhotoId(u64::MAX);
+        assert!(doc.redo(&mut lr, &mut px, &mut Base::new()).is_err());
+        assert_eq!((exposure(&lr, id), doc.history.position(), doc.history.can_redo()), (0.0, 0, true), "still redoable");
+        assert!(doc.take_notice().unwrap().starts_with("Couldn\u{2019}t redo \u{201c}Exposure\u{201d}"));
+        doc.source.photo = id;
+        assert!(doc.redo(&mut lr, &mut px, &mut Base::new()).unwrap());
+        assert_eq!((exposure(&lr, id), labels(&doc)), (1.0, rows));
+        assert_eq!(doc.take_notice(), None);
     }
 
     /// Review: a lost prefix drops every step older than the oldest surviving Pixel state, the

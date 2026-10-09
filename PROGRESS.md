@@ -192,8 +192,9 @@ See [`PRD.md`](PRD.md) → *Milestones for Claude Code*.
     goto before both → redo the rotation → the original exposure" test is kept as written (its
     redone state carries the exposure render, so it goes through the re-render path; it fails if
     a render is ever reused by frame instead of by settings, mutation-checked); adoption itself
-    is tested with an undo/redo of the rotation alone. A Develop-only step whose commit fails still resets the
-    history (task 1's tested behaviour). Not done here: `bench.rs` peak bytes during a follow and
+    is tested with an undo/redo of the rotation alone. A Develop-only step whose commit fails is
+    kept with a notice too, as a paired one (user, 2026-10-09; it used to reset the history; task
+    1's test rewritten, both sides). Not done here: `bench.rs` peak bytes during a follow and
     the memory test for k geometry steps (design §5); a single-channel Channels-panel restriction
     on `edit.transform` during a follow is untested.
   - [ ] 3. Shell: commands, shortcuts, Studio's History panel, reconcile points
