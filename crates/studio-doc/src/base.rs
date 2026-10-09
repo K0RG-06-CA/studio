@@ -9,7 +9,7 @@ use std::sync::mpsc::{Receiver, TryRecvError, channel};
 use lightcraft_engine::Session;
 use lightcraft_engine::develop::DevelopSettings;
 use lightcraft_engine::media::RenderResult;
-use lightcraft_engine::pipeline::{DeepSamples, OutputDepth};
+use lightcraft_engine::pipeline::{DeepImage, DeepSamples, OutputDepth, Rendered};
 use photocraft_color::PixelFormat;
 use photocraft_doc::LayerContent;
 use photocraft_geom::{Rect, Size};
@@ -20,6 +20,10 @@ use crate::Document;
 /// Rows written per band, so a 24 MP render never needs a full-size float copy.
 const BAND_ROWS: usize = 256;
 
+/// What the worker sends back: LightCraft's result (its decoded source goes to the session's
+/// cache) and the base surface built from it, there and not on the UI thread.
+type Done = (RenderResult, Result<(Surface, Size), String>);
+
 /// Keeps a document's base layer in step with its develop settings.
 #[derive(Default)]
 pub struct Base {
@@ -28,7 +32,7 @@ pub struct Base {
     /// Hash of the settings the base pixels show; none until the first render.
     shown: Option<u64>,
     /// The render in flight: the settings hash it renders, and where its result arrives.
-    pending: Option<(u64, Receiver<RenderResult>)>,
+    pending: Option<(u64, Receiver<Done>)>,
     /// A render that failed: the settings hash and why. Not tried again until the settings change
     /// (a photo whose file is gone would otherwise be re-decoded every frame).
     failed: Option<(u64, String)>,
@@ -109,7 +113,9 @@ impl Base {
         std::thread::Builder::new()
             .name("studio-base".into())
             .spawn(move || {
-                let _ = tx.send(job.run());
+                let r = job.run();
+                let surface = surface_from(&r.rendered);
+                let _ = tx.send((r, surface));
             })
             .map_err(|e| format!("no thread for the render: {e}"))?;
         self.pending = Some((want, rx));
@@ -121,7 +127,7 @@ impl Base {
     /// straighten and rotation change it).
     fn take(&mut self, session: &mut Session, doc: &mut Document) -> Result<(), String> {
         let Some((want, rx)) = &self.pending else { return Ok(()) };
-        let result = match rx.try_recv() {
+        let (result, converted) = match rx.try_recv() {
             Ok(r) => r,
             Err(TryRecvError::Empty) => return Ok(()),
             Err(TryRecvError::Disconnected) => {
@@ -132,38 +138,56 @@ impl Base {
         let want = *want;
         self.pending = None;
         session.accept(&result);
-        let rendered = result.rendered?;
-        let deep = rendered.deep.ok_or("LightCraft returned no 16-bit render")?;
-        let DeepSamples::U16(samples) = &deep.samples else { return Err("LightCraft returned the wrong sample type".into()) };
-        let (w, h) = (deep.width, deep.height);
-        if samples.len() != w.checked_mul(h).and_then(|n| n.checked_mul(3)).ok_or("render too large")? {
-            return Err(format!("render of {w}×{h} came with {} samples", samples.len()));
-        }
-        let (width, height) = (u32::try_from(w).map_err(|e| e.to_string())?, u32::try_from(h).map_err(|e| e.to_string())?);
-        let mut surface = Surface::new(PixelFormat::RGBA16);
-        let mut band = Vec::with_capacity(w * BAND_ROWS * 4);
-        for (i, rows) in samples.chunks(w * 3 * BAND_ROWS).enumerate() {
-            band.clear();
-            for px in rows.as_chunks::<3>().0 {
-                band.extend(px.iter().map(|&v| f32::from(v) / 65535.0));
-                band.push(1.0);
-            }
-            let y = u32::try_from(i * BAND_ROWS).map_err(|e| e.to_string())?;
-            let rows_h = u32::try_from(rows.len() / (w * 3)).map_err(|e| e.to_string())?;
-            surface.write_region(Rect::from_xywh(0, y as i32, width, rows_h), &band);
-        }
+        let (surface, size) = converted?;
         let base = doc.base_layer_mut().ok_or("the document has no base layer")?;
         base.content = LayerContent::Raster(surface);
         // derived pixels, not an edit: the revision (and so "unsaved") doesn't move
-        doc.pixel.size = Size { width, height };
+        doc.pixel.size = size;
         self.shown = Some(want);
         Ok(())
     }
 }
 
+/// The base surface from a render: its 16-bit image, or why there is none.
+fn surface_from(rendered: &Result<Rendered, String>) -> Result<(Surface, Size), String> {
+    let rendered = rendered.as_ref().map_err(Clone::clone)?;
+    let deep = rendered.deep.as_ref().ok_or("LightCraft returned no 16-bit render")?;
+    surface_from_deep(deep)
+}
+
+/// An RGBA16 surface (alpha 1) and its size from a 16-bit RGB render, written in bands. The
+/// render's shape is checked first: PhotoCraft's `write_region` asserts on a wrong length, and an
+/// empty image would make a zero-size band.
+pub(crate) fn surface_from_deep(deep: &DeepImage) -> Result<(Surface, Size), String> {
+    let DeepSamples::U16(samples) = &deep.samples else { return Err("LightCraft returned the wrong sample type".into()) };
+    let (w, h) = (deep.width, deep.height);
+    if w == 0 || h == 0 {
+        return Err(format!("empty render ({w}×{h})"));
+    }
+    if samples.len() != w.checked_mul(h).and_then(|n| n.checked_mul(3)).ok_or("render too large")? {
+        return Err(format!("render of {w}×{h} came with {} samples", samples.len()));
+    }
+    let (width, height) = (u32::try_from(w).map_err(|e| e.to_string())?, u32::try_from(h).map_err(|e| e.to_string())?);
+    let mut surface = Surface::new(PixelFormat::RGBA16);
+    let mut band = Vec::with_capacity(w * 4 * h.min(BAND_ROWS));
+    for (i, rows) in samples.chunks(w * 3 * BAND_ROWS).enumerate() {
+        band.clear();
+        for px in rows.as_chunks::<3>().0 {
+            band.extend(px.iter().map(|&v| f32::from(v) / 65535.0));
+            band.push(1.0);
+        }
+        let y = i32::try_from(i * BAND_ROWS).map_err(|e| e.to_string())?;
+        let rows_h = u32::try_from(rows.len() / (w * 3)).map_err(|e| e.to_string())?;
+        surface.write_region(Rect::from_xywh(0, y, width, rows_h), &band);
+    }
+    Ok((surface, Size { width, height }))
+}
+
 #[cfg(test)]
 mod tests {
     use std::time::{Duration, Instant};
+
+    use lightcraft_engine::pipeline::OutputSpace;
 
     use super::*;
     use crate::tests::demo;
@@ -332,6 +356,39 @@ mod tests {
         settle(&mut base, &mut session, &mut doc);
         let turned = doc.pixel.size;
         assert!(turned.width.abs_diff(full.height) <= 1 && turned.height.abs_diff(full.width) <= 1, "{full:?} → {turned:?}");
+    }
+
+    fn deep(width: usize, height: usize, samples: Vec<u16>) -> DeepImage {
+        DeepImage { width, height, space: OutputSpace::Srgb, samples: DeepSamples::U16(samples) }
+    }
+
+    #[test]
+    fn a_render_becomes_an_opaque_16_bit_surface_band_by_band() {
+        // 2 wide, 300 tall: more than one band; the last pixel sits in the second band
+        let (w, h) = (2usize, 300usize);
+        let mut samples = vec![0u16; w * h * 3];
+        samples[0..3].copy_from_slice(&[65535, 0, 32768]);
+        let last = (h - 1) * w + 1;
+        samples[last * 3..last * 3 + 3].copy_from_slice(&[0, 65535, 65535]);
+        let (surface, size) = surface_from_deep(&deep(w, h, samples)).unwrap();
+        assert_eq!((size.width, size.height), (2, 300));
+        let mut px = [[0.0f32; 4]; 2];
+        surface.read_rgba_into(Rect::from_xywh(0, 0, 2, 1), &mut px);
+        assert!((px[0][0] - 1.0).abs() < 1e-4 && px[0][1] == 0.0 && (px[0][2] - 0.5).abs() < 1e-3 && px[0][3] == 1.0, "{px:?}");
+        surface.read_rgba_into(Rect::from_xywh(0, 299, 2, 1), &mut px);
+        assert_eq!(px[1], [0.0, 1.0, 1.0, 1.0], "{px:?}");
+        assert_eq!(px[0], [0.0, 0.0, 0.0, 1.0], "black, opaque");
+    }
+
+    #[test]
+    fn a_malformed_render_is_an_error_not_a_crash() {
+        assert!(surface_from_deep(&deep(0, 0, Vec::new())).unwrap_err().contains("empty"));
+        assert!(surface_from_deep(&deep(0, 5, Vec::new())).unwrap_err().contains("empty"));
+        assert!(surface_from_deep(&deep(5, 0, Vec::new())).unwrap_err().contains("empty"));
+        assert!(surface_from_deep(&deep(2, 2, vec![0; 11])).unwrap_err().contains("11 samples"));
+        assert!(surface_from_deep(&deep(usize::MAX, 2, Vec::new())).unwrap_err().contains("too large"));
+        let f32s = DeepImage { width: 1, height: 1, space: OutputSpace::Srgb, samples: DeepSamples::F32(vec![0.0; 3]) };
+        assert!(surface_from_deep(&f32s).unwrap_err().contains("sample type"));
     }
 
     #[test]
