@@ -94,7 +94,7 @@ Former hand checks and the tests that replaced them:
   halation on scene-linear light before the tone curve, which its render API doesn't expose (its
   `F32Linear` output is after the curve and clamped). The document only reserves `Film` settings.
 
-## Must fix before milestone 4
+## Must fix before milestone 4 (done)
 
 - **A never-saved document is dropped silently on exit**, and a failed exit save only goes to stderr
   (`apps/studio/src/main.rs` `on_exit`). Harmless today, since a document holds only develop settings
@@ -122,6 +122,10 @@ Former hand checks and the tests that replaced them:
     stale result is dropped; `Base::current` hands out the layer tree only when the base is up to
     date. No draft. GPU 8-bit is slower than the CPU here (~1.1 s vs ~0.9 s), so no upstream
     request for a GPU 16-bit path. Future option if Pixel feels laggy: a 1280 px draft (~55 ms).
+  - [x] Measured after the fix, base after an edit end to end, 24 MP: release ~0.9 s → ~0.44 s
+    (12 MP: 0.45 → 0.23 s); dev profile ~1.1 s → ~0.7 s. Dependencies already build at
+    `opt-level = 2` in dev (`Cargo.toml` since the scaffold), so CI's >60 s was its 2-core runners,
+    not a debug build: no profile change.
 
 ## Review (milestone 3): LOW findings left open
 
