@@ -30,7 +30,7 @@ See [`PRD.md`](PRD.md) → *Milestones for Claude Code*.
   - [x] 5. Open into a session: find the photo by hash → path/scene → import (an id alone means nothing in another library); the file's settings win, as a History step
   - [x] 6. Shell wiring: `document.new/save/saveAs/open/close`, `run_with` (params), name in the top bar, reopen at launch
   - [x] 7. Smoke script (document.new → saveAs → close → open; reopened on the relaunch) + docs
-- [ ] **4. Pixel persona** — PhotoCraft tools with Photoshop layout (tool bar left, options bar top, Layers and Properties right).
+- [x] **4. Pixel persona** — PhotoCraft tools with Photoshop layout (tool bar left, options bar top, Layers and Properties right).
   - [x] 1. Spike (`tests_photocraft::spike_*`): PhotoCraft's `PhotocraftApp` runs through its
     `eframe::App` with eframe's test frame (`Frame::_new_kittest`, eframe 0.36.2); its tool bar,
     options bar, right dock and `canvas_view` draw in Studio's places; its fonts and LightCraft's
@@ -102,7 +102,7 @@ See [`PRD.md`](PRD.md) → *Milestones for Claude Code*.
     adds none), smoke script (Pixel: tool, new layer, undo, redo; the quit must stop at the
     prompt; save; the relaunch reopens the document with its Pixel layer), NOTICE (PhotoCraft's
     engine and editor).
-  - [ ] Smoke test on DX12 (opens a real window: run when the user isn't studying)
+  - [x] Smoke test on DX12 (2026-10-09, 76.6 s for both runs: Pixel edit, undo/redo, the quit prompt, the relaunch with the Pixel layer)
 
   **PhotoCraft limitations (`d836e34`), each with a test that fails once upstream fixes it:**
   - L1 Layers / History / Properties panels are private: Pixel shows PhotoCraft's whole right dock
@@ -266,6 +266,11 @@ LOW, left open:
 - `canvas()` re-stores `views[idx]` after `canvas_view` (guarded index, redundant).
 - `files_dropped_on_pixel_dont_open_in_photocraft` checks PhotoCraft's set-up behaviour, not Studio
   code.
+
+After the review: CI ran out of disk on ubuntu-latest (`ld` Bus error, 30 MB left; PhotoCraft's
+debug info), so CI builds without it (`CARGO_PROFILE_DEV_DEBUG: 0`). The smoke script ran several
+steps in one slow frame (`app.quit`, then the prompt's cancel before the close request came back):
+it now runs one step a frame, two frames apart at least.
 
 ## Review (M4 must-fixes): LOW findings left open
 

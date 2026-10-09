@@ -12,7 +12,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use lightcraft_engine::gpu;
 use studio_shell::StudioShell;
 
-/// The script: one command every [`STEP`] seconds. Ends in Develop, so the next run starts there.
+/// The script: one command every [`STEP`] seconds, and two frames apart at least (after a slow
+/// frame, a quit must reach the window before its prompt is answered). Ends in Develop, so the
+/// next run starts there.
 /// The document is saved as `smoke.studio` in the data folder, closed and opened again, edited
 /// (`lightcraft:` runs a LightCraft command), and quit with: the quit must stop at the "save
 /// changes?" prompt, which is cancelled before saving. Then Pixel (PhotoCraft) adds a layer, undoes
@@ -112,6 +114,10 @@ impl log::Log for Logger {
 
 pub struct Script {
     start: Option<f64>,
+    /// When the last command ran.
+    last: f64,
+    /// Frames since then: a quit takes two to come back as a close request.
+    frames: u32,
     next: usize,
     closing: bool,
 }
@@ -125,7 +131,7 @@ impl Script {
         if let Some(d) = &shell.document {
             println!("smoke: restored pixel layers {}", d.pixel.layers.len());
         }
-        Script { start: None, next: 0, closing: false }
+        Script { start: None, last: 0.0, frames: 0, next: 0, closing: false }
     }
 
     /// Run after each frame of the shell.
@@ -144,9 +150,10 @@ impl Script {
         if lr.app.session.active().is_none() {
             lr.app.session.selection.active = lr.app.session.catalog.photos().next().map(|p| p.id);
         }
-        while self.next < SCRIPT.len() && now - start >= STEP * (self.next + 1) as f64 {
+        self.frames = self.frames.saturating_add(1);
+        if self.next < SCRIPT.len() && self.frames > 2 && now - start.max(self.last) >= STEP {
             let id = SCRIPT[self.next];
-            println!("smoke: {id}");
+            println!("smoke: {id} ({:.1} s)", now - start);
             if id == "document.prompt.cancel" && shell.prompt.is_none() {
                 fail("app.quit with an unsaved document didn't ask first");
             }
@@ -165,6 +172,7 @@ impl Script {
                 fail(format!("{id}: {e}"));
             }
             self.next += 1;
+            (self.last, self.frames) = (now, 0);
         }
         if self.next < SCRIPT.len() {
             return;
@@ -174,7 +182,7 @@ impl Script {
         let rendered = matches!(lr.app.loupe_shown, Some((_, "render")));
         let base_rendered = shell.base_up_to_date();
         let busy = lr.app.renderer.in_flight() > 0 || gpu_pending || !rendered || !base_rendered;
-        let end = start + STEP * (SCRIPT.len() + 1) as f64;
+        let end = self.last + STEP;
         if busy && now < end + SETTLE {
             return;
         }
