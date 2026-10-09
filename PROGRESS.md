@@ -188,10 +188,11 @@ See [`PRD.md`](PRD.md) → *Milestones for Claude Code*.
     the test knob) and lands it; a render that fails, can't start or passes the ceiling undoes
     the step and is the error. The shell's persona switch and `unsaved()` (every `document.*`,
     the quit prompt) go through it. Tests: an undo during a pending render (not started, and in
-    flight) completes after it lands; a zero ceiling rolls back. Deviations, small: the plan's
-    "rotate → exposure → goto before both → redo" case exercises the re-render path (the
-    exposure render replaced the post-follow document in place), so adoption is tested with an
-    undo/redo of the rotation alone. A Develop-only step whose commit fails still resets the
+    flight) completes after it lands; a zero ceiling rolls back. The plan's "rotate → exposure →
+    goto before both → redo the rotation → the original exposure" test is kept as written (its
+    redone state carries the exposure render, so it goes through the re-render path; it fails if
+    a render is ever reused by frame instead of by settings, mutation-checked); adoption itself
+    is tested with an undo/redo of the rotation alone. A Develop-only step whose commit fails still resets the
     history (task 1's tested behaviour). Not done here: `bench.rs` peak bytes during a follow and
     the memory test for k geometry steps (design §5); a single-channel Channels-panel restriction
     on `edit.transform` during a follow is untested.

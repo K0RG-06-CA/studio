@@ -329,6 +329,10 @@ mod tests {
         (b.x0 + (i as u32 % b.width()) as i32, b.y0 + (i as u32 / b.width()) as i32)
     }
 
+    fn base_surface(doc: &photocraft_doc::Document) -> &Surface {
+        doc.layers.iter().find(|l| crate::is_base(l)).unwrap().surface().unwrap()
+    }
+
     fn base_px(doc: &photocraft_doc::Document, x: i32, y: i32) -> [f32; 4] {
         let mut px = [[0.0; 4]];
         doc.layers.iter().find(|l| crate::is_base(l)).unwrap().surface().unwrap().read_rgba_into(Rect::from_xywh(x, y, 1, 1), &mut px);
@@ -561,6 +565,38 @@ mod tests {
         assert_eq!(t.base.started(), started + 1, "rendered once");
         assert_eq!((t.doc.shown_hash(), dot(&t.pc(), "Paint")), (Some(rotated), at), "the layers stayed as the state has them");
         assert_eq!(t.st().history.past_len(), past + 1, "the render is no state");
+        assert_eq!(t.doc.take_notice(), None);
+    }
+
+    /// The plan's case as written (task 2): rotate → exposure (rendered) → goto before both →
+    /// redo the rotation → the base shows the rotation with the original exposure, not the
+    /// exposure render the redone state carried.
+    #[test]
+    fn rotate_exposure_goto_before_both_then_redo_the_rotation_shows_the_original_exposure() {
+        let mut t = open();
+        t.paint("Paint", 300, 100);
+        t.rotate_left();
+        t.settle();
+        let (rotated, original, orientation) = (t.doc.develop.hash64(), t.pc(), t.doc.develop.orientation);
+        t.develop("Exposure", |s| s.light.exposure = 1.0);
+        t.settle();
+        assert_ne!(t.doc.shown_hash(), Some(rotated), "the exposure is rendered");
+        t.doc.goto(&mut t.lr, &mut t.px, &mut t.base, 1).unwrap();
+        t.settle();
+        assert!(t.redo());
+        t.settle();
+        let s = t.lr.develop_of(t.id()).unwrap();
+        assert_eq!((s.light.exposure, s.orientation), (0.0, orientation));
+        assert_eq!(t.doc.shown_hash(), Some(rotated), "the base shows the rotation's own settings");
+        let now = t.pc();
+        let (ours, want) = (base_surface(&now), base_surface(&original));
+        assert_eq!((t.size(), dot(&t.pc(), "Paint")), ((400, 600), (100, 299)));
+        let mut a = vec![[0.0f32; 4]; 400 * 600];
+        let mut b = a.clone();
+        ours.read_rgba_into(Rect::from_xywh(0, 0, 400, 600), &mut a);
+        want.read_rgba_into(Rect::from_xywh(0, 0, 400, 600), &mut b);
+        let worst = a.iter().zip(&b).flat_map(|(p, q)| (0..3).map(move |c| (p[c] - q[c]).abs())).fold(0.0, f32::max);
+        assert!(worst <= 2.0 / 65535.0, "the original exposure's pixels: off by {} LSB", worst * 65535.0);
         assert_eq!(t.doc.take_notice(), None);
     }
 
