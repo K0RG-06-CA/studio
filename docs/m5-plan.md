@@ -419,6 +419,8 @@ the imported file: Ctrl+S is Save As.
     clears Studio's redo;
   - a rating, `library.import` and "Open x.studio" add no step and are untouched by undo;
   - document A edited, document B opened, undo in B does nothing to A (A's settings unchanged);
+  - document open on photo A, a Develop edit made to photo B (another photo, not the document's):
+    no Studio step; Ctrl+Z touches neither A nor B (B's edit stays, A unchanged);
   - undo during a slider drag ends the drag (one step) then undoes it; undo mid-stroke (pointer
     held) → the stroke is committed first;
   - `px.execute("edit.undo")` directly, with a Develop step after the Pixel step → Studio jump
