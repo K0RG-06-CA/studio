@@ -86,7 +86,14 @@ pub struct StudioShell {
     /// Close the window on the next frame (`app.quit`, or the prompt's answer to a close).
     #[serde(skip)]
     pub close_window: bool,
+    /// The desktop's save dialog, given a file name to suggest (`<name>.studio`): where to save a
+    /// document that has no file yet (none: cancelled). Set by the app; tests put a fake here.
+    #[serde(skip)]
+    pub pick_save_path: Option<PickSavePath>,
 }
+
+/// See [`StudioShell::pick_save_path`].
+pub type PickSavePath = Box<dyn FnMut(&str) -> Option<PathBuf>>;
 
 /// An action that would drop the open document's unsaved changes, held while the prompt asks.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -110,6 +117,7 @@ impl Default for StudioShell {
             document_path: None,
             prompt: None,
             close_window: false,
+            pick_save_path: None,
         }
     }
 }
@@ -142,7 +150,8 @@ impl StudioShell {
     /// - Lightroom Classic's module keys: `view.grid` (G) and `view.loupe` (E) in Library,
     ///   `view.develop` (D), `tool.crop` (R) in Develop.
     /// - The document: `document.new` (from the photo picked in Library), `document.open {path}`,
-    ///   `document.save` (to its path, else beside its source file), `document.saveAs {path}`,
+    ///   `document.save` (to its path, else beside its source file, else where the save dialog
+    ///   says), `document.saveAs {path}`,
     ///   `document.close {discard?}`. Unsaved changes stop `new`, `open` and `close` unless
     ///   `discard` is true: they return an error and show the "save changes?" prompt, which
     ///   `document.prompt.save` (save, then go ahead), `document.prompt.discard` (go ahead) and
@@ -244,11 +253,17 @@ impl StudioShell {
                 if let Some(lr) = &self.lightroom {
                     self.base.mirror(&lr.app.session, doc);
                 }
-                let path = match cmd {
-                    "saveAs" => path("path").ok_or("document.saveAs needs a `path`")?,
-                    _ => doc.path.clone().or_else(|| doc.default_path()).ok_or("this document has no file yet: use document.saveAs")?,
+                let known = match cmd {
+                    "saveAs" => Some(path("path").ok_or("document.saveAs needs a `path`")?),
+                    _ => doc.path.clone().or_else(|| doc.default_path()),
                 };
-                doc.save(&path)?;
+                let file = format!("{}.{}", doc.name, studio_doc::file::EXTENSION);
+                let path = match known {
+                    Some(p) => p,
+                    // no file yet: ask where (the dialog may be cancelled)
+                    None => self.pick_save_path.as_mut().and_then(|pick| pick(&file)).ok_or("this document has no file yet: use document.saveAs")?,
+                };
+                self.document.as_mut().ok_or("no document is open")?.save(&path)?;
                 self.document_path = Some(path);
                 Ok(())
             }

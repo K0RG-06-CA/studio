@@ -104,7 +104,7 @@ Former hand checks and the tests that replaced them:
   - [x] Prompt on `document.new` / `open` / `close` (`document.prompt.save|discard|cancel`)
   - [x] Window close and Ctrl+Q (every persona) go through the prompt (`app.quit`; LightCraft's own
     Cmd+Q in Library/Develop, Studio's elsewhere; one Close, one prompt)
-  - [ ] Save of a document with no file picks one (save dialog)
+  - [x] Save of a document with no file picks one (save dialog; cancelling it keeps the prompt)
   - [ ] Visible save error; `on_exit` recovers a never-saved document
   - [ ] Smoke script and offscreen renders of the prompt and the error
 - **Full-size 16-bit base render is CPU-only and slow** (CI runners took over 60 s for 24 MP). Measure

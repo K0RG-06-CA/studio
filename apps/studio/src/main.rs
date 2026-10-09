@@ -149,6 +149,10 @@ fn main() -> ExitCode {
             // A missing or unreadable saved state falls back to the default layout.
             let saved = cc.storage.and_then(|s| eframe::get_value(s, SHELL_KEY));
             let mut shell = StudioShell::restore(saved);
+            shell.pick_save_path = Some(Box::new(|file| {
+                let ext = std::path::Path::new(file).extension().map(|e| e.to_string_lossy().into_owned()).unwrap_or_default();
+                rfd::FileDialog::new().set_title("Save As").set_file_name(file).add_filter("Studio document", &[ext]).save_file()
+            }));
             shell.lightroom = Some(lightroom(open_library(library, smoke), cc.storage.and_then(|s| eframe::get_value(s, LIGHTCRAFT_KEY))));
             // the document of the last launch (a deleted one is forgotten, see `reopen`)
             if let Err(e) = shell.reopen() {

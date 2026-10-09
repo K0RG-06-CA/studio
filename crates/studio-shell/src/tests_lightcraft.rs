@@ -959,6 +959,41 @@ fn closing_the_window_with_an_unsaved_document_asks_first_in_every_persona() {
 }
 
 #[test]
+fn saving_a_document_without_a_file_asks_where_and_a_cancelled_dialog_keeps_everything() {
+    let dir = temp_dir("prompt-pick");
+    let path = dir.join("picked.studio");
+    let asked = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+    let mut h = studio();
+    // a demo photo's document: no file, nowhere beside a source file
+    h.run_steps(3);
+    pick_first(&mut h);
+    h.state_mut().run("document.new").unwrap();
+    settle_base(&mut h);
+    edit(&mut h, 1.5);
+    let name = h.state().document.as_ref().unwrap().name.clone();
+    // the dialog is cancelled: the prompt stays, nothing closes
+    let log = asked.clone();
+    h.state_mut().pick_save_path = Some(Box::new(move |file| {
+        log.lock().unwrap().push(file.to_owned());
+        None
+    }));
+    run_window(&mut h, 2, true);
+    answer(&mut h, "Save");
+    assert_eq!(run_window(&mut h, 4, false), Window::default());
+    assert_eq!(*asked.lock().unwrap(), [format!("{name}.studio")], "suggests <name>.studio");
+    assert_eq!(h.state().prompt, Some(crate::Pending::Quit), "still asking");
+    assert!(h.state().document.as_ref().unwrap().unsaved());
+    // a file is picked: saved there, then closed
+    let picked = path.clone();
+    h.state_mut().pick_save_path = Some(Box::new(move |_| Some(picked.clone())));
+    answer(&mut h, "Save");
+    assert!(run_window(&mut h, 4, false).closed);
+    assert_eq!(studio_doc::Document::open(&path).unwrap().develop.light.exposure, 1.5);
+    assert_eq!(h.state().document_path.as_deref(), Some(path.as_path()), "opened again next launch");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn ctrl_q_asks_exactly_once_in_every_persona() {
     let dir = temp_dir("prompt-quit");
     let path = dir.join("trip.studio");
