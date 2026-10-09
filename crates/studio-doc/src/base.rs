@@ -45,6 +45,12 @@ pub struct Base {
     /// LightCraft's stages kept between this photo's renders: a re-render after an edit redoes only
     /// what the edit changed (24 MP: ~0.9 s → ~0.43 s, see `bench.rs`).
     stages: Arc<StageCache>,
+    /// A Pixel gesture (a stroke, a drag, a transform) is in progress: a finished render waits in
+    /// `ready` until it ends, so the pixels under it don't change halfway. Set by the shell each
+    /// frame before `sync`.
+    pub hold: bool,
+    /// A render that finished while `hold` was on: (settings hash, anchor, pixels, size).
+    ready: Option<(u64, Anchor, Surface, Size)>,
 }
 
 impl Base {
@@ -98,7 +104,8 @@ impl Base {
         if let Some((_, why)) = &self.failed {
             return Err(why.clone());
         }
-        if self.pending.is_none() && self.shown != Some(want) && session.interaction.is_none() {
+        let waiting = self.ready.as_ref().is_some_and(|r| r.0 == want);
+        if self.pending.is_none() && self.shown != Some(want) && !waiting && session.interaction.is_none() {
             self.start(session, doc, want)?;
         }
         Ok(())
@@ -154,6 +161,14 @@ impl Base {
     /// pixels or error: the next `sync` renders the newest settings (edits made meanwhile
     /// coalesce into that one render).
     fn take(&mut self, session: &mut Session, pixel: &mut PixelSession, doc: &mut Document) -> Result<(), String> {
+        // one that finished during a gesture goes in once it has ended (unless edited since)
+        if !self.hold
+            && let Some((want, anchor, surface, size)) = self.ready.take()
+            && want == doc.develop.hash64()
+        {
+            doc.write_base(pixel, surface, size, Some(anchor))?;
+            self.shown = Some(want);
+        }
         let Some((want, anchor, rx)) = &self.pending else { return Ok(()) };
         let (result, converted) = match rx.try_recv() {
             Ok(r) => r,
@@ -170,6 +185,10 @@ impl Base {
             return Ok(());
         }
         let (surface, size) = converted?;
+        if self.hold {
+            self.ready = Some((want, anchor, surface, size));
+            return Ok(());
+        }
         // into PhotoCraft, the pixels' one home: derived pixels, not an edit (the revision, and so
         // "unsaved", doesn't move)
         doc.write_base(pixel, surface, size, Some(anchor))?;
@@ -569,6 +588,61 @@ mod tests {
         let q = base_px(&doc, b.x0, b.y0);
         assert!((0..3).all(|c| (p[c] - q[c]).abs() < 0.02), "{p:?} vs {q:?}");
         assert_eq!(doc.take_notice(), None);
+    }
+
+    #[test]
+    fn a_render_that_finishes_during_a_stroke_goes_in_when_the_stroke_ends() {
+        let (mut session, mut doc, mut base) = open();
+        let mut pixel = PixelSession::new();
+        settle(&mut base, &mut session, &mut pixel, &mut doc);
+        let id = doc.source.photo;
+        let shown = |doc: &Document| doc.base_layer().unwrap().surface().unwrap().tiles().next().map(|(_, t)| Arc::as_ptr(t));
+        let (before, started) = (shown(&doc), base.started());
+        // a stroke starts in Pixel; meanwhile Develop's exposure changes and its render finishes
+        base.hold = true;
+        set_exposure(&mut session, id, 1.0);
+        let t0 = Instant::now();
+        while base.rendering() || base.started() == started {
+            assert!(t0.elapsed() < Duration::from_secs(300), "render never finished");
+            base.sync(&mut session, &mut pixel, &mut doc).unwrap();
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        for _ in 0..3 {
+            base.sync(&mut session, &mut pixel, &mut doc).unwrap();
+        }
+        assert_eq!(shown(&doc), before, "the pixels under the stroke didn't change");
+        assert!(!base.up_to_date(&doc) && base.current(&doc).is_err(), "and the base isn't current");
+        assert_eq!(base.started(), started + 1, "nor rendered again while it waits");
+        // the stroke ends (PhotoCraft commits it over the old base), then the render goes in
+        pixel
+            .edit("Brush", |d, active| {
+                let l = photocraft_doc::Layer::raster("Stroke", PixelFormat::RGBA16);
+                *active = Some(l.id);
+                d.layers.push(l);
+                Ok(())
+            })
+            .unwrap();
+        base.hold = false;
+        base.sync(&mut session, &mut pixel, &mut doc).unwrap();
+        assert!(base.up_to_date(&doc));
+        assert_ne!(shown(&doc), before);
+        assert_eq!(doc.pixel.layers.len(), 2, "the stroke is kept");
+        assert_eq!(pixel.active().unwrap().history.entries(), ["Open", "Brush"], "the render is no history step");
+        // a render held while the settings changed again is dropped, never shown
+        base.hold = true;
+        set_exposure(&mut session, id, 1.5);
+        let started = base.started();
+        while base.rendering() || base.started() == started {
+            base.sync(&mut session, &mut pixel, &mut doc).unwrap();
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let held = shown(&doc);
+        set_exposure(&mut session, id, -1.0);
+        base.hold = false;
+        base.sync(&mut session, &mut pixel, &mut doc).unwrap();
+        assert_eq!(shown(&doc), held, "the held 1.5 render was stale: not written");
+        settle(&mut base, &mut session, &mut pixel, &mut doc);
+        assert_eq!(doc.develop.light.exposure, -1.0);
     }
 
     fn deep(width: usize, height: usize, samples: Vec<u16>) -> DeepImage {

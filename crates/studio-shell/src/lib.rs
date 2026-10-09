@@ -340,7 +340,12 @@ impl StudioShell {
     }
 
     /// The document's base layer follows its photo's develop settings; once per frame.
-    fn document_tick(&mut self) {
+    fn document_tick(&mut self, ctx: &egui::Context) {
+        // a Pixel gesture in progress (a stroke or drag: a button held; Free Transform; typing):
+        // a new render waits until it ends
+        self.base.hold = self.persona == Persona::Pixel
+            && (ctx.input(|i| i.pointer.any_down())
+                || self.pixel.as_ref().is_some_and(|px| px.app.ui.transform.is_some() || px.app.ui.text_edit.is_some()));
         if let (Some(doc), Some(lr), Some(px)) = (&mut self.document, &mut self.lightroom, &mut self.pixel) {
             if let Err(e) = self.base.sync(&mut lr.app.session, &mut px.app.session, doc) {
                 self.base_error = Some(e);
@@ -387,8 +392,9 @@ impl StudioShell {
             ui.ctx().send_viewport_cmd(egui::ViewportCommand::CancelClose);
             self.prompt = Some(Pending::Quit);
         }
-        self.document_tick();
-        // egui repaints only on input: keep polling for the render while one is in flight
+        self.document_tick(ui.ctx());
+        // egui repaints only on input: keep polling for the render while one is in flight (one
+        // held for a gesture goes in on the input that ends it)
         if self.base.rendering() {
             ui.ctx().request_repaint_after(std::time::Duration::from_millis(30));
         }

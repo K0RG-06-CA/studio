@@ -64,7 +64,11 @@ See [`PRD.md`](PRD.md) → *Milestones for Claude Code*.
     taken back with PhotoCraft's own undo + `clear_redo` (history as before; a good edit made in
     the same frame stays), else the last copy goes back in; notice `LOCKED`. Checks the result,
     so menus, panel drags, shortcuts and commands are all covered.
-  - [ ] 5. Renders held during a gesture
+  - [x] 5. A render that finishes during a Pixel gesture waits (`Base::hold`, set by the shell in
+    Pixel while a pointer button is down, Free Transform is open or type is being edited): the
+    pixels under a stroke don't change halfway, the base reads as not current meanwhile, nothing
+    re-renders, and it goes in (no history step) on the frame the gesture ends, unless the
+    settings changed since (then the newest renders).
   - [ ] 6. Shell wiring (`pixel.rs`, layout, badge, empty state)
   - [ ] 7. Commands and shortcuts (`pixel.*`, Studio's keys first, drops ignored, prompt)
   - [ ] 8. Overlays, History panel (L4)

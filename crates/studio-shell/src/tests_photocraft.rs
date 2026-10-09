@@ -180,6 +180,49 @@ fn pixel_edits_live_in_photocraft_and_are_what_saving_writes() {
     assert!(h.state().pixel.as_ref().unwrap().app.session.documents().is_empty());
 }
 
+/// The first tile of the document's base layer in PhotoCraft: which render it shows.
+fn shown_render(h: &Harness<'_, crate::StudioShell>) -> Option<usize> {
+    let doc = &h.state().pixel.as_ref().unwrap().app.session.active().unwrap().doc;
+    doc.layers[0].surface().unwrap().tiles().next().map(|(_, t)| std::sync::Arc::as_ptr(t) as usize)
+}
+
+#[test]
+fn in_pixel_a_new_render_waits_while_a_button_is_held_and_goes_in_on_release() {
+    let mut h = studio();
+    h.run_steps(3);
+    pick_first(&mut h);
+    h.state_mut().run("document.new").unwrap();
+    settle_base(&mut h);
+    h.state_mut().run("persona.pixel").unwrap();
+    h.run_steps(2);
+    let before = shown_render(&h);
+    // a stroke starts (the button goes down), and a develop change renders meanwhile
+    let pos = egui::pos2(600.0, 400.0);
+    h.event(egui::Event::PointerMoved(pos));
+    h.event(egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE });
+    h.run_steps(1);
+    let lr = h.state_mut().lightroom.as_mut().unwrap();
+    lr.app.run("develop.set", serde_json::json!({"control": "light.exposure", "value": 1.0})).unwrap();
+    let t0 = std::time::Instant::now();
+    loop {
+        h.run_steps(1);
+        let s = h.state();
+        if !s.base.rendering() && s.base.started() >= 2 {
+            break;
+        }
+        assert!(t0.elapsed() < std::time::Duration::from_secs(300), "render never finished");
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    h.run_steps(3);
+    assert_eq!(shown_render(&h), before, "held while the button is down");
+    assert!(!h.state().base_up_to_date());
+    // released: the render goes in
+    h.event(egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE });
+    h.run_steps(2);
+    assert_ne!(shown_render(&h), before);
+    assert!(h.state().base_up_to_date());
+}
+
 fn harness_app() -> PhotocraftApp {
     let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Services::default());
     app.session.add_document(pixel_doc(), None);
