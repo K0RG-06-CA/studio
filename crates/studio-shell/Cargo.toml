@@ -17,10 +17,18 @@ serde_json = { workspace = true }
 lightcraft-ui-egui = { workspace = true }
 lightcraft-engine = { workspace = true }
 studio-doc = { workspace = true }
+photocraft-ui-egui = { workspace = true }
+photocraft-engine = { workspace = true }
+# PhotoCraft's editor runs only as an `eframe::App` (its `logic`/`ui` take an eframe frame)
+eframe = { workspace = true }
 
 [dev-dependencies]
 # the reference compositor: checks what the document's base layer shows
 photocraft-compose = { workspace = true }
+# documents for PhotoCraft's editor in the milestone 4 spike
+photocraft-doc = { workspace = true }
+photocraft-color = { workspace = true }
+photocraft-geom = { workspace = true }
 # same format eframe saves the app state in
 ron = { workspace = true }
 # a library whose writes fail (test of quitting with unsaved changes)

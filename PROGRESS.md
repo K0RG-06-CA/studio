@@ -31,6 +31,22 @@ See [`PRD.md`](PRD.md) → *Milestones for Claude Code*.
   - [x] 6. Shell wiring: `document.new/save/saveAs/open/close`, `run_with` (params), name in the top bar, reopen at launch
   - [x] 7. Smoke script (document.new → saveAs → close → open; reopened on the relaunch) + docs
 - [ ] **4. Pixel persona** — PhotoCraft tools with Photoshop layout (tool bar left, options bar top, Layers and Properties right).
+  - [x] 1. Spike (`tests_photocraft::spike_*`): PhotoCraft's `PhotocraftApp` runs through its
+    `eframe::App` with eframe's test frame (`Frame::_new_kittest`, eframe 0.36.2); its tool bar,
+    options bar, right dock and `canvas_view` draw in Studio's places; its fonts and LightCraft's
+    share one context (both personas still render after the other installed its fonts). Found:
+    `History::purge_last` drops the state but not the step's label, so a refused edit is undone
+    with PhotoCraft's own undo + `clear_redo`; Free Transform / type sessions are public
+    (`app.ui.transform`, `app.ui.text_edit`), stroke and drag state isn't (a held pointer button
+    stands in); the crop rectangle is readable (`crop.geometry.rect`). L1 doctest in `pixel.rs`.
+  - [ ] 2. `studio-doc` pixel module: one source of truth (PhotoCraft's session), copy-back
+  - [ ] 3. Render register (pruned), undo restore, Pixel layers anchored across crops
+  - [ ] 4. Lock guard (everything but `visible`)
+  - [ ] 5. Renders held during a gesture
+  - [ ] 6. Shell wiring (`pixel.rs`, layout, badge, empty state)
+  - [ ] 7. Commands and shortcuts (`pixel.*`, Studio's keys first, drops ignored, prompt)
+  - [ ] 8. Overlays, History panel (L4)
+  - [ ] 9. App wiring, smoke script, renders, NOTICE
 - [ ] **5. Round trip** — Library → Develop → Pixel and back on one document, one undo history across personas.
 - [ ] **6. MCP** — one MCP server exposing commands from every persona.
 - [ ] **7. ARM64 + Linux builds** — CI on Windows ARM64/x64 and Linux ARM64/x64; downloadable .exe and AppImage/.deb.
