@@ -225,6 +225,48 @@ Former hand checks and the tests that replaced them:
     `opt-level = 2` in dev (`Cargo.toml` since the scaffold), so CI's >60 s was its 2-core runners,
     not a debug build: no profile change.
 
+## Review (milestone 4, Pixel)
+
+HIGH and MEDIUM fixed, one commit each, each test seen failing without its fix:
+- HIGH: Studio's document keys in Pixel matched with extra Shift/Alt (egui's `consume_shortcut`),
+  so Shift+Ctrl+N (New Layer) replaced the document, Alt+Ctrl+W closed it… now exact
+  (`chords_sharing_a_letter_*`).
+- HIGH: Duplicate Layer on the Develop layer was refused (the copy carried the base's mark);
+  the copy is now an ordinary, unlocked layer (`duplicating_the_develop_layer_*`).
+- HIGH: Ctrl+C/X/V never reached PhotoCraft (egui-winit sends Copy/Cut/Paste events; the app now
+  forwards `raw_input_hook` in Pixel) (`copy_cut_and_paste_reach_photocraft_in_pixel`).
+- HIGH (found as MEDIUM, a crash): clicking Pixel after a document was made elsewhere panicked in
+  PhotoCraft's Navigator (stale views); views are synced before Pixel draws
+  (`clicking_pixel_after_a_document_was_made_elsewhere_draws_it`).
+- MEDIUM: the canvas didn't do PhotoCraft's document-area bookkeeping (`last_canvas_rect`, Free
+  Transform's steps) (`pixels_canvas_tells_photocraft_*`).
+- MEDIUM: PhotoCraft's own file commands / extra documents: `pixel.file.*` refused, other
+  documents closed, a closed Studio document reopened with a notice
+  (`photocraft_holds_studios_document_and_nothing_else`).
+- MEDIUM: an open Free Transform / type edit / pen path is applied before "unsaved?" is asked
+  (`an_open_free_transform_is_applied_*`).
+- MEDIUM: a refused edit is undone back to the first state that stands (a good edit built on it
+  in the same frame left a step undoing to nothing) (`a_good_edit_after_a_bad_one_*`).
+
+LOW, left open:
+- PhotoCraft background jobs: a render landing mid-job would discard the job's result. Not
+  reachable: Studio leaves PhotoCraft's `background_jobs` off (commands run inline). If it's ever
+  turned on, hold renders while a job runs.
+- `hold` covers a held button, Free Transform and type, not modal dialogs with live previews
+  (Liquify, Camera Raw, filters) or a pen path.
+- A notice from the copy-back (layers that stayed after an undo across a rotation) is returned as
+  the error of an otherwise successful `pixel.*` command; the copy-back's notices replace an error
+  already showing.
+- A reopened `.studio` has no anchor for its saved base: if the catalog's crop changed since the
+  save, Pixel layers aren't moved to follow it.
+- PhotoCraft's `retain_gpu_documents` (part of its document area) isn't called: GPU canvas memory
+  of a closed document is kept until the next one replaces it.
+- Persona keys and Ctrl+Q still match with extra Shift/Alt; Ctrl+1 (PhotoCraft's Actual Pixels) is
+  Studio's persona key by design.
+- `canvas()` re-stores `views[idx]` after `canvas_view` (guarded index, redundant).
+- `files_dropped_on_pixel_dont_open_in_photocraft` checks PhotoCraft's set-up behaviour, not Studio
+  code.
+
 ## Review (M4 must-fixes): LOW findings left open
 
 From the code review of the must-fixes (the HIGH and both MEDIUM were fixed, one commit each, with a
