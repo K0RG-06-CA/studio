@@ -430,6 +430,30 @@ fn chords_sharing_a_letter_with_studios_document_keys_stay_photocrafts() {
     assert!(h.state().document.as_ref().unwrap().unsaved());
 }
 
+/// Review H3: Ctrl+C/X/V reach PhotoCraft's pixel commands in Pixel (egui-winit sends them as
+/// Copy/Cut/Paste events, which PhotoCraft's raw input hook turns back into key presses).
+#[test]
+fn copy_cut_and_paste_reach_photocraft_in_pixel() {
+    let mut h = studio();
+    h.run_steps(3);
+    let hooked = |h: &mut Harness<'_, crate::StudioShell>, event: egui::Event| {
+        let mut raw = egui::RawInput { events: vec![event], ..Default::default() };
+        let ctx = h.ctx.clone();
+        h.state_mut().raw_input_hook(&ctx, &mut raw);
+        raw.events
+    };
+    let key = |events: &[egui::Event], want: egui::Key| {
+        events.iter().any(|e| matches!(e, egui::Event::Key { key, pressed: true, modifiers, .. } if *key == want && modifiers.command))
+    };
+    // outside Pixel: as they came
+    assert!(matches!(hooked(&mut h, egui::Event::Copy)[..], [egui::Event::Copy]));
+    h.state_mut().run("persona.pixel").unwrap();
+    h.run_steps(3);
+    assert!(key(&hooked(&mut h, egui::Event::Copy), egui::Key::C), "Copy is Ctrl+C for PhotoCraft");
+    assert!(key(&hooked(&mut h, egui::Event::Cut), egui::Key::X), "Cut is Ctrl+X");
+    assert!(key(&hooked(&mut h, egui::Event::Paste("x".into())), egui::Key::V), "Paste is Ctrl+V");
+}
+
 #[test]
 fn ctrl_z_in_pixel_undoes_pixel_edits_and_leaves_develops_history_alone() {
     let dir = temp_dir("pixel-undo");

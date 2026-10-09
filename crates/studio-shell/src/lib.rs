@@ -386,6 +386,15 @@ impl StudioShell {
         }
     }
 
+    /// The app's raw input, before the frame (eframe's `raw_input_hook`). In Pixel, PhotoCraft's:
+    /// egui-winit turns Ctrl+C/X/V into Copy/Cut/Paste events (and drops Ctrl+V when the
+    /// clipboard holds an image), which PhotoCraft gives back to its pixel commands as key presses.
+    pub fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
+        if let Some(px) = self.pixel.as_mut().filter(|_| self.persona == Persona::Pixel) {
+            eframe::App::raw_input_hook(&mut px.app, ctx, raw);
+        }
+    }
+
     /// Draw the whole shell into `ui`.
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         if std::mem::take(&mut self.close_window) {

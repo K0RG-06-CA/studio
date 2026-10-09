@@ -34,6 +34,10 @@ impl eframe::App for App {
         }
     }
 
+    fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+        self.0.raw_input_hook(ctx, raw_input);
+    }
+
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         eframe::set_value(storage, SHELL_KEY, &self.0);
         if let Some(lr) = &self.0.lightroom {
