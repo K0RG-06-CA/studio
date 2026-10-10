@@ -92,6 +92,9 @@ pub struct StudioShell {
     /// gesture is its own until release).
     #[serde(skip)]
     pub held: Vec<&'static str>,
+    /// Where the pointer was last seen over the window (egui forgets it once the pointer leaves).
+    #[serde(skip)]
+    pub pointer: Option<egui::Pos2>,
 }
 
 /// What a save returns when its dialog was cancelled: not a failure, nothing to show.
@@ -132,6 +135,7 @@ impl Default for StudioShell {
             pick_open_path: None,
             error: None,
             held: Vec::new(),
+            pointer: None,
         }
     }
 }
@@ -588,7 +592,7 @@ impl StudioShell {
     /// clipboard holds an image), which PhotoCraft gives back to its pixel commands as key presses.
     pub fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
         if self.persona == Persona::Pixel {
-            release_on_focus_loss(ctx, raw);
+            release_on_focus_loss(ctx, raw, self.pointer);
         }
         if let Some(px) = self.pixel.as_mut().filter(|_| self.persona == Persona::Pixel) {
             eframe::App::raw_input_hook(&mut px.app, ctx, raw);
@@ -605,6 +609,9 @@ impl StudioShell {
         if ui.input(|i| i.viewport().close_requested()) && self.unsaved() {
             ui.ctx().send_viewport_cmd(egui::ViewportCommand::CancelClose);
             self.prompt = Some(Pending::Quit);
+        }
+        if let Some(pos) = ui.input(|i| i.pointer.latest_pos()) {
+            self.pointer = Some(pos);
         }
         self.document_tick(ui.ctx());
         // egui repaints only on input: keep polling for the render while one is in flight (one
@@ -915,16 +922,20 @@ impl StudioShell {
 
 /// A button let go while the window has no focus (Alt+Tab mid-stroke) is never reported, and
 /// egui keeps it down until the next click: the window losing focus releases every button egui
-/// has down, so a stroke ends (Photoshop's way) and the keys held for it run.
-fn release_on_focus_loss(ctx: &egui::Context, raw: &mut egui::RawInput) {
+/// has down, so a stroke ends (Photoshop's way) and the keys held for it run. The release is
+/// where the pointer was last seen (`last`, once egui has forgotten), so a stroke dragged out of
+/// the window gets no segment to the corner.
+fn release_on_focus_loss(ctx: &egui::Context, raw: &mut egui::RawInput, last: Option<egui::Pos2>) {
     if !raw.events.iter().any(|e| matches!(e, egui::Event::WindowFocused(false))) {
         return;
     }
     use egui::PointerButton::{Extra1, Extra2, Middle, Primary, Secondary};
     let (pos, down) = ctx.input(|i| {
-        let pos = i.pointer.interact_pos().or(i.pointer.latest_pos()).unwrap_or_default();
+        let pos = i.pointer.interact_pos().or(i.pointer.latest_pos()).or(last);
         (pos, [Primary, Secondary, Middle, Extra1, Extra2].into_iter().filter(|&b| i.pointer.button_down(b)).collect::<Vec<_>>())
     });
+    // no position ever seen: no button went down over the window
+    let Some(pos) = pos else { return };
     for button in down {
         raw.events.push(egui::Event::PointerButton { pos, button, pressed: false, modifiers: egui::Modifiers::NONE });
     }

@@ -1167,6 +1167,41 @@ fn a_stroke_cut_short_by_losing_focus_ends_and_the_save_held_for_it_runs() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// Review: the stroke leaves the window (egui forgets where the pointer is), then the window
+/// loses focus: the release that ends it is where the pointer was last seen, so the stroke
+/// gets no segment to the window's corner.
+#[test]
+fn a_stroke_dragged_out_of_the_window_then_cut_short_by_focus_loss_stays_where_it_was_drawn() {
+    let dir = temp_dir("focus-gone");
+    let path = dir.join("trip.studio");
+    let bounds = |h: &Harness<'_, crate::StudioShell>| {
+        let doc = &h.state().pixel.as_ref().unwrap().app.session.active().unwrap().doc;
+        let b = photocraft_compose::bounds::content_bounds(doc.layers.last().unwrap().surface().unwrap());
+        (b.x0, b.y0, b.x1, b.y1)
+    };
+    // the same stroke, released where it was last drawn
+    let mut h = studio();
+    ready_to_paint(&mut h, &path);
+    let end = stroke_down(&mut h);
+    release(&mut h, end);
+    h.run_steps(2);
+    let drawn = bounds(&h);
+    let mut h = studio();
+    ready_to_paint(&mut h, &path);
+    stroke_down(&mut h);
+    h.event(egui::Event::PointerGone);
+    h.run_steps(2);
+    let mut raw = egui::RawInput { events: vec![egui::Event::WindowFocused(false)], ..Default::default() };
+    let ctx = h.ctx.clone();
+    h.state_mut().raw_input_hook(&ctx, &mut raw);
+    h.input_mut().events.extend(raw.events);
+    h.run_steps(2);
+    assert!(!h.ctx.input(|i| i.pointer.any_down()), "the button is up");
+    let ended = bounds(&h);
+    assert_eq!(ended, drawn, "no segment towards the corner");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// A stroke undone, then saved (the keys in one frame, as typed fast): the file hasn't got it.
 #[test]
 fn an_undone_stroke_isnt_saved() {
