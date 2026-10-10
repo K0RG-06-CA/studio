@@ -410,6 +410,20 @@ debug info), so CI builds without it (`CARGO_PROFILE_DEV_DEBUG: 0`). The smoke s
 steps in one slow frame (`app.quit`, then the prompt's cancel before the close request came back):
 it now runs one step a frame, two frames apart at least.
 
+## Review (M5 task 3): LOW findings left open
+
+- Pixel's History tab clones every row and lays every row out each frame (no `show_rows`):
+  O(steps) per frame, at most `HISTORY_STEPS` (1000).
+- An undo key held for a stroke whose release egui never sees (button let go outside the
+  window) runs at the next release.
+- A Free Transform opened before a Develop rotation stays open over the rotated layers until
+  applied (its box predates the follow); applying it is PhotoCraft's own transform of the box.
+- `history.goto` with a non-integer index says it "needs an `index`".
+- `StudioShell::held` is `pub` only so `main.rs`'s `..Default::default()` compiles.
+- An error from the end-of-frame reconcile (a jump PhotoCraft began that fails) takes the error
+  modal, titled "History", over one set earlier in the frame.
+- Untested: an undo key in the release frame itself waits behind the held ones.
+
 ## Review (M4 must-fixes): LOW findings left open
 
 From the code review of the must-fixes (the HIGH and both MEDIUM were fixed, one commit each, with a
