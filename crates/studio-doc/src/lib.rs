@@ -52,9 +52,12 @@ pub struct Film {}
 /// The document. `develop` and `film` are the base layer's recipe; `pixel` is PhotoCraft's layer
 /// tree, whose bottom layer is the base. `revision` counts every change, `saved_revision` the
 /// one on disk. `history` is its one undo history across personas (see [history]).
+///
+/// A document opened from an image file (PNG, JPEG, TIFF, PSD…: [`Document::from_image`]) has
+/// no `source`: no base layer, nothing to render, no Develop steps; it is Pixel's alone.
 pub struct Document {
     pub name: String,
-    pub source: Source,
+    pub source: Option<Source>,
     pub develop: DevelopSettings,
     pub film: Film,
     pub pixel: photocraft_doc::Document,
@@ -108,7 +111,7 @@ impl Document {
         pixel.layers.push(base);
         Ok(Document {
             name,
-            source: Source { photo: id, content_hash: photo.content_hash.clone(), source: photo.source.clone() },
+            source: Some(Source { photo: id, content_hash: photo.content_hash.clone(), source: photo.source.clone() }),
             develop: (*develop).clone(),
             film: Film::default(),
             pixel,
@@ -119,6 +122,42 @@ impl Document {
             history: Default::default(),
             generation: 0,
         })
+    }
+
+    /// A document of the image file `name` (`bytes`), without a photo: its layers as PhotoCraft
+    /// imports them (a PSD's groups, masks, blend modes…), and what the import approximated or
+    /// dropped, to show before anything is edited. Never saved over the file: it has no `path`.
+    pub fn from_image(name: &str, bytes: &[u8]) -> Result<(Document, Vec<String>), String> {
+        let r = photocraft_io::import(name, bytes).map_err(|e| format!("{name}: {e}"))?;
+        let mut pixel = r.document;
+        // a layer carrying Studio's base mark (a file Studio wrote) is an ordinary one here
+        let marked: Vec<_> = pixel.walk().into_iter().filter(|(_, _, l)| is_base(l)).map(|(_, _, l)| l.id).collect();
+        for id in marked {
+            if let Some(l) = pixel.layer_mut(id) {
+                unmark(l);
+            }
+        }
+        let stem = std::path::Path::new(name).file_stem().map_or_else(|| name.to_owned(), |s| s.to_string_lossy().into_owned());
+        pixel.name = stem.clone();
+        let doc = Document {
+            name: stem,
+            source: None,
+            develop: DevelopSettings::default(),
+            film: Film::default(),
+            pixel,
+            path: None,
+            revision: 0,
+            saved_revision: 0,
+            link: Default::default(),
+            history: Default::default(),
+            generation: 0,
+        };
+        Ok((doc, r.warnings))
+    }
+
+    /// The library photo the document is made from; none for one opened from an image file.
+    pub fn photo(&self) -> Option<PhotoId> {
+        self.source.as_ref().map(|s| s.photo)
     }
 
     /// The base layer: the photo as Develop renders it, at the bottom of the tree.
@@ -135,13 +174,7 @@ impl Document {
     }
 
     pub fn header(&self) -> Header {
-        Header {
-            version: VERSION,
-            name: self.name.clone(),
-            source: Some(self.source.clone()),
-            develop: self.develop.clone(),
-            film: self.film.clone(),
-        }
+        Header { version: VERSION, name: self.name.clone(), source: self.source.clone(), develop: self.develop.clone(), film: self.film.clone() }
     }
 }
 
@@ -171,7 +204,7 @@ mod tests {
         let (session, id) = demo();
         let doc = Document::from_photo(&session, id).unwrap();
         let photo = session.catalog.photo(id).unwrap();
-        assert_eq!((doc.source.photo, &doc.source.source), (id, &photo.source));
+        assert_eq!((doc.photo().unwrap(), &doc.source.as_ref().unwrap().source), (id, &photo.source));
         assert_eq!(doc.develop, *session.develop_of(id).unwrap());
         assert_eq!((doc.pixel.mode, doc.pixel.depth), (ColorMode::Rgb, SampleType::U16));
         assert_eq!((doc.pixel.size.width, doc.pixel.size.height), (photo.width, photo.height));

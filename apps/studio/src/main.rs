@@ -160,6 +160,16 @@ fn main() -> ExitCode {
                 let ext = std::path::Path::new(file).extension().map(|e| e.to_string_lossy().into_owned()).unwrap_or_default();
                 rfd::FileDialog::new().set_title("Save As").set_file_name(file).add_filter("Studio document", &[ext]).save_file()
             }));
+            // a document, or an image file opened straight into Pixel (PhotoCraft's importers)
+            shell.pick_open_path = Some(Box::new(|| {
+                let images = ["png", "jpg", "jpeg", "tif", "tiff", "psd", "psb", "webp", "gif", "bmp"];
+                rfd::FileDialog::new()
+                    .set_title("Open")
+                    .add_filter("Documents and images", &[&["studio"][..], &images[..]].concat())
+                    .add_filter("Studio document", &["studio"])
+                    .add_filter("Images", &images)
+                    .pick_file()
+            }));
             shell.lightroom = Some(lightroom(open_library(library, smoke), cc.storage.and_then(|s| eframe::get_value(s, LIGHTCRAFT_KEY))));
             // PhotoCraft: Pixel's editor and the open document's pixels; its GPU canvas on wgpu
             let mut photocraft = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());

@@ -5,24 +5,26 @@
 use lightcraft_engine::Session;
 use lightcraft_engine::catalog::model::{PhotoId, Source as PhotoSource};
 
-use crate::Document;
 use crate::file::EXTENSION;
+use crate::{Document, Source};
 
 impl Document {
     /// Connect the document to `session`'s library. The photo is found by content hash, then by
     /// its path or demo scene (an id alone means nothing in another library), else its file is
     /// imported. If the library's settings differ from the file's, the file wins: they are applied
-    /// as the History step "Open <name>.studio", so Develop shows and can undo it.
+    /// as the History step "Open <name>.studio", so Develop shows and can undo it. A document
+    /// without a photo has nothing in the library.
     pub fn open_into(&mut self, session: &mut Session) -> Result<(), String> {
-        let id = match self.find(session) {
+        let Some(source) = &mut self.source else { return Ok(()) };
+        let id = match find(source, session) {
             Some(id) => id,
-            None => self.import(session)?,
+            None => import(source, session)?,
         };
-        self.source.photo = id;
+        source.photo = id;
         if let Some(p) = session.catalog.photo(id)
-            && self.source.content_hash.is_none()
+            && source.content_hash.is_none()
         {
-            self.source.content_hash = p.content_hash.clone();
+            source.content_hash = p.content_hash.clone();
         }
         if session.develop_of(id).is_none_or(|now| *now != self.develop) {
             // committed directly, not through `set_develop`: with Auto Sync on, that would carry the
@@ -33,26 +35,26 @@ impl Document {
         }
         Ok(())
     }
+}
 
-    fn find(&self, session: &Session) -> Option<PhotoId> {
-        let photos = || session.catalog.photos().filter(|p| !p.deleted);
-        let by_hash = self.source.content_hash.as_ref().and_then(|h| photos().find(|p| p.content_hash.as_ref() == Some(h)));
-        by_hash.or_else(|| photos().find(|p| p.source == self.source.source)).map(|p| p.id)
-    }
+fn find(source: &Source, session: &Session) -> Option<PhotoId> {
+    let photos = || session.catalog.photos().filter(|p| !p.deleted);
+    let by_hash = source.content_hash.as_ref().and_then(|h| photos().find(|p| p.content_hash.as_ref() == Some(h)));
+    by_hash.or_else(|| photos().find(|p| p.source == source.source)).map(|p| p.id)
+}
 
-    fn import(&self, session: &mut Session) -> Result<PhotoId, String> {
-        let path = match &self.source.source {
-            PhotoSource::File { path } => path,
-            PhotoSource::Demo { scene } => return Err(format!("demo photo {scene} isn't in this library")),
-        };
-        let r = session.execute("library.import", &serde_json::json!({"paths": [path]})).map_err(|e| format!("importing {path}: {e}"))?;
-        r["imported"]
-            .as_array()
-            .and_then(|a| a.first())
-            .and_then(serde_json::Value::as_u64)
-            .map(PhotoId)
-            .ok_or_else(|| format!("{path} couldn't be imported: {r}"))
-    }
+fn import(source: &Source, session: &mut Session) -> Result<PhotoId, String> {
+    let path = match &source.source {
+        PhotoSource::File { path } => path,
+        PhotoSource::Demo { scene } => return Err(format!("demo photo {scene} isn't in this library")),
+    };
+    let r = session.execute("library.import", &serde_json::json!({"paths": [path]})).map_err(|e| format!("importing {path}: {e}"))?;
+    r["imported"]
+        .as_array()
+        .and_then(|a| a.first())
+        .and_then(serde_json::Value::as_u64)
+        .map(PhotoId)
+        .ok_or_else(|| format!("{path} couldn't be imported: {r}"))
 }
 
 #[cfg(test)]
@@ -72,16 +74,16 @@ mod tests {
         let mut doc = Document::from_photo(&session, id).unwrap();
         doc.develop.light.exposure = 0.9;
         doc.open_into(&mut session).unwrap();
-        assert_eq!(doc.source.photo, id);
+        assert_eq!(doc.photo().unwrap(), id);
         assert_eq!(session.develop_of(id).unwrap().light.exposure, 0.9);
         let after = steps(&session, id);
         assert_eq!(after.last().map(String::as_str), Some(format!("Open {}.studio", doc.name).as_str()), "{after:?}");
         doc.open_into(&mut session).unwrap();
         assert_eq!(steps(&session, id), after, "same settings: no new step");
         // a wrong id doesn't matter: the photo is found by what it is
-        doc.source.photo = PhotoId(u64::MAX);
+        doc.source.as_mut().unwrap().photo = PhotoId(u64::MAX);
         doc.open_into(&mut session).unwrap();
-        assert_eq!(doc.source.photo, id);
+        assert_eq!(doc.photo().unwrap(), id);
     }
 
     #[test]
@@ -131,14 +133,14 @@ mod tests {
         let r = a.execute("library.import", &serde_json::json!({"paths": [png.to_string_lossy()]})).unwrap();
         let id_a = PhotoId(r["imported"][0].as_u64().unwrap());
         let mut doc = Document::from_photo(&a, id_a).unwrap();
-        assert!(doc.source.content_hash.is_some());
+        assert!(doc.source.as_ref().unwrap().content_hash.is_some());
         doc.develop.light.exposure = -1.0;
         let file = dir.join("shot.studio");
         doc.save(&file).unwrap();
         // the same library: found by hash, nothing imported twice
         let mut doc = Document::open(&file).unwrap();
         doc.open_into(&mut a).unwrap();
-        assert_eq!((doc.source.photo, a.catalog.len()), (id_a, 1));
+        assert_eq!((doc.photo().unwrap(), a.catalog.len()), (id_a, 1));
         assert_eq!(a.develop_of(id_a).unwrap().light.exposure, -1.0);
         a.close_library().unwrap();
         // another, empty library: the photo's file is imported and gets the file's settings
@@ -146,7 +148,7 @@ mod tests {
         let mut doc = Document::open(&file).unwrap();
         doc.open_into(&mut b).unwrap();
         let id_b = b.catalog.photos().next().unwrap().id;
-        assert_eq!((doc.source.photo, b.catalog.len()), (id_b, 1));
+        assert_eq!((doc.photo().unwrap(), b.catalog.len()), (id_b, 1));
         assert_eq!(b.develop_of(id_b).unwrap().light.exposure, -1.0);
         assert_eq!(steps(&b, id_b).last().map(String::as_str), Some("Open shot.studio"));
         // the file gone: a clear error

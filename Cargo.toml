@@ -30,6 +30,8 @@ photocraft-compose = { git = "https://github.com/storytold/photocraft", rev = "d
 # milestone 4: the Pixel persona runs PhotoCraft's own editor and engine
 photocraft-engine = { git = "https://github.com/storytold/photocraft", rev = "d836e3458d77c316b48604fb54525b1dc9217408" }
 photocraft-ui-egui = { git = "https://github.com/storytold/photocraft", rev = "d836e3458d77c316b48604fb54525b1dc9217408" }
+# milestone 5: PNG/JPEG/TIFF/PSD open straight into Pixel (PhotoCraft's importers)
+photocraft-io = { git = "https://github.com/storytold/photocraft", rev = "d836e3458d77c316b48604fb54525b1dc9217408" }
 
 # external — egui/eframe match storytold's LightCraft and PhotoCraft (0.36); bump in lockstep
 egui = "0.36"

@@ -562,8 +562,8 @@ fn states(st: &DocState) -> Vec<Pointer> {
 
 /// Both halves of `step` can move now: no background job holds PhotoCraft's document, no slider
 /// drag is open on the photo.
-fn ready(lr: &Session, px: &PixelSession, photo: PhotoId, step: &Step) -> Result<(), String> {
-    if step.develop.is_some() && lr.interaction.as_ref().is_some_and(|i| i.photo == photo) {
+fn ready(lr: &Session, px: &PixelSession, photo: Option<PhotoId>, step: &Step) -> Result<(), String> {
+    if step.develop.is_some() && lr.interaction.as_ref().is_some_and(|i| Some(i.photo) == photo) {
         return Err("a Develop slider is still being dragged: nothing was undone".into());
     }
     match px.active_job() {
@@ -576,7 +576,8 @@ impl Document {
     /// Mirror the catalog's settings for the document's photo (the base follows them), noting a
     /// change as a Develop step. Once per frame, and before anything decides on the history.
     pub fn note_develop(&mut self, lr: &Session) {
-        if let Some(now) = self.history.note_develop(lr, self.source.photo)
+        if let Some(photo) = self.photo()
+            && let Some(now) = self.history.note_develop(lr, photo)
             && *now != self.develop
         {
             self.develop = (*now).clone();
@@ -655,7 +656,7 @@ impl Document {
     /// Commit a Develop half to LightCraft (journaled: it survives a restart). A failure leaves
     /// LightCraft as it was (`commit` applies the op or nothing).
     fn commit_develop(&mut self, lr: &mut Session, label: &str, settings: &Arc<DevelopSettings>, list: &Arc<Vec<HistoryStep>>) -> Result<(), String> {
-        let id = self.source.photo;
+        let id = self.photo().ok_or("the document has no photo")?;
         let edited = lr.catalog.photo(id).and_then(|p| p.edited.clone());
         let ops =
             vec![Op::SetDevelop { id, settings: settings.clone(), label: label.into(), edited }, Op::SetHistory { id, history: (**list).clone() }];
@@ -731,7 +732,7 @@ impl Document {
             return Err(RENDERING.into());
         }
         let Some(step) = self.history.steps.pop() else { return Ok(false) };
-        if let Err(e) = ready(lr, px, self.source.photo, &step) {
+        if let Err(e) = ready(lr, px, self.photo(), &step) {
             self.history.steps.push(step);
             return Err(e);
         }
@@ -775,7 +776,7 @@ impl Document {
             return Err(RENDERING.into());
         }
         let Some(mut step) = self.history.redo.pop() else { return Ok(false) };
-        if let Err(e) = ready(lr, px, self.source.photo, &step) {
+        if let Err(e) = ready(lr, px, self.photo(), &step) {
             self.history.redo.push(step);
             return Err(e);
         }
@@ -859,7 +860,7 @@ pub(crate) mod tests {
     #[test]
     fn develop_and_pixel_steps_undo_in_reverse_order_and_redo_again() {
         let (mut lr, mut px, mut doc) = open();
-        let id = doc.source.photo;
+        let id = doc.photo().unwrap();
         let h0 = rows(&lr, id);
         set_exposure(&mut lr, id, 1.0);
         tick(&mut doc, &lr, &mut px);
@@ -944,7 +945,7 @@ pub(crate) mod tests {
     #[test]
     fn a_slider_drag_is_one_step_from_the_pre_drag_settings_and_a_history_click_is_a_new_step() {
         let (mut lr, mut px, mut doc) = open();
-        let id = doc.source.photo;
+        let id = doc.photo().unwrap();
         lr.selection.active = Some(id);
         lr.begin_interaction("Exposure").unwrap();
         for e in [0.5, 1.0, 1.5] {
@@ -978,7 +979,7 @@ pub(crate) mod tests {
     #[test]
     fn undo_during_a_slider_drag_ends_it_as_one_step_then_undoes_it() {
         let (mut lr, mut px, mut doc) = open();
-        let id = doc.source.photo;
+        let id = doc.photo().unwrap();
         lr.selection.active = Some(id);
         lr.begin_interaction("Exposure").unwrap();
         set_exposure(&mut lr, id, 0.5);
@@ -994,7 +995,7 @@ pub(crate) mod tests {
     #[test]
     fn an_edit_in_either_engine_clears_the_others_redo() {
         let (mut lr, mut px, mut doc) = open();
-        let id = doc.source.photo;
+        let id = doc.photo().unwrap();
         paint(&mut px, "Brush", 1, 1);
         tick(&mut doc, &lr, &mut px);
         assert!(doc.undo(&mut lr, &mut px, &mut Base::new()).unwrap());
@@ -1049,7 +1050,7 @@ pub(crate) mod tests {
     #[test]
     fn undo_in_another_document_leaves_the_first_alone() {
         let (mut lr, mut px, mut a) = open();
-        let id_a = a.source.photo;
+        let id_a = a.photo().unwrap();
         let id_b = lr.catalog.photos().map(|p| p.id).find(|&p| p != id_a).unwrap();
         set_exposure(&mut lr, id_a, 1.0);
         tick(&mut a, &lr, &mut px);
@@ -1068,7 +1069,7 @@ pub(crate) mod tests {
     #[test]
     fn a_develop_edit_to_another_photo_is_no_step_and_undo_touches_neither() {
         let (mut lr, mut px, mut doc) = open();
-        let id_a = doc.source.photo;
+        let id_a = doc.photo().unwrap();
         let id_b = lr.catalog.photos().map(|p| p.id).find(|&p| p != id_a).unwrap();
         set_exposure(&mut lr, id_b, 1.0);
         tick(&mut doc, &lr, &mut px);
@@ -1087,7 +1088,7 @@ pub(crate) mod tests {
     #[test]
     fn photocrafts_own_undo_is_studios_for_pixel_steps_and_a_jump_past_a_develop_step() {
         let (mut lr, mut px, mut doc) = open();
-        let id = doc.source.photo;
+        let id = doc.photo().unwrap();
         paint(&mut px, "Brush", 1, 1);
         tick(&mut doc, &lr, &mut px);
         paint(&mut px, "Pencil", 2, 2);
@@ -1135,7 +1136,7 @@ pub(crate) mod tests {
     #[test]
     fn a_fold_of_pixel_steps_is_merged_a_refused_edit_leaves_the_list_and_a_fold_across_develop_resets() {
         let (mut lr, mut px, mut doc) = open();
-        let id = doc.source.photo;
+        let id = doc.photo().unwrap();
         paint(&mut px, "Brush", 1, 1);
         tick(&mut doc, &lr, &mut px);
         paint(&mut px, "Pencil", 2, 2);
@@ -1238,7 +1239,7 @@ pub(crate) mod tests {
     #[test]
     fn five_thousand_exposure_edits_stay_under_budget_and_share_their_history_lists() {
         let (mut lr, mut px, mut doc) = open();
-        let id = doc.source.photo;
+        let id = doc.photo().unwrap();
         let value = |i: usize| (i % 97) as f64 * 0.01 + 0.01;
         for i in 0..5000 {
             set_exposure(&mut lr, id, value(i));
@@ -1263,7 +1264,7 @@ pub(crate) mod tests {
     #[test]
     fn redo_survives_a_render_landing_after_an_undo() {
         let (mut lr, mut px, mut doc) = open();
-        let id = doc.source.photo;
+        let id = doc.photo().unwrap();
         set_exposure(&mut lr, id, 1.0);
         tick(&mut doc, &lr, &mut px);
         assert!(doc.undo(&mut lr, &mut px, &mut Base::new()).unwrap());
@@ -1288,7 +1289,7 @@ pub(crate) mod tests {
     #[test]
     fn goto_jumps_to_any_row_with_the_engines_moved_first() {
         let (mut lr, mut px, mut doc) = open();
-        let id = doc.source.photo;
+        let id = doc.photo().unwrap();
         set_exposure(&mut lr, id, 1.0);
         tick(&mut doc, &lr, &mut px);
         paint(&mut px, "Brush", 1, 1);
@@ -1313,25 +1314,25 @@ pub(crate) mod tests {
     #[test]
     fn a_develop_step_whose_commit_fails_is_kept_and_says_why() {
         let (mut lr, mut px, mut doc) = open();
-        let id = doc.source.photo;
+        let id = doc.photo().unwrap();
         set_exposure(&mut lr, id, 1.0);
         tick(&mut doc, &lr, &mut px);
         let rows = labels(&doc);
-        doc.source.photo = PhotoId(u64::MAX);
+        doc.source.as_mut().unwrap().photo = PhotoId(u64::MAX);
         let e = doc.undo(&mut lr, &mut px, &mut Base::new()).unwrap_err();
         assert_eq!((exposure(&lr, id), doc.develop.light.exposure), (1.0, 1.0), "nothing moved");
         assert_eq!((labels(&doc), doc.history.position(), doc.history.can_redo()), (rows.clone(), 1, false), "the step is kept");
         let notice = doc.take_notice().unwrap();
         assert!(notice.starts_with("Couldn\u{2019}t undo \u{201c}Exposure\u{201d}") && notice.contains(&e), "{notice}");
-        doc.source.photo = id;
+        doc.source.as_mut().unwrap().photo = id;
         assert!(doc.undo(&mut lr, &mut px, &mut Base::new()).unwrap());
         assert_eq!(exposure(&lr, id), 0.0);
         // and on the redo side
-        doc.source.photo = PhotoId(u64::MAX);
+        doc.source.as_mut().unwrap().photo = PhotoId(u64::MAX);
         assert!(doc.redo(&mut lr, &mut px, &mut Base::new()).is_err());
         assert_eq!((exposure(&lr, id), doc.history.position(), doc.history.can_redo()), (0.0, 0, true), "still redoable");
         assert!(doc.take_notice().unwrap().starts_with("Couldn\u{2019}t redo \u{201c}Exposure\u{201d}"));
-        doc.source.photo = id;
+        doc.source.as_mut().unwrap().photo = id;
         assert!(doc.redo(&mut lr, &mut px, &mut Base::new()).unwrap());
         assert_eq!((exposure(&lr, id), labels(&doc)), (1.0, rows));
         assert_eq!(doc.take_notice(), None);
@@ -1343,7 +1344,7 @@ pub(crate) mod tests {
     #[test]
     fn a_lost_prefix_drops_every_step_older_than_the_oldest_surviving_state() {
         let (mut lr, mut px, mut doc) = open();
-        let id = doc.source.photo;
+        let id = doc.photo().unwrap();
         set_exposure(&mut lr, id, 1.0);
         tick(&mut doc, &lr, &mut px);
         paint(&mut px, "Brush", 1, 1);
@@ -1400,7 +1401,7 @@ pub(crate) mod tests {
     #[test]
     fn a_step_with_a_develop_half_waits_for_a_drag_on_the_photo_and_moves_neither_engine() {
         let (mut lr, mut px, mut doc) = open();
-        let id = doc.source.photo;
+        let id = doc.photo().unwrap();
         paint(&mut px, "Brush", 1, 1);
         tick(&mut doc, &lr, &mut px);
         set_exposure(&mut lr, id, 1.0);
@@ -1424,7 +1425,7 @@ pub(crate) mod tests {
     /// settings. PhotoCraft's history: "Open", "Brush".
     fn paired() -> (Session, PixelSession, Document) {
         let (mut lr, mut px, mut doc) = open();
-        let id = doc.source.photo;
+        let id = doc.photo().unwrap();
         paint(&mut px, "Brush", 1, 1);
         tick(&mut doc, &lr, &mut px);
         set_exposure(&mut lr, id, 1.0);
@@ -1463,8 +1464,8 @@ pub(crate) mod tests {
     #[test]
     fn a_rollback_that_fails_too_starts_the_history_over() {
         let (mut lr, mut px, mut doc) = paired();
-        let id = doc.source.photo;
-        doc.source.photo = PhotoId(u64::MAX);
+        let id = doc.photo().unwrap();
+        doc.source.as_mut().unwrap().photo = PhotoId(u64::MAX);
         // the Pixel half undoes, the commit fails, putting the Pixel half back fails
         doc.history.fail_moves = [false, true].into();
         let e = doc.undo_one(&mut lr, &mut px).unwrap_err();
@@ -1475,7 +1476,7 @@ pub(crate) mod tests {
         // redo: the Pixel half redoes, the commit fails, putting it back fails
         let (mut lr, mut px, mut doc) = paired();
         assert!(doc.undo(&mut lr, &mut px, &mut Base::new()).unwrap());
-        doc.source.photo = PhotoId(u64::MAX);
+        doc.source.as_mut().unwrap().photo = PhotoId(u64::MAX);
         doc.history.fail_moves = [false, true].into();
         assert!(doc.redo_one(&mut lr, &mut px).is_err());
         assert_eq!((doc.history.position(), doc.history.can_redo()), (0, false));
@@ -1484,7 +1485,7 @@ pub(crate) mod tests {
         // and a rollback that works keeps the step, as before
         let (mut lr, mut px, mut doc) = paired();
         let pixels = px.active().unwrap().doc.clone();
-        doc.source.photo = PhotoId(u64::MAX);
+        doc.source.as_mut().unwrap().photo = PhotoId(u64::MAX);
         assert!(doc.undo_one(&mut lr, &mut px).is_err());
         assert!(Arc::ptr_eq(&px.active().unwrap().doc, &pixels));
         assert_eq!((doc.history.position(), doc.take_notice().unwrap().starts_with("Couldn\u{2019}t undo")), (1, true));
@@ -1497,7 +1498,7 @@ pub(crate) mod tests {
     #[test]
     fn photocrafts_own_undo_is_accepted_only_for_pixel_steps_on_top() {
         let (mut lr, mut px, mut doc) = open();
-        let id = doc.source.photo;
+        let id = doc.photo().unwrap();
         paint(&mut px, "Brush", 1, 1);
         tick(&mut doc, &lr, &mut px);
         paint(&mut px, "Pencil", 2, 2);

@@ -44,9 +44,9 @@ Copyright (c) 2016 The Inter Project Authors
 PhotoCraft — https://github.com/storytold/photocraft
 License: MIT OR Apache-2.0 (used under MIT; same MIT text as above)
 Used: linked as a Git dependency (photocraft-doc, photocraft-raster, photocraft-color,
-photocraft-geom, photocraft-format, photocraft-engine, photocraft-ui-egui and the crates
-they use, pinned in Cargo.toml): its layer tree and .pcraft bundle are the pixel half of
-Studio's document, and its editor (engine, tools, panels, dialogs, icons and fonts it ships)
+photocraft-geom, photocraft-format, photocraft-engine, photocraft-ui-egui, photocraft-io
+and the crates they use, pinned in Cargo.toml): its layer tree and .pcraft bundle are the
+pixel half of Studio's document, its importers open PNG/JPEG/TIFF/PSD files into Pixel, and its editor (engine, tools, panels, dialogs, icons and fonts it ships)
 runs the Pixel persona, recoloured with Studio's theme. Also: Photoshop-style right-dock
 group layout (as a reference for default panel groups); workspace lint and never-crash
 conventions.

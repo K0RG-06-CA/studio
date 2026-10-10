@@ -273,6 +273,13 @@ fn render_personas() {
     settle(&mut h);
     h.render().unwrap().save(dir.join("save-error.png")).unwrap();
     let _ = std::fs::remove_file(blocker);
+    // a PSD opened straight into Pixel: its layers, no Develop layer, Develop and Film greyed
+    h.state_mut().run("document.dismissError").unwrap();
+    h.state_mut().run("document.prompt.cancel").unwrap();
+    let psd = crate::tests_images::image(&crate::tests_lightcraft::temp_dir("render-psd"), "art.psd");
+    h.state_mut().run_with("document.open", &serde_json::json!({"path": psd, "discard": true})).unwrap();
+    settle(&mut h);
+    h.render().unwrap().save(dir.join("pixel-image.png")).unwrap();
 }
 
 /// Run frames until LightCraft's background renders (thumbnails, the loupe) are done.

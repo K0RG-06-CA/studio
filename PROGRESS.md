@@ -254,7 +254,36 @@ See [`PRD.md`](PRD.md) → *Milestones for Claude Code*.
     replaced the first (Ctrl+Z twice undid only the stroke; Ctrl+Z then Shift+Ctrl+Z lost the
     undo); held keys are a queue now, each runs in order once the stroke is in: Ctrl+Z twice =
     the stroke and the step before it (user's question: defined, tested).
-  - [ ] 4. A document without a photo: PNG/JPEG/TIFF/PSD straight into Pixel
+  - [x] 4. A document without a photo: PNG/JPEG/TIFF/PSD straight into Pixel (2026-10-10).
+    `Document.source` is an `Option`; `Document::from_image` imports through PhotoCraft's own
+    importers (`photocraft-io`, at the pinned rev): a PSD keeps its groups, masks and blend
+    modes, a flat file is one layer at its depth; Studio's base mark on an imported layer is
+    removed. Without a photo: no base layer, nothing renders (`Base::sync` does nothing,
+    `up_to_date` is true), no Develop steps, `open_into` does nothing, no `default_path`. A
+    `.studio` file may name no photo (then it has no base layer; a base without a photo, or a
+    photo without a base, is an error). Shell: `document.open {path?}` opens a `.studio` or an
+    image (no path: the open dialog, `pick_open_path`, rfd in the app, fakes in tests; Ctrl+O
+    in Pixel); what the import approximated or dropped shows at once in the error modal,
+    "Opened “x” with warnings", before any edit; every failed open is shown. A document
+    without a photo opens in Pixel; Develop and Film are greyed for it (hover and the
+    `persona.*` error say why; `view.develop`/`tool.crop` refused). `document.saveAs` without
+    a path asks through the save dialog (Shift+Ctrl+S in Pixel); a save only ever writes a
+    `.studio` file, so an opened PNG/PSD is never written over (test: Ctrl+S asks, the PNG's
+    bytes are unchanged, a save pointed at the PNG is refused). Opening anything with unsaved
+    changes asks first: the command, Ctrl+O and a file dropped on Pixel (taken before
+    PhotoCraft sees it; replaces `files_dropped_on_pixel_dont_open_in_photocraft`). Clicking
+    Pixel with a photo picked and no document makes one; a document of another photo is
+    replaced, at once if saved, else through the prompt (review 13 deviation). Interpretation,
+    not in the plan's words: a document opened from an image is of no photo, so the photo
+    picked in Library doesn't replace it (else every Library round trip would). An M4-saved
+    file opens: `fixtures/m4-saved.studio` was written by M4's own code (a worktree at
+    `fc42139`, its `edited()` + `save`), tested in studio-doc and in the shell (photo found,
+    exposure 0.7, its layers, the base renders). Pixel's empty canvas now says "or open a file
+    (Ctrl+O)". Offscreen render `pixel-image.png` looked at (Develop/Film greyed, the PSD's
+    group, no Develop layer). Mutation-checked: the `.studio`-only save, Develop/Film off, the
+    drop, not replacing a photo-less document, the warnings modal and opening in Pixel each
+    turn a test red. Not done: raws and SVGs opened this way go through PhotoCraft too (its
+    importer takes them; a raw belongs in Library, left for later).
   - [ ] 5. Save/close flush and render identity
   - [ ] 6. Round trip end to end, smoke, docs, limitations
 

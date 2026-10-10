@@ -238,9 +238,11 @@ fn pixel_leaf(h: &Harness<'_, crate::StudioShell>, tab: &crate::dock::Tab) -> Re
 fn pixel_is_photoshops_layout_on_photocraft() {
     let mut h = studio();
     h.run_steps(3);
+    // no photo picked, no document: the canvas says how to get one
+    h.state_mut().lightroom.as_mut().unwrap().app.session.selection.active = None;
     h.state_mut().run("persona.pixel").unwrap();
     h.run_steps(4);
-    // no document yet: the canvas says how to get one
+    assert!(h.state().document.is_none());
     assert!(painted_text(h.output()).contains("No document"), "{}", painted_text(h.output()));
     h.state_mut().run("persona.library").unwrap();
     h.run_steps(2);
@@ -313,7 +315,7 @@ fn a_change_to_the_develop_layer_is_taken_back_and_says_why() {
 use crate::tests_lightcraft::{Window, ctrl_q, prompt_shown, run_window};
 
 /// A rendered document saved to `path`, open in Pixel, and a Pixel edit on it (not saved).
-fn pixel_edited(h: &mut Harness<'_, crate::StudioShell>, path: &std::path::Path) {
+pub(crate) fn pixel_edited(h: &mut Harness<'_, crate::StudioShell>, path: &std::path::Path) {
     h.run_steps(3);
     pick_first(h);
     h.state_mut().run("document.new").unwrap();
@@ -328,7 +330,7 @@ fn pixel_edited(h: &mut Harness<'_, crate::StudioShell>, path: &std::path::Path)
 }
 
 /// Press a key with modifiers for the next frame (straight into the input: see `ctrl_q`).
-fn press(h: &mut Harness<'_, crate::StudioShell>, modifiers: egui::Modifiers, key: egui::Key) {
+pub(crate) fn press(h: &mut Harness<'_, crate::StudioShell>, modifiers: egui::Modifiers, key: egui::Key) {
     h.input_mut().events.push(egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers });
     h.run_steps(1);
     h.input_mut().events.push(egui::Event::Key { key, physical_key: None, pressed: false, repeat: false, modifiers });
@@ -615,7 +617,7 @@ fn ctrl_z_in_pixel_undoes_pixel_edits_and_leaves_develops_history_alone() {
     pixel_edited(&mut h, &path);
     let develop = |h: &Harness<'_, crate::StudioShell>| {
         let lr = h.state().lightroom.as_ref().unwrap();
-        let id = h.state().document.as_ref().unwrap().source.photo;
+        let id = h.state().document.as_ref().unwrap().photo().unwrap();
         (lr.app.session.develop_of(id).unwrap().light.exposure, lr.app.session.undo.len())
     };
     let before = develop(&h);
@@ -624,42 +626,6 @@ fn ctrl_z_in_pixel_undoes_pixel_edits_and_leaves_develops_history_alone() {
     assert_eq!(develop(&h), before, "Develop's settings and history are untouched");
     press(&mut h, egui::Modifiers::COMMAND | egui::Modifiers::SHIFT, egui::Key::Z);
     assert_eq!(layer_names(h.state().document.as_ref().unwrap()).len(), 2, "and redone");
-}
-
-#[test]
-fn files_dropped_on_pixel_dont_open_in_photocraft() {
-    let dir = temp_dir("pixel-drop");
-    let png = dir.join("dropped.png");
-    // a 1×1 PNG
-    std::fs::write(
-        &png,
-        [
-            0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
-            0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4, 0x89, 0x00, 0x00, 0x00, 0x0A, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x63, 0x00, 0x01,
-            0x00, 0x00, 0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
-        ],
-    )
-    .unwrap();
-    // PhotoCraft as Studio sets it up (no import service, its own document area not drawn)
-    // neither opens dropped files nor places them as layers (opening a PNG or PSD in Pixel is
-    // milestone 5's)
-    let mut h = studio();
-    h.state_mut().run("persona.pixel").unwrap();
-    h.run_steps(3);
-    let drop = |h: &mut Harness<'_, crate::StudioShell>| {
-        h.input_mut().dropped_files.push(std::sync::Arc::new(crate::tests_lightcraft::Dropped(png.clone())));
-        h.run_steps(3);
-    };
-    drop(&mut h);
-    assert!(h.state().pixel.as_ref().unwrap().app.session.documents().is_empty());
-    pick_first(&mut h);
-    h.state_mut().run("document.new").unwrap();
-    settle_base(&mut h);
-    h.state_mut().run("persona.pixel").unwrap();
-    h.run_steps(3);
-    drop(&mut h);
-    assert_eq!(h.state().pixel.as_ref().unwrap().app.session.documents().len(), 1);
-    assert_eq!(layer_names(h.state().document.as_ref().unwrap()), [studio_doc::BASE_LAYER]);
 }
 
 // --- Task 8: PhotoCraft's overlays ---
@@ -707,7 +673,7 @@ fn painted_document(h: &mut Harness<'_, crate::StudioShell>) {
 }
 
 fn rotate_left(h: &mut Harness<'_, crate::StudioShell>) {
-    let id = h.state().document.as_ref().unwrap().source.photo.0;
+    let id = h.state().document.as_ref().unwrap().photo().unwrap().0;
     let lr = &mut h.state_mut().lightroom.as_mut().unwrap().app.session;
     lr.execute("photo.rotateLeft", &serde_json::json!({"ids": [id]})).unwrap();
 }
@@ -791,7 +757,7 @@ fn photocrafts_logic_doesnt_run_while_a_develop_rotation_renders() {
 
 /// The document's exposure, as LightCraft has it.
 fn exposure(h: &Harness<'_, crate::StudioShell>) -> f64 {
-    let id = h.state().document.as_ref().unwrap().source.photo;
+    let id = h.state().document.as_ref().unwrap().photo().unwrap();
     h.state().lightroom.as_ref().unwrap().app.session.develop_of(id).unwrap().light.exposure
 }
 

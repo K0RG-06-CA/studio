@@ -777,7 +777,7 @@ fn a_saved_document_comes_back_after_a_relaunch() {
     assert_eq!((doc.name.as_str(), doc.develop.light.exposure, doc.path.as_deref()), (name.as_str(), 1.0, Some(path.as_path())));
     // and the file's settings reached the (fresh) library
     let lr = shell.lightroom.as_ref().unwrap();
-    assert_eq!(lr.app.session.develop_of(doc.source.photo).unwrap().light.exposure, 1.0);
+    assert_eq!(lr.app.session.develop_of(doc.photo().unwrap()).unwrap().light.exposure, 1.0);
     let mut h = studio_with(Harness::builder().with_size([1400.0, 900.0]));
     *h.state_mut() = shell;
     settle_base(&mut h);

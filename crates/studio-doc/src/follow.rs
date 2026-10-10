@@ -246,7 +246,7 @@ mod tests {
 
     impl T {
         fn id(&self) -> PhotoId {
-            self.doc.source.photo
+            self.doc.photo().unwrap()
         }
 
         /// One frame as the shell runs it: the base synced, PhotoCraft copied back.
@@ -406,7 +406,7 @@ mod tests {
         let (rows, position, past) = (t.rows(), t.doc.history.position(), t.st().history.past_len());
         let settings = t.lr.develop_of(id).unwrap();
         // the commit fails: the photo isn't in the library as far as it is concerned
-        t.doc.source.photo = PhotoId(u64::MAX);
+        t.doc.source.as_mut().unwrap().photo = PhotoId(u64::MAX);
         let e = t.doc.undo(&mut t.lr, &mut t.px, &mut t.base).unwrap_err();
         assert!(Arc::ptr_eq(&t.pc(), &rotated), "the Pixel half was redone back: the same document");
         assert_eq!(t.lr.develop_of(id).unwrap(), settings, "the Develop half never moved");
@@ -415,19 +415,19 @@ mod tests {
         let notice = t.doc.take_notice().unwrap();
         assert!(notice.starts_with("Couldn\u{2019}t undo \u{201c}Rotate Left\u{201d}") && notice.contains(&e), "{notice}");
         // working again: both halves go back together
-        t.doc.source.photo = id;
+        t.doc.source.as_mut().unwrap().photo = id;
         assert!(t.undo());
         assert!(Arc::ptr_eq(&t.pc(), &unrotated), "the exact pre-follow document");
         assert_eq!(t.lr.develop_of(id).unwrap().orientation, Default::default());
         // the same on the redo side
-        t.doc.source.photo = PhotoId(u64::MAX);
+        t.doc.source.as_mut().unwrap().photo = PhotoId(u64::MAX);
         assert!(t.doc.redo(&mut t.lr, &mut t.px, &mut t.base).is_err());
         assert!(Arc::ptr_eq(&t.pc(), &unrotated), "the Pixel half was undone back");
         assert_eq!(t.lr.develop_of(id).unwrap().orientation, Default::default());
         assert_eq!((t.doc.history.position(), t.doc.history.can_redo()), (position - 1, true), "still redoable");
         assert!(t.st().history.can_redo());
         assert!(t.doc.take_notice().unwrap().starts_with("Couldn\u{2019}t redo \u{201c}Rotate Left\u{201d}"));
-        t.doc.source.photo = id;
+        t.doc.source.as_mut().unwrap().photo = id;
         assert!(t.redo());
         assert!(Arc::ptr_eq(&t.pc(), &rotated));
         assert_eq!(t.lr.develop_of(id).unwrap(), settings);

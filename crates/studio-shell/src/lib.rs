@@ -30,6 +30,9 @@ mod tests_lightcraft;
 #[cfg(test)]
 mod tests_photocraft;
 
+#[cfg(test)]
+mod tests_images;
+
 /// Lightroom Classic's module keys: (key, command, persona, what LightCraft shows).
 const LIGHTROOM_KEYS: [(egui::Key, &str, Persona, lightroom::Go); 4] = [
     (egui::Key::G, "view.grid", Persona::Library, lightroom::Go::Grid),
@@ -76,6 +79,10 @@ pub struct StudioShell {
     /// document that has no file yet (none: cancelled). Set by the app; tests put a fake here.
     #[serde(skip)]
     pub pick_save_path: Option<PickSavePath>,
+    /// The desktop's open dialog (a `.studio` document or an image file; none: cancelled). Set by
+    /// the app; tests put a fake here.
+    #[serde(skip)]
+    pub pick_open_path: Option<PickOpenPath>,
     /// A document action that failed where no caller sees the error (a save, what follows the
     /// prompt's answer): (title, why), shown until dismissed (`document.dismissError`).
     #[serde(skip)]
@@ -94,6 +101,8 @@ const BUSY: &str = "Develop rendering\u{2026}";
 
 /// See [`StudioShell::pick_save_path`].
 pub type PickSavePath = Box<dyn FnMut(&str) -> Option<PathBuf>>;
+/// See [`StudioShell::pick_open_path`].
+pub type PickOpenPath = Box<dyn FnMut() -> Option<PathBuf>>;
 
 /// An action that would drop the open document's unsaved changes, held while the prompt asks.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -119,6 +128,7 @@ impl Default for StudioShell {
             prompt: None,
             close_window: false,
             pick_save_path: None,
+            pick_open_path: None,
             error: None,
             held: Vec::new(),
         }
@@ -152,9 +162,12 @@ impl StudioShell {
     /// - `app.quit` (Ctrl+Q): close the window; an unsaved document asks first.
     /// - Lightroom Classic's module keys: `view.grid` (G) and `view.loupe` (E) in Library,
     ///   `view.develop` (D), `tool.crop` (R) in Develop.
-    /// - The document: `document.new` (from the photo picked in Library), `document.open {path}`,
+    /// - The document: `document.new` (from the photo picked in Library), `document.open {path?}`
+    ///   (a `.studio` file, or an image file PhotoCraft opens: PNG, JPEG, TIFF, PSD…, which
+    ///   becomes a document without a photo, in Pixel; no path: the open dialog),
     ///   `document.save` (to its path, else beside its source file, else where the save dialog
-    ///   says), `document.saveAs {path}`,
+    ///   says), `document.saveAs {path?}` (no path: the save dialog); only ever to a `.studio`
+    ///   file, so an opened image is never written over,
     ///   `document.close {discard?}`. Unsaved changes stop `new`, `open` and `close` unless
     ///   `discard` is true: they return an error and show the "save changes?" prompt, which
     ///   `document.prompt.save` (save, then go ahead), `document.prompt.discard` (go ahead) and
@@ -211,9 +224,15 @@ impl StudioShell {
             if !p.enabled() {
                 return Err(format!("{} arrives in v{}", p.label(), p.version()));
             }
+            if let Some(why) = self.persona_off(p) {
+                return Err(why);
+            }
             // a Develop geometry change lands (Pixel layers follow) before any persona shows it;
             // one that can't render was undone, and its notice shows next frame
             let _ = self.flush();
+            if p == Persona::Pixel {
+                self.pixel_document();
+            }
             if let Some(lr) = &mut self.lightroom {
                 lr.switch(self.persona, p);
             }
@@ -228,6 +247,12 @@ impl StudioShell {
         let discard = params.get("discard").and_then(Value::as_bool).unwrap_or(false);
         let unsaved = self.unsaved();
         match cmd {
+            // no path: the open dialog says which (cancelled: nothing happens)
+            "open" if path("path").is_none() => {
+                let pick = self.pick_open_path.as_mut().ok_or("document.open needs a `path`")?;
+                let Some(picked) = pick() else { return Ok(()) };
+                self.run_with("document.open", &serde_json::json!({"path": picked, "discard": discard}))
+            }
             "new" | "open" | "close" if unsaved && !discard => {
                 self.prompt = Some(match cmd {
                     "new" => Pending::New,
@@ -273,10 +298,13 @@ impl StudioShell {
             }
             "open" => {
                 let path = path("path").ok_or("document.open needs a `path`")?;
-                let lr = self.lightroom.as_mut().ok_or("LightCraft isn't running")?;
-                let mut doc = Document::open(&path)?;
-                doc.open_into(&mut lr.app.session)?;
-                self.replace(doc)
+                let r = self.open(&path);
+                // every way an open fails is shown (unsaved changes aren't a failure: it asks)
+                if let Err(why) = &r {
+                    let name = path.file_name().map_or_else(|| path.to_string_lossy(), |n| n.to_string_lossy());
+                    self.error = Some((format!("Couldn\u{2019}t open \u{201c}{name}\u{201d}"), why.clone()));
+                }
+                r
             }
             "save" | "saveAs" => {
                 let r = self.save(cmd == "saveAs", path("path"));
@@ -363,7 +391,7 @@ impl StudioShell {
             self.base.mirror(&lr.app.session, doc);
         }
         let known = match save_as {
-            true => Some(to.ok_or("document.saveAs needs a `path`")?),
+            true => to,
             false => doc.path.clone().or_else(|| doc.default_path()),
         };
         let file = format!("{}.{}", doc.name, studio_doc::file::EXTENSION);
@@ -371,10 +399,35 @@ impl StudioShell {
             (Some(p), _) => p,
             // no file yet: ask where (the dialog may be cancelled)
             (None, Some(pick)) => pick(&file).ok_or(SAVE_CANCELLED)?,
+            (None, None) if save_as => return Err("document.saveAs needs a `path`".into()),
             (None, None) => return Err("this document has no file yet: use document.saveAs".into()),
         };
+        // only ever a .studio file: a document opened from an image is never written over it
+        if !path.extension().is_some_and(|e| e.eq_ignore_ascii_case(studio_doc::file::EXTENSION)) {
+            return Err(format!("Studio saves .{} documents, not {}", studio_doc::file::EXTENSION, path.display()));
+        }
         self.document.as_mut().ok_or("no document is open")?.save(&path)?;
         self.document_path = Some(path);
+        Ok(())
+    }
+
+    /// `document.open`: a `.studio` file (its photo found in the library), or an image file
+    /// PhotoCraft can open, as a document without a photo; what its import approximated or
+    /// dropped is shown at once, before anything is edited or saved.
+    fn open(&mut self, path: &std::path::Path) -> Result<(), String> {
+        if path.extension().is_some_and(|e| e.eq_ignore_ascii_case(studio_doc::file::EXTENSION)) {
+            let lr = self.lightroom.as_mut().ok_or("LightCraft isn't running")?;
+            let mut doc = Document::open(path)?;
+            doc.open_into(&mut lr.app.session)?;
+            return self.replace(doc);
+        }
+        let bytes = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let name = path.file_name().map_or_else(|| path.to_string_lossy(), |n| n.to_string_lossy()).into_owned();
+        let (doc, warnings) = Document::from_image(&name, &bytes)?;
+        self.replace(doc)?;
+        if !warnings.is_empty() {
+            self.error = Some((format!("Opened \u{201c}{name}\u{201d} with warnings"), warnings.join("\n")));
+        }
         Ok(())
     }
 
@@ -384,10 +437,39 @@ impl StudioShell {
         if let Some(px) = &mut self.pixel {
             doc.attach(&mut px.app.session);
         }
+        let photo = doc.source.is_some();
         self.document = Some(doc);
         self.base = self.base.renewed();
         self.base_error = None;
+        // a document without a photo is Pixel's: it opens there (Develop and Film are off)
+        if !photo {
+            self.dispatch("persona.pixel", &Value::Null)?;
+        }
         Ok(())
+    }
+
+    /// Why persona `p` can't show the open document: Develop and Film edit a library photo, and
+    /// a document opened from an image file has none (their buttons are greyed with this).
+    fn persona_off(&self, p: Persona) -> Option<String> {
+        let photoless = self.document.as_ref().is_some_and(|d| d.source.is_none());
+        (photoless && matches!(p, Persona::Develop | Persona::Film))
+            .then(|| format!("{} needs a library photo: this document was opened from an image file", p.label()))
+    }
+
+    /// Pixel shows the photo picked in Library: a document is made from it when none is open, and
+    /// one of another photo is replaced (at once if it is saved, else through the "save
+    /// changes?" prompt). A document opened from an image file is of no photo, so the photo
+    /// picked meanwhile doesn't replace it.
+    fn pixel_document(&mut self) {
+        let Some(picked) = self.lightroom.as_ref().and_then(|lr| lr.app.session.active()) else { return };
+        if self.document.as_ref().is_none_or(|d| d.photo().is_some_and(|p| p != picked)) {
+            // a failure shows itself (the prompt; a photo that can't be read: its error)
+            if let Err(e) = self.run("document.new")
+                && self.prompt.is_none()
+            {
+                self.error = Some(("Couldn\u{2019}t make a new document".to_owned(), e));
+            }
+        }
     }
 
     /// Open the document of the last launch again (`document_path`), once LightCraft is set. A
@@ -398,6 +480,10 @@ impl StudioShell {
         let r = self.run_with("document.open", &serde_json::json!({"path": path}));
         if r.is_err() && !path.exists() {
             self.document_path = None;
+        }
+        // the app reports it (at launch, a modal for a file that went away would only be noise)
+        if r.is_err() {
+            self.error = None;
         }
         r
     }
@@ -511,6 +597,15 @@ impl StudioShell {
             ui.ctx().request_repaint_after(std::time::Duration::from_millis(30));
         }
         self.shortcuts(ui);
+        // a file dropped on Pixel opens as the document (asking first if the open one has
+        // changes); taken here, so PhotoCraft never opens it in its own session
+        if self.persona == Persona::Pixel {
+            let dropped = ui.input_mut(|i| std::mem::take(&mut i.raw.dropped_files));
+            if let Some(file) = dropped.first() {
+                // failures show themselves (the open's error, the prompt)
+                let _ = self.run_with("document.open", &serde_json::json!({"path": file.path()}));
+            }
+        }
         // Closing from another persona with library changes that couldn't be saved: stop, and go
         // to Library, where LightCraft asks what to do (in its personas it checks this itself).
         if !self.persona.lightroom() && ui.input(|i| i.viewport().close_requested()) && self.lightroom.as_mut().is_some_and(|lr| !lr.may_close()) {
@@ -719,10 +814,11 @@ impl StudioShell {
                         .fill(if on { t.active } else { egui::Color32::TRANSPARENT })
                         .frame_when_inactive(on)
                         .min_size(egui::vec2(64.0, t.top_bar_h - 10.0));
+                    let off = self.persona_off(p);
                     let r = ui
-                        .add_enabled(p.enabled(), button)
+                        .add_enabled(p.enabled() && off.is_none(), button)
                         .on_hover_text(format!("{} ({})", p.label(), shortcut_text(ui, p)))
-                        .on_disabled_hover_text(format!("{} arrives in v{}", p.label(), p.version()));
+                        .on_disabled_hover_text(off.unwrap_or_else(|| format!("{} arrives in v{}", p.label(), p.version())));
                     if r.clicked() {
                         let _ = self.run(&p.command());
                     }
@@ -755,22 +851,20 @@ impl StudioShell {
             let _ = self.run("app.quit");
         }
         // Pixel: PhotoCraft's own file shortcuts would act on its session, not on the document.
-        // Photoshop's keys for Studio's document commands instead; Open and Save As have no
-        // dialog yet, so they do nothing.
+        // Photoshop's keys for Studio's document commands instead (Open and Save As through the
+        // desktop's dialogs).
         if self.persona == Persona::Pixel {
             let (cmd, shift) = (egui::Modifiers::COMMAND, egui::Modifiers::COMMAND | egui::Modifiers::SHIFT);
             let keys = [
-                (shift, egui::Key::S, None),
-                (cmd, egui::Key::S, Some("document.save")),
-                (cmd, egui::Key::N, Some("document.new")),
-                (cmd, egui::Key::W, Some("document.close")),
-                (cmd, egui::Key::O, None),
+                (shift, egui::Key::S, "document.saveAs"),
+                (cmd, egui::Key::S, "document.save"),
+                (cmd, egui::Key::N, "document.new"),
+                (cmd, egui::Key::W, "document.close"),
+                (cmd, egui::Key::O, "document.open"),
             ];
             for (mods, key, id) in keys {
-                if ui.input_mut(|i| consume_exact(i, mods, key))
-                    && let Some(id) = id
-                {
-                    // failures show themselves (a save's error, the prompt)
+                if ui.input_mut(|i| consume_exact(i, mods, key)) {
+                    // failures show themselves (a save's or an open's error, the prompt)
                     let _ = self.run(id);
                 }
             }

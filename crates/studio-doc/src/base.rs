@@ -79,9 +79,9 @@ impl Base {
         self.started
     }
 
-    /// The base shows the current settings (and nothing is in flight).
+    /// The base shows the current settings (and nothing is in flight); always, without a photo.
     pub fn up_to_date(&self, doc: &Document) -> bool {
-        self.pending.is_none() && doc.shown_hash() == Some(doc.develop.hash64())
+        doc.source.is_none() || (self.pending.is_none() && doc.shown_hash() == Some(doc.develop.hash64()))
     }
 
     /// The document's layer tree, for anything that flattens it or reads the base's pixels
@@ -96,8 +96,12 @@ impl Base {
     /// the base is stale and no slider drag is open (a drag then renders once, at release).
     /// Errors are LightCraft's (a photo gone from the library, a
     /// decode that failed); the base keeps its last pixels, and a failed render is reported again
-    /// every frame, not retried, until the settings change.
+    /// every frame, not retried, until the settings change. A document without a photo has no
+    /// base: nothing to do.
     pub fn sync(&mut self, session: &mut Session, pixel: &mut PixelSession, doc: &mut Document) -> Result<(), String> {
+        if doc.source.is_none() {
+            return Ok(());
+        }
         self.mirror(session, doc);
         let r = self.step(session, pixel, doc);
         if let Err(e) = &r
@@ -135,7 +139,8 @@ impl Base {
     /// can't start, or takes longer than the ceiling ([`FOLLOW_CEILING`]) undoes the step (see
     /// [`Document::follow_failed`]) and is the error.
     pub(crate) fn finish(&mut self, session: &mut Session, pixel: &mut PixelSession, doc: &mut Document) -> Result<(), String> {
-        if session.interaction.as_ref().is_some_and(|i| i.photo == doc.source.photo) {
+        let Some(photo) = doc.photo() else { return Ok(()) };
+        if session.interaction.as_ref().is_some_and(|i| i.photo == photo) {
             session.end_interaction().map_err(|e| e.to_string())?;
         }
         self.mirror(session, doc);
@@ -180,7 +185,7 @@ impl Base {
     }
 
     fn start(&mut self, session: &mut Session, doc: &Document, want: u64) -> Result<(), String> {
-        let id = doc.source.photo;
+        let id = doc.photo().ok_or("the document has no photo to render")?;
         let photo = session.catalog.photo(id).ok_or_else(|| format!("photo {} isn't in the library", id.0))?;
         let (w, h) = (photo.width as usize, photo.height as usize);
         let anchor = Anchor::new(Arc::new(doc.develop.clone()), (w, h), photo.embedded_lens);
@@ -357,7 +362,7 @@ mod tests {
     #[test]
     fn a_re_render_through_the_stage_cache_matches_a_plain_one_within_1_lsb() {
         let (mut session, doc, _) = open();
-        let id = doc.source.photo;
+        let id = doc.photo().unwrap();
         let render = |session: &mut Session, stages: Option<&Arc<StageCache>>| {
             let s = (*session.develop_of(id).unwrap()).clone();
             let mut job = session.preview_job(id, 600, 600, true, &s).unwrap();
@@ -398,7 +403,7 @@ mod tests {
     fn edits_during_a_render_coalesce_and_its_stale_result_is_dropped() {
         let (mut session, mut doc, mut base) = open();
         let mut pixel = PixelSession::new();
-        let id = doc.source.photo;
+        let id = doc.photo().unwrap();
         base.sync(&mut session, &mut pixel, &mut doc).unwrap();
         assert!(base.rendering());
         // three edits while the first render runs: no second render alongside it
@@ -433,7 +438,7 @@ mod tests {
     fn reading_the_base_waits_until_it_shows_the_current_settings() {
         let (mut session, mut doc, mut base) = open();
         let mut pixel = PixelSession::new();
-        let id = doc.source.photo;
+        let id = doc.photo().unwrap();
         assert!(base.current(&doc).is_err(), "nothing rendered yet");
         base.sync(&mut session, &mut pixel, &mut doc).unwrap();
         assert!(base.rendering() && base.current(&doc).is_err(), "in flight");
@@ -448,7 +453,7 @@ mod tests {
         let after = photocraft_compose::flatten(base.current(&doc).unwrap()).px;
         assert!(after.len() == before.len() && after != before, "the new render, not the old one");
         // a render that fails leaves the base stale: never readable as if current
-        doc.source.photo = PhotoId(u64::MAX);
+        doc.source.as_mut().unwrap().photo = PhotoId(u64::MAX);
         doc.develop.light.exposure = -1.0;
         assert!(base.sync(&mut session, &mut pixel, &mut doc).is_err());
         assert!(base.current(&doc).is_err());
@@ -462,7 +467,7 @@ mod tests {
         settle(&mut base, &mut session, &mut pixel, &mut doc);
         let (w, h) = (doc.pixel.size.width as usize, doc.pixel.size.height as usize);
         assert_eq!((w, h), (600, 400), "capped at 600 on the long side, never scaled up");
-        let theirs = session.render_now(doc.source.photo, w, h).unwrap().image;
+        let theirs = session.render_now(doc.photo().unwrap(), w, h).unwrap().image;
         assert_eq!((theirs.width, theirs.height), (w, h));
         let ours = photocraft_compose::flatten(&doc.pixel);
         assert_eq!(ours.px.len(), w * h);
@@ -479,7 +484,7 @@ mod tests {
         let mut pixel = PixelSession::new();
         settle(&mut base, &mut session, &mut pixel, &mut doc);
         let before = mean_rgb(&doc);
-        let (id, rev) = (doc.source.photo, doc.revision);
+        let (id, rev) = (doc.photo().unwrap(), doc.revision);
         let mut s = (*session.develop_of(id).unwrap()).clone();
         s.light.exposure = 2.0;
         session.set_develop(id, s.clone(), "Exposure").unwrap();
@@ -502,7 +507,7 @@ mod tests {
         let (mut session, mut doc, mut base) = open();
         let mut pixel = PixelSession::new();
         settle(&mut base, &mut session, &mut pixel, &mut doc);
-        let id = doc.source.photo;
+        let id = doc.photo().unwrap();
         session.selection.active = Some(id);
         session.begin_interaction("Exposure").unwrap();
         for e in [0.5, 1.0, 1.5] {
@@ -577,9 +582,9 @@ mod tests {
         let mut pixel = PixelSession::new();
         settle(&mut base, &mut session, &mut pixel, &mut doc);
         let full = doc.pixel.size;
-        let photo = session.catalog.photo(doc.source.photo).unwrap();
+        let photo = session.catalog.photo(doc.photo().unwrap()).unwrap();
         assert_eq!((full.width, full.height), (photo.width, photo.height), "native size");
-        let id = doc.source.photo;
+        let id = doc.photo().unwrap();
         let mut s = (*session.develop_of(id).unwrap()).clone();
         s.crop.geometry.rect.x1 = 0.5;
         s.crop.geometry.rect.y1 = 0.5;
@@ -628,7 +633,7 @@ mod tests {
         doc.copy_back(&mut pixel);
         let p = base_px(&doc, 300, 250);
         // Develop crops a quarter off the top and the bottom (the long side, so the scale, stays)
-        let id = doc.source.photo;
+        let id = doc.photo().unwrap();
         let mut s = (*session.develop_of(id).unwrap()).clone();
         (s.crop.geometry.rect.y0, s.crop.geometry.rect.y1) = (0.25, 0.75);
         session.set_develop(id, s, "Crop").unwrap();
@@ -648,7 +653,7 @@ mod tests {
         let (mut session, mut doc, mut base) = open();
         let mut pixel = PixelSession::new();
         settle(&mut base, &mut session, &mut pixel, &mut doc);
-        let id = doc.source.photo;
+        let id = doc.photo().unwrap();
         let shown = |doc: &Document| doc.base_layer().unwrap().surface().unwrap().tiles().next().map(|(_, t)| Arc::as_ptr(t));
         let (before, started) = (shown(&doc), base.started());
         // a stroke starts in Pixel; meanwhile Develop's exposure changes and its render finishes
@@ -735,7 +740,7 @@ mod tests {
     fn a_photo_gone_from_the_library_is_an_error_not_a_crash() {
         let (mut session, mut doc, mut base) = open();
         let mut pixel = PixelSession::new();
-        doc.source.photo = PhotoId(u64::MAX);
+        doc.source.as_mut().unwrap().photo = PhotoId(u64::MAX);
         let e = base.sync(&mut session, &mut pixel, &mut doc).unwrap_err();
         assert!(e.contains("isn't in the library"), "{e}");
         assert!(!base.rendering());

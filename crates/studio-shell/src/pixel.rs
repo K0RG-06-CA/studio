@@ -147,7 +147,7 @@ impl Pixel {
     pub fn canvas(&mut self, ui: &mut Ui, rendering: bool) {
         let rect = ui.available_rect_before_wrap();
         let Some(idx) = self.app.session.active_index().filter(|i| *i < self.app.ui.views.len()) else {
-            ui.centered_and_justified(|ui| ui.label(crate::theme::placeholder("No document: pick a photo in Library, then New Document")));
+            ui.centered_and_justified(|ui| ui.label(crate::theme::placeholder("No document: pick a photo in Library, or open a file (Ctrl+O)")));
             return;
         };
         self.show(ui, |app, ui| {
