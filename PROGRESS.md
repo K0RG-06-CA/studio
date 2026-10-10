@@ -112,8 +112,9 @@ See [`PRD.md`](PRD.md) → *Milestones for Claude Code*.
     `tests_photocraft::l2_*`); Studio's lock guard takes them back.
   - L3 Its undo restores whole documents, layers the host wrote outside history included
     (`l3_*`); Studio's render register puts the current Develop render back.
-  - L4 History footer: Delete state / New snapshot / New document from state do nothing
-    (`tests_photocraft::l4_*`).
+  - ~~L4 History footer: Delete state / New snapshot / New document from state do nothing~~
+    Retired in M5 task 3: PhotoCraft's History panel is off (Studio's History tab instead), so
+    its test went too.
   - L5 Its editor runs only as an `eframe::App` (`logic`/`ui` take an `eframe::Frame` they don't
     use): Studio passes eframe's hidden test frame (`Frame::_new_kittest`, eframe 0.36.2). No
     test can name the API upstream would add; an eframe bump breaks the build if it goes.
@@ -216,7 +217,32 @@ See [`PRD.md`](PRD.md) → *Milestones for Claude Code*.
     state appended in one reconcile fails three tests) (2026-10-10). Not done here: `bench.rs` peak bytes during
     a follow (waits for the slow-frame fix); a single-channel Channels-panel restriction
     on `edit.transform` during a follow is untested.
-  - [ ] 3. Shell: commands, shortcuts, Studio's History panel, reconcile points
+  - [x] 3. Shell: commands, shortcuts, Studio's History panel, reconcile points (2026-10-10).
+    Commands `edit.undo`, `edit.redo`, `edit.toggleLastState` (redo if there is one, else undo,
+    as PhotoCraft's) and `history.goto {index}` on the document's one history; PhotoCraft's own
+    `pixel.edit.undo|redo|toggleLastState` are routed to them. While PhotoCraft has a Free
+    Transform, type or a pen path open, undo/redo/toggle are its own (the box's steps; M4's nudge
+    test unchanged); a jump applies what is open first. Ctrl+Z / Shift+Ctrl+Z / Alt+Ctrl+Z in
+    every persona while a document is open, taken by Studio before either engine's logic (so
+    LightCraft's `native_shortcuts` aren't needed: the key never reaches it); never while a text
+    field has the keyboard; with no document, LightCraft's own (a rating undone, test).
+    Reconcile points: at the end of every frame (after PhotoCraft's logic, panels and dialogs)
+    and after every `run_with`, so a LightCraft command scripted right after a Pixel edit is a
+    step after it (test, red before). Undo mid-stroke: PhotoCraft's drag is private
+    (`app.drag`, `finish_gesture` is `pub(crate)`), so a Studio can't end a stroke itself; an
+    undo key pressed with the button down in Pixel is held and runs in the frame the gesture
+    ends, after PhotoCraft committed it: the stroke is a step, then undone (test: redo brings
+    it back). Studio's History tab sits above PhotoCraft's dock in Pixel (rows: Original, every
+    step, the redo rows dimmed; the current one highlighted; "Develop", "Pixel" or both per row;
+    a click is `history.goto`); PhotoCraft's History panel is off (L4 retired). A saved layout
+    now resets when it lacks a panel the persona has (panels can't be closed, so it is an older
+    save: M4's Pixel layout gets the History tab; two corrupt-save cases that drop a panel now
+    reset too, test updated; the save/restore tests move a panel instead of removing it).
+    Offscreen render `pixel-history.png` looked at (the persona tags were clipped by the
+    margin-less tab; fixed). Mutation-checked: the end-of-frame reconcile, holding the key
+    mid-stroke, the text-field guard and the document guard each turn their test red. Not
+    done: Studio's History tab in Develop (left for later, plan); the smoke script's new
+    commands (task 6).
   - [ ] 4. A document without a photo: PNG/JPEG/TIFF/PSD straight into Pixel
   - [ ] 5. Save/close flush and render identity
   - [ ] 6. Round trip end to end, smoke, docs, limitations

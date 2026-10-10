@@ -177,10 +177,12 @@ fn corrupt_saves() -> Vec<(&'static str, String, bool)> {
         ("split fraction above 1", good.replacen("fraction:0.18", "fraction:7.0", 1), true),
         ("NaN rectangle", nan_rect, true),
         ("canvas missing", good.replacen("tabs:[Canvas]", r#"tabs:[Panel("Folders")]"#, 1), true),
-        // These parse into layouts egui_dock copes with, so they are kept as they are.
+        // A panel missing: panels can't be closed, so it is a save from before the persona had it
+        // (or a damaged one), and only Reset Workspace would bring it back.
+        ("leaf with no tabs", good.replacen(r#"tabs:[Panel("Folders")]"#, "tabs:[]", 1), true),
+        ("split child missing", leaf_to_empty, true),
+        // This parses into a layout egui_dock copes with, so it is kept as it is.
         ("active tab out of range", good.replacen("active:(0)", "active:(9)", 1), false),
-        ("leaf with no tabs", good.replacen(r#"tabs:[Panel("Folders")]"#, "tabs:[]", 1), false),
-        ("split child missing", leaf_to_empty, false),
     ]
 }
 
@@ -244,6 +246,13 @@ fn render_personas() {
     crate::tests_photocraft::add_layer(&mut h, "Paint");
     settle(&mut h);
     h.render().unwrap().save(dir.join("pixel-document.png")).unwrap();
+    // Studio's History tab: a Pixel step, a Develop step undone (dimmed, below the current row)
+    let lr = h.state_mut().lightroom.as_mut().unwrap();
+    lr.app.run("develop.set", serde_json::json!({"control": "light.exposure", "value": 0.5})).unwrap();
+    h.run_steps(1);
+    h.state_mut().run("edit.undo").unwrap();
+    settle(&mut h);
+    h.render().unwrap().save(dir.join("pixel-history.png")).unwrap();
     // a change to the Develop layer taken back, and why
     let base = h.state().document.as_ref().unwrap().base_layer().unwrap().id.0;
     let session = &mut h.state_mut().pixel.as_mut().unwrap().app.session;

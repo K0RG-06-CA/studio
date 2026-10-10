@@ -63,15 +63,16 @@ pub struct Pixel {
 
 impl Pixel {
     /// PhotoCraft in Photoshop's grammar (its Pro theme: tab strips, flat panels, Properties in
-    /// the dock), with Navigator (and Histogram), Properties, History and Layers in its right
-    /// dock, as the PRD's Pixel column; its Color group stays off for Layers' room.
+    /// the dock), with Navigator (and Histogram), Properties and Layers in its right dock, as the
+    /// PRD's Pixel column; its Color group stays off for Layers' room, and its History is off:
+    /// the document's history is Studio's (its own History tab), across personas.
     pub fn new(mut app: PhotocraftApp) -> Self {
         app.ui.theme = ThemeKind::Pro;
         app.ui.panels.color = false;
         app.ui.panels.navigator = true;
         app.ui.panels.layers = true;
         app.ui.panels.properties = true;
-        app.ui.panels.history = true;
+        app.ui.panels.history = false;
         Pixel { app, frame: eframe::Frame::_new_kittest(), frames: 0, style: None }
     }
 
@@ -163,7 +164,7 @@ impl Pixel {
         }
     }
 
-    /// The panels tab: PhotoCraft's right dock (Layers, Properties, History, and its icon rail)
+    /// The panels tab: PhotoCraft's right dock (Layers, Properties, and its icon rail)
     /// filling it. Its panels are private, so they come as one (see the module docs). Too narrow
     /// a tab shows the dock's narrowest, clipped; its own resize handle is clipped away (the
     /// Studio dock sets the width).

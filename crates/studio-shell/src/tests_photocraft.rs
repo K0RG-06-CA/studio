@@ -662,7 +662,7 @@ fn files_dropped_on_pixel_dont_open_in_photocraft() {
     assert_eq!(layer_names(h.state().document.as_ref().unwrap()), [studio_doc::BASE_LAYER]);
 }
 
-// --- Task 8: PhotoCraft's overlays, its History panel ---
+// --- Task 8: PhotoCraft's overlays ---
 
 #[test]
 fn photocrafts_dialogs_show_over_pixel_ctrl_l_opens_levels() {
@@ -676,47 +676,6 @@ fn photocrafts_dialogs_show_over_pixel_ctrl_l_opens_levels() {
     assert!(text.contains("Levels"), "{text}");
     // in Studio's frame: its theme around the dialog stays Studio's
     assert_eq!(h.ctx.global_style().visuals.panel_fill, crate::theme::TOKENS.chrome);
-}
-
-/// L4: the History panel's "Delete current state", "Create new snapshot" and "Create new
-/// document from current state" buttons do nothing (`d836e34`: their clicks are dropped). Fails
-/// once upstream wires one of them up.
-#[test]
-fn l4_photocrafts_history_footer_buttons_do_nothing() {
-    let dir = temp_dir("pixel-history");
-    let mut h = studio();
-    pixel_edited(&mut h, &dir.join("trip.studio"));
-    let state = |h: &Harness<'_, crate::StudioShell>| {
-        let pc = &h.state().pixel.as_ref().unwrap().app.session;
-        (pc.documents().len(), pc.active().unwrap().history.entries(), layer_names(h.state().document.as_ref().unwrap()))
-    };
-    let before = state(&h);
-    // icon buttons without an accessible name (their tooltips don't show headless): the History
-    // footer is the one row of exactly three 24-point buttons in Pixel's panels tab, right to
-    // left: delete, snapshot, new document
-    let column = pixel_leaf(&h, &crate::dock::Tab::Panel("Layers".to_owned()));
-    let small = |n: &egui_kittest::kittest::AccessKitNode<'_>| {
-        n.bounding_box().is_some_and(|b| (b.width() - 24.0).abs() < 0.5 && (b.height() - 24.0).abs() < 0.5)
-    };
-    let buttons: Vec<Rect> =
-        h.query_all(egui_kittest::kittest::By::new().predicate(small)).map(|n| n.rect()).filter(|r| column.contains(r.center())).collect();
-    let row = |r: &Rect| buttons.iter().filter(|b| (b.top() - r.top()).abs() < 0.5).count();
-    let mut footer: Vec<Rect> = buttons.iter().copied().filter(|r| row(r) == 3).collect();
-    footer.sort_by(|a, b| b.left().total_cmp(&a.left()));
-    assert_eq!(footer.len(), 3, "the History footer's three buttons: {buttons:?}");
-    let mut clicked = 0;
-    for (at, label) in footer.into_iter().zip(["Delete current state", "Create new snapshot", "Create new document from current state"]) {
-        h.hover_at(at.center());
-        h.run_steps(1);
-        for pressed in [true, false] {
-            h.event(egui::Event::PointerButton { pos: at.center(), button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE });
-            h.run_steps(1);
-        }
-        h.run_steps(2);
-        assert_eq!(state(&h), before, "upstream now does something for {label}");
-        clicked += 1;
-    }
-    assert_eq!(clicked, 3, "all three buttons found");
 }
 
 fn harness_app() -> PhotocraftApp {
@@ -826,4 +785,221 @@ fn photocrafts_logic_doesnt_run_while_a_develop_rotation_renders() {
     let frames = h.state().pixel.as_ref().unwrap().frames();
     h.run_steps(1);
     assert_eq!(h.state().pixel.as_ref().unwrap().frames(), frames + 1, "and it runs again once it landed");
+}
+
+// --- Milestone 5, task 3: one history in the shell ---
+
+/// The document's exposure, as LightCraft has it.
+fn exposure(h: &Harness<'_, crate::StudioShell>) -> f64 {
+    let id = h.state().document.as_ref().unwrap().source.photo;
+    h.state().lightroom.as_ref().unwrap().app.session.develop_of(id).unwrap().light.exposure
+}
+
+/// A Develop edit, as LightCraft's panels make one.
+fn set_exposure(h: &mut Harness<'_, crate::StudioShell>, value: f64) {
+    let lr = h.state_mut().lightroom.as_mut().unwrap();
+    lr.app.run("develop.set", serde_json::json!({"control": "light.exposure", "value": value})).unwrap();
+    h.run_steps(1);
+}
+
+/// A rendered document with a Pixel step ("Paint") and then a Develop step (exposure 1).
+fn both_engines_edited(h: &mut Harness<'_, crate::StudioShell>) {
+    h.run_steps(3);
+    pick_first(h);
+    h.state_mut().run("document.new").unwrap();
+    settle_base(h);
+    add_layer(h, "Paint");
+    h.run_steps(1);
+    set_exposure(h, 1.0);
+    let labels: Vec<_> = h.state().document.as_ref().unwrap().history.entries().into_iter().map(|e| (e.develop, e.pixel)).collect();
+    assert_eq!(labels, [(false, false), (false, true), (true, false)], "Original, a Pixel step, a Develop step");
+}
+
+fn layer_count(h: &Harness<'_, crate::StudioShell>) -> usize {
+    h.state().document.as_ref().unwrap().pixel.layers.len()
+}
+
+#[test]
+fn ctrl_z_walks_one_history_back_and_forth_from_every_persona() {
+    let mut h = studio();
+    both_engines_edited(&mut h);
+    let (cmd, shift, alt) = (egui::Modifiers::COMMAND, egui::Modifiers::SHIFT, egui::Modifiers::ALT);
+    // in Develop: the Develop step, then the Pixel step made before it
+    h.state_mut().run("persona.develop").unwrap();
+    h.run_steps(2);
+    press(&mut h, cmd, egui::Key::Z);
+    assert_eq!((exposure(&h), layer_count(&h)), (0.0, 2));
+    press(&mut h, cmd, egui::Key::Z);
+    assert_eq!((exposure(&h), layer_count(&h)), (0.0, 1), "a Pixel step undone from Develop");
+    press(&mut h, cmd | shift, egui::Key::Z);
+    press(&mut h, cmd | shift, egui::Key::Z);
+    assert_eq!((exposure(&h), layer_count(&h)), (1.0, 2), "both redone");
+    // in Pixel: the Develop step, made after the last Pixel edit
+    h.state_mut().run("persona.pixel").unwrap();
+    h.run_steps(2);
+    press(&mut h, cmd, egui::Key::Z);
+    assert_eq!((exposure(&h), layer_count(&h)), (0.0, 2), "a Develop step undone from Pixel");
+    // Alt+Ctrl+Z toggles the last state
+    press(&mut h, cmd | alt, egui::Key::Z);
+    assert_eq!(exposure(&h), 1.0);
+    press(&mut h, cmd | alt, egui::Key::Z);
+    assert_eq!(exposure(&h), 0.0);
+    // and in Film (no engine of its own)
+    h.state_mut().run("persona.film").unwrap();
+    h.run_steps(1);
+    press(&mut h, cmd, egui::Key::Z);
+    assert_eq!(layer_count(&h), 1);
+    assert_eq!(h.state().document.as_ref().unwrap().history.position(), 0);
+}
+
+#[test]
+fn the_history_commands_and_photocrafts_own_undo_commands_are_studios() {
+    let mut h = studio();
+    both_engines_edited(&mut h);
+    // PhotoCraft's undo, as a command: Studio's, so the newest step goes, the Develop one
+    h.state_mut().run("pixel.edit.undo").unwrap();
+    assert_eq!((exposure(&h), layer_count(&h)), (0.0, 2));
+    h.state_mut().run("pixel.edit.redo").unwrap();
+    assert_eq!(exposure(&h), 1.0);
+    h.state_mut().run("pixel.edit.toggleLastState").unwrap();
+    assert_eq!(exposure(&h), 0.0);
+    h.state_mut().run("edit.undo").unwrap();
+    assert_eq!(layer_count(&h), 1);
+    h.state_mut().run("edit.redo").unwrap();
+    h.state_mut().run("edit.toggleLastState").unwrap();
+    assert_eq!((exposure(&h), layer_count(&h)), (1.0, 2), "the toggle redoes while there is a redo");
+    h.state_mut().run_with("history.goto", &serde_json::json!({"index": 0})).unwrap();
+    assert_eq!((exposure(&h), layer_count(&h)), (0.0, 1));
+    h.state_mut().run_with("history.goto", &serde_json::json!({"index": 2})).unwrap();
+    assert_eq!((exposure(&h), layer_count(&h)), (1.0, 2));
+    assert!(h.state_mut().run_with("history.goto", &serde_json::json!({"index": 3})).is_err());
+    assert!(h.state_mut().run("history.goto").is_err(), "needs an index");
+    h.state_mut().run_with("document.close", &serde_json::json!({"discard": true})).unwrap();
+    assert!(h.state_mut().run("edit.undo").unwrap_err().contains("no document"));
+}
+
+#[test]
+fn pixels_history_tab_lists_both_engines_steps_and_a_click_jumps() {
+    let mut h = studio();
+    both_engines_edited(&mut h);
+    h.state_mut().run("persona.pixel").unwrap();
+    h.run_steps(3);
+    // Studio's History tab; PhotoCraft's own History panel is off (its footer did nothing: L4)
+    let tab = pixel_leaf(&h, &crate::dock::Tab::Panel("History".to_owned()));
+    assert!(!h.state().pixel.as_ref().unwrap().app.ui.panels.history);
+    // a widget labelled `label` in the tab (the Layers panel names "Paint" too)
+    let in_tab = |h: &Harness<'_, crate::StudioShell>, label: &str| h.get_all_by_label(label).filter(|n| tab.contains(n.rect().center())).count();
+    let develop = h.state().document.as_ref().unwrap().history.entries()[2].label.clone();
+    for row in ["Original", "Paint", develop.as_str()] {
+        assert_eq!(in_tab(&h, row), 1, "{row}");
+    }
+    // each row says which persona made it
+    assert_eq!((in_tab(&h, "Pixel"), in_tab(&h, "Develop")), (1, 1));
+    let click = |h: &mut Harness<'_, crate::StudioShell>, label: &str| {
+        h.get_all_by_label(label).find(|n| tab.contains(n.rect().center())).unwrap().click();
+        h.run_steps(2);
+    };
+    click(&mut h, "Paint");
+    assert_eq!((exposure(&h), layer_count(&h), h.state().document.as_ref().unwrap().history.position()), (0.0, 2, 1));
+    click(&mut h, "Original");
+    assert_eq!(layer_count(&h), 1);
+    // the undone rows stay, and a click goes forward again
+    click(&mut h, &develop);
+    assert_eq!((exposure(&h), layer_count(&h)), (1.0, 2));
+}
+
+#[test]
+fn ctrl_z_in_a_text_field_is_the_fields_own() {
+    let mut h = studio();
+    both_engines_edited(&mut h);
+    h.state_mut().run("persona.library").unwrap();
+    h.run_steps(3);
+    let field = h.query_all(egui_kittest::kittest::By::new().role(egui::accesskit::Role::TextInput)).next().map(|n| n.rect().center());
+    let field = field.expect("a text field in Library");
+    h.hover_at(field);
+    for pressed in [true, false] {
+        h.event(egui::Event::PointerButton { pos: field, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE });
+        h.run_steps(1);
+    }
+    assert!(h.ctx.egui_wants_keyboard_input(), "the field has the keyboard");
+    press(&mut h, egui::Modifiers::COMMAND, egui::Key::Z);
+    assert_eq!((exposure(&h), layer_count(&h)), (1.0, 2), "the history is untouched");
+}
+
+#[test]
+fn with_no_document_ctrl_z_in_library_is_lightcrafts_own() {
+    let mut h = studio();
+    h.run_steps(3);
+    pick_first(&mut h);
+    let rating = |h: &Harness<'_, crate::StudioShell>| {
+        let lr = &h.state().lightroom.as_ref().unwrap().app.session;
+        lr.catalog.photo(lr.active().unwrap()).unwrap().rating
+    };
+    let lr = h.state_mut().lightroom.as_mut().unwrap();
+    lr.app.run("photo.rate", serde_json::json!({"rating": 3})).unwrap();
+    h.run_steps(1);
+    assert_eq!(rating(&h), 3);
+    press(&mut h, egui::Modifiers::COMMAND, egui::Key::Z);
+    assert_eq!(rating(&h), 0, "LightCraft undid its rating");
+}
+
+#[test]
+fn ctrl_z_mid_stroke_commits_the_stroke_then_undoes_it() {
+    let mut h = studio();
+    h.run_steps(3);
+    pick_first(&mut h);
+    h.state_mut().run("document.new").unwrap();
+    settle_base(&mut h);
+    h.state_mut().run("persona.pixel").unwrap();
+    h.run_steps(3);
+    h.state_mut().run("pixel.layer.new.layer").unwrap();
+    h.state_mut().run_with("pixel.tool", &serde_json::json!({"name": "brush"})).unwrap();
+    h.run_steps(2);
+    let painted = |h: &Harness<'_, crate::StudioShell>| {
+        let doc = &h.state().document.as_ref().unwrap().pixel;
+        doc.layers.last().unwrap().surface().unwrap().tile_count() > 0
+    };
+    assert!(!painted(&h));
+    let c = pixel_leaf(&h, &crate::dock::Tab::Canvas).center();
+    h.event(egui::Event::PointerMoved(c));
+    h.event(egui::Event::PointerButton { pos: c, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE });
+    h.run_steps(1);
+    for i in 1..6 {
+        h.event(egui::Event::PointerMoved(c + egui::vec2(8.0 * i as f32, 4.0 * i as f32)));
+        h.run_steps(1);
+    }
+    // Ctrl+Z with the button still down: nothing is undone under the stroke
+    press(&mut h, egui::Modifiers::COMMAND, egui::Key::Z);
+    assert_eq!(layer_count(&h), 2, "the new layer is still there");
+    let end = c + egui::vec2(40.0, 20.0);
+    h.event(egui::Event::PointerButton { pos: end, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE });
+    h.run_steps(3);
+    // the stroke was committed (a step), then undone
+    let doc = h.state().document.as_ref().unwrap();
+    assert_eq!((layer_count(&h), painted(&h), doc.history.can_redo()), (2, false, true));
+    press(&mut h, egui::Modifiers::COMMAND | egui::Modifiers::SHIFT, egui::Key::Z);
+    assert!(painted(&h), "and it redoes");
+}
+
+/// A Pixel edit made in a frame, then a LightCraft command before the next one (as MCP or the
+/// smoke script drive it): the steps keep the order they were made in.
+#[test]
+fn a_pixel_edit_and_a_develop_command_right_after_it_keep_their_order() {
+    let mut h = studio();
+    h.run_steps(3);
+    pick_first(&mut h);
+    h.state_mut().run("document.new").unwrap();
+    settle_base(&mut h);
+    h.state_mut().run("persona.pixel").unwrap();
+    h.run_steps(3);
+    // PhotoCraft's own New Layer key, in its logic, in the last frame
+    let modifiers = egui::Modifiers::COMMAND | egui::Modifiers::SHIFT;
+    h.input_mut().events.push(egui::Event::Key { key: egui::Key::N, physical_key: None, pressed: true, repeat: false, modifiers });
+    h.run_steps(1);
+    assert_eq!(h.state().pixel.as_ref().unwrap().app.session.active().unwrap().doc.layers.len(), 2);
+    let lr = h.state_mut().lightroom.as_mut().unwrap();
+    lr.app.run("develop.set", serde_json::json!({"control": "light.exposure", "value": 1.0})).unwrap();
+    h.run_steps(1);
+    let kinds: Vec<_> = h.state().document.as_ref().unwrap().history.entries().into_iter().map(|e| (e.develop, e.pixel)).collect();
+    assert_eq!(kinds, [(false, false), (false, true), (true, false)]);
 }

@@ -39,9 +39,10 @@ fn spec(p: Persona) -> Spec {
             left: (0.18, &[(0.3, &["Navigator"]), (0.3, &["Film Stocks"]), (0.4, &["History"])]),
             right: (0.2, &[(0.2, &["Histogram"]), (0.8, &["Film Effects"])]),
         },
-        // Photoshop: PhotoCraft's right dock (Layers, Properties, History) in one tab: its panels
-        // can't be drawn one by one (see pixel). Tools and options are fixed chrome.
-        Persona::Pixel => Spec { left: (0.0, &[]), right: (0.24, &[(1.0, &["Layers"])]) },
+        // Photoshop: PhotoCraft's right dock (Layers, Properties) in one tab: its panels can't be
+        // drawn one by one (see pixel). Above it, Studio's History: the document's one history,
+        // both engines' steps. Tools and options are fixed chrome.
+        Persona::Pixel => Spec { left: (0.0, &[]), right: (0.24, &[(0.3, &["History"]), (0.7, &["Layers"])]) },
         // Photoshop: tabbed groups in a right column (tools and options are fixed chrome).
         Persona::Vector | Persona::Layout | Persona::Export => Spec {
             left: (0.0, &[]),
@@ -121,11 +122,12 @@ pub fn layout_is_usable(dock: &DockState<Tab>) -> bool {
     nodes_ok && windows_ok && canvases == 1
 }
 
-/// Every panel in a saved layout is one the persona still has (a save from before a milestone
-/// changed its panels, e.g. Pixel's placeholders before PhotoCraft, isn't).
+/// A saved layout has exactly the panels the persona has now (a save from before a milestone
+/// changed them isn't: Pixel's placeholders before PhotoCraft, Pixel without Studio's History).
+/// Panels can't be closed, so a missing one means an older save.
 pub fn tabs_known(p: Persona, dock: &DockState<Tab>) -> bool {
     let known = default_layout(p);
-    dock.iter_all_tabs().all(|(_, t)| known.find_tab(t).is_some())
+    dock.iter_all_tabs().all(|(_, t)| known.find_tab(t).is_some()) && known.iter_all_tabs().all(|(_, t)| dock.find_tab(t).is_some())
 }
 
 /// Draws the tabs of one persona's dock.
@@ -142,6 +144,10 @@ pub struct Viewer<'a> {
     /// Set when the user picks Reset Workspace from a tab's right-click menu; the shell then runs
     /// `window.resetWorkspace` after the dock is drawn (the layout can't change while it is).
     pub reset_requested: bool,
+    /// The open document's history rows and the row it is at, for Pixel's History tab.
+    pub history: Option<(Vec<studio_doc::history::Entry>, usize)>,
+    /// A History row clicked: the shell runs `history.goto` to it after the dock is drawn.
+    pub goto: Option<usize>,
 }
 
 impl TabViewer for Viewer<'_> {
@@ -170,6 +176,15 @@ impl TabViewer for Viewer<'_> {
             match tab {
                 Tab::Canvas => return px.canvas(ui, self.rendering),
                 Tab::Panel(name) if name == "Layers" => return px.panels(ui),
+                Tab::Panel(name) if name == "History" => {
+                    match &self.history {
+                        Some((rows, at)) => self.goto = crate::history_panel::show(ui, rows, *at),
+                        None => {
+                            ui.label(theme::placeholder("No document"));
+                        }
+                    }
+                    return;
+                }
                 Tab::Panel(_) => {}
             }
         }
@@ -273,7 +288,9 @@ mod tests {
         }
         assert!(names(&default_layout(Persona::Library)).contains(&"Folders".to_owned()));
         assert!(names(&default_layout(Persona::Develop)).contains(&"Edit".to_owned()));
-        assert_eq!(names(&default_layout(Persona::Pixel)), ["Canvas", "Layers"]);
+        let mut pixel = names(&default_layout(Persona::Pixel));
+        pixel.sort();
+        assert_eq!(pixel, ["Canvas", "History", "Layers"]);
     }
 
     #[test]

@@ -5,6 +5,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 pub mod dock;
+mod history_panel;
 pub mod lightroom;
 pub mod persona;
 pub mod pixel;
@@ -79,6 +80,10 @@ pub struct StudioShell {
     /// prompt's answer): (title, why), shown until dismissed (`document.dismissError`).
     #[serde(skip)]
     pub error: Option<(String, String)>,
+    /// An undo key pressed during a stroke or drag in Pixel: it runs once the gesture has ended
+    /// and its edit is in (PhotoCraft's gesture is its own until release).
+    #[serde(skip)]
+    pub held: Option<&'static str>,
 }
 
 /// What a save returns when its dialog was cancelled: not a failure, nothing to show.
@@ -115,6 +120,7 @@ impl Default for StudioShell {
             close_window: false,
             pick_save_path: None,
             error: None,
+            held: None,
         }
     }
 }
@@ -156,7 +162,22 @@ impl StudioShell {
     ///   `document.dismissError`.
     /// - Pixel (PhotoCraft): `pixel.tool {name}`, and `pixel.<PhotoCraft command id>` with its
     ///   params (see [`Self::run_pixel`]).
+    /// - The document's one history, across personas (see [`Self::run_history`]): `edit.undo`
+    ///   (Ctrl+Z), `edit.redo` (Shift+Ctrl+Z), `edit.toggleLastState` (Alt+Ctrl+Z),
+    ///   `history.goto {index}` (a row of Pixel's History tab, 0 = the original).
+    ///
+    /// What a command changed in either engine is a history step when it returns, so a step
+    /// made right after it (a script's next command) comes after it.
     pub fn run_with(&mut self, id: &str, params: &Value) -> Result<(), String> {
+        let r = self.dispatch(id, params);
+        self.settle();
+        r
+    }
+
+    fn dispatch(&mut self, id: &str, params: &Value) -> Result<(), String> {
+        if matches!(id, "edit.undo" | "edit.redo" | "edit.toggleLastState" | "history.goto") {
+            return self.run_history(id, params);
+        }
         if let Some(cmd) = id.strip_prefix("document.") {
             return self.run_document(cmd, params);
         }
@@ -279,11 +300,39 @@ impl StudioShell {
         }
     }
 
+    /// `edit.undo`, `edit.redo`, `edit.toggleLastState` (redo if there is one, else undo, as
+    /// PhotoCraft's) and `history.goto {index}` on the open document's one history
+    /// (`studio_doc::history`), whichever engine made the steps. While PhotoCraft has a Free
+    /// Transform, type or a pen path open, undo, redo and the toggle are its own (the box's steps,
+    /// say); a jump applies what is open first.
+    fn run_history(&mut self, id: &str, params: &Value) -> Result<(), String> {
+        let index = params.get("index").and_then(Value::as_u64);
+        let (Some(doc), Some(lr), Some(px)) = (&mut self.document, &mut self.lightroom, &mut self.pixel) else {
+            return Err("no document is open".into());
+        };
+        let ui = &px.app.ui;
+        if id != "history.goto" && (ui.transform.is_some() || ui.text_edit.is_some() || ui.pen.is_some()) {
+            return px.app.run(id, serde_json::json!({})).map(|_| ());
+        }
+        px.apply_pending();
+        let (lr, pc, base) = (&mut lr.app.session, &mut px.app.session, &mut self.base);
+        let redo = id == "edit.redo" || (id == "edit.toggleLastState" && doc.history.can_redo());
+        match id {
+            "history.goto" => doc.goto(lr, pc, base, index.ok_or("history.goto needs an `index`")? as usize),
+            _ if redo => doc.redo(lr, pc, base).map(|_| ()),
+            _ => doc.undo(lr, pc, base).map(|_| ()),
+        }
+    }
+
     /// `pixel.tool {name}` (a Photoshop tool: "brush", "move", "rectMarquee"…), and any PhotoCraft
     /// command as `pixel.<its id>` with its params (`pixel.layer.new.layer`, `pixel.edit.undo`…)
     /// on the open document. It's copied back at once, so a change to the locked Develop layer is
     /// taken back now and the command returns why.
     fn run_pixel(&mut self, cmd: &str, params: &Value) -> Result<(), String> {
+        // PhotoCraft's own undo is the document's one history
+        if matches!(cmd, "edit.undo" | "edit.redo" | "edit.toggleLastState") {
+            return self.run_history(cmd, params);
+        }
         let px = self.pixel.as_mut().ok_or("PhotoCraft isn't running")?;
         // its documents are Studio's to open, save and close
         if cmd.starts_with("file.") {
@@ -402,6 +451,18 @@ impl StudioShell {
         r
     }
 
+    /// What either engine changed since the last look becomes history steps, in the order it was
+    /// made: at the end of every frame (PhotoCraft's logic, panels and dialogs edit during it) and
+    /// after every command. A jump PhotoCraft began itself is finished here (see
+    /// [`Document::reconcile`]).
+    fn settle(&mut self) {
+        let (Some(doc), Some(lr), Some(px)) = (&mut self.document, &mut self.lightroom, &mut self.pixel) else { return };
+        doc.note_develop(&lr.app.session);
+        if let Err(e) = doc.reconcile(&mut lr.app.session, &mut px.app.session) {
+            self.error = Some(("History".to_owned(), e));
+        }
+    }
+
     /// A Develop geometry change waits for its render: PhotoCraft is barred until it lands.
     pub fn develop_rendering(&self) -> bool {
         self.document.as_ref().is_some_and(|d| d.history.pending_follow())
@@ -462,6 +523,13 @@ impl StudioShell {
         }
         if let Some(px) = self.pixel.as_mut().filter(|_| self.persona == Persona::Pixel) {
             px.overlays(ui.ctx());
+        }
+        self.settle();
+        // an undo key held for a gesture in Pixel: the gesture ended this frame (its edit is in)
+        if !ui.input(|i| i.pointer.any_down())
+            && let Some(id) = self.held.take()
+        {
+            self.undo_key(id);
         }
         self.document_prompt(ui.ctx());
         self.error_notice(ui.ctx());
@@ -612,7 +680,8 @@ impl StudioShell {
         let pixel = self.pixel.as_mut().filter(|_| p == Persona::Pixel);
         let rendering = self.document.as_ref().is_some_and(|d| !self.base.up_to_date(d));
         let document = self.document.as_ref().map(|d| d.name.clone());
-        let mut viewer = dock::Viewer { persona: p, lightroom, pixel, rendering, document, reset_requested: false };
+        let history = self.document.as_ref().filter(|_| p == Persona::Pixel).map(|d| (d.history.entries(), d.history.position()));
+        let mut viewer = dock::Viewer { persona: p, lightroom, pixel, rendering, document, reset_requested: false, history, goto: None };
         egui::CentralPanel::default().frame(egui::Frame::NONE.fill(t.divider)).show(ui, |ui| {
             DockArea::new(&mut self.layouts[p as usize])
                 .id(egui::Id::new(("studio.dock", p.id())))
@@ -622,8 +691,14 @@ impl StudioShell {
                 .show_leaf_close_all_buttons(false)
                 .show_inside(ui, &mut viewer);
         });
-        if viewer.reset_requested {
+        let (reset, goto) = (viewer.reset_requested, viewer.goto);
+        if reset {
             let _ = self.run("window.resetWorkspace");
+        }
+        if let Some(index) = goto
+            && let Err(e) = self.run_with("history.goto", &serde_json::json!({"index": index}))
+        {
+            self.error = Some(("History".to_owned(), e));
         }
     }
 
@@ -698,6 +773,23 @@ impl StudioShell {
                 }
             }
         }
+        // The document's one history: Photoshop's undo keys in every persona while a document is
+        // open (without one, LightCraft's own in its personas), never while typing (a text field's
+        // own undo). Taken here, so neither engine's own undo sees them.
+        if self.document.is_some() && !ui.ctx().egui_wants_keyboard_input() {
+            let (cmd, shift, alt) = (egui::Modifiers::COMMAND, egui::Modifiers::SHIFT, egui::Modifiers::ALT);
+            for (mods, id) in [(cmd, "edit.undo"), (cmd | shift, "edit.redo"), (cmd | alt, "edit.toggleLastState")] {
+                if !ui.input_mut(|i| consume_exact(i, mods, egui::Key::Z)) {
+                    continue;
+                }
+                // mid-stroke in Pixel: PhotoCraft commits the stroke at release, then this runs
+                if self.persona == Persona::Pixel && ui.input(|i| i.pointer.any_down()) {
+                    self.held = Some(id);
+                } else {
+                    self.undo_key(id);
+                }
+            }
+        }
         // Lightroom's single keys belong to the Lightroom personas (in Pixel, G and E are Photoshop
         // tools), never while typing, and only bare: Shift+E and the like stay LightCraft's.
         let lightroom = matches!(self.persona, Persona::Library | Persona::Develop | Persona::Film);
@@ -708,6 +800,13 @@ impl StudioShell {
             if ui.input_mut(|i| i.modifiers.is_none() && i.consume_key(egui::Modifiers::NONE, key)) {
                 let _ = self.run(id);
             }
+        }
+    }
+
+    /// An undo key's command; what stops it is shown.
+    fn undo_key(&mut self, id: &str) {
+        if let Err(e) = self.run(id) {
+            self.error = Some(("History".to_owned(), e));
         }
     }
 }
@@ -768,15 +867,28 @@ mod tests {
         assert!(!has_panel(&s, Persona::Library, "Folders"), "other personas are untouched");
     }
 
+    /// Move a panel into a group of its own on the right, as a user dragging its tab would.
+    fn move_panel(s: &mut StudioShell, p: Persona, name: &str) {
+        remove_panel(s, p, name);
+        let dock = &mut s.layouts[p as usize];
+        dock.main_surface_mut().split_right(egui_dock::NodeIndex::root(), 0.9, vec![Tab::Panel(name.to_owned())]);
+    }
+
+    fn where_is(s: &StudioShell, p: Persona, name: &str) -> Option<egui_dock::TabPath> {
+        s.layouts[p as usize].find_tab(&Tab::Panel(name.to_owned()))
+    }
+
     #[test]
     fn shell_state_survives_save_and_restore() {
         let mut s = StudioShell::default();
         s.run("persona.develop").unwrap();
-        remove_panel(&mut s, Persona::Develop, "Presets");
+        move_panel(&mut s, Persona::Develop, "Presets");
+        let moved = where_is(&s, Persona::Develop, "Presets");
+        assert_ne!(moved, where_is(&StudioShell::default(), Persona::Develop, "Presets"));
         let saved = ron::to_string(&s).unwrap();
         let back = StudioShell::restore(Some(ron::from_str(&saved).unwrap()));
         assert_eq!(back.persona, Persona::Develop);
-        assert!(!has_panel(&back, Persona::Develop, "Presets"));
+        assert_eq!(where_is(&back, Persona::Develop, "Presets"), moved);
         assert!(has_panel(&back, Persona::Develop, "History"));
     }
 
@@ -790,10 +902,18 @@ mod tests {
         // the other personas' layouts are kept.
         let mut old = StudioShell::default();
         old.layouts[Persona::Pixel as usize] = dock::default_layout(Persona::Vector);
-        remove_panel(&mut old, Persona::Library, "Folders");
+        move_panel(&mut old, Persona::Library, "Folders");
+        let moved = where_is(&old, Persona::Library, "Folders");
         let back = StudioShell::restore(Some(old));
         assert!(has_panel(&back, Persona::Pixel, "Layers") && !has_panel(&back, Persona::Pixel, "Histogram"));
-        assert!(!has_panel(&back, Persona::Library, "Folders"));
+        assert_eq!(where_is(&back, Persona::Library, "Folders"), moved);
+        // one saved before Pixel had Studio's History tab (milestone 4: PhotoCraft's dock alone)
+        // goes back to default too
+        let mut m4 = StudioShell::default();
+        let mut pixel = DockState::new(vec![Tab::Canvas]);
+        pixel.main_surface_mut().split_right(egui_dock::NodeIndex::root(), 0.76, vec![Tab::Panel("Layers".to_owned())]);
+        m4.layouts[Persona::Pixel as usize] = pixel;
+        assert!(has_panel(&StudioShell::restore(Some(m4)), Persona::Pixel, "History"));
         // A save with the wrong number of layouts doesn't parse, so the app falls back to defaults.
         assert!(ron::from_str::<StudioShell>("(persona: pixel, layouts: [])").is_err());
     }
