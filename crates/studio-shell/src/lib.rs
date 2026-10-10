@@ -912,8 +912,13 @@ impl StudioShell {
     /// A Studio key's command; what stops it is shown (a document command's failure shows itself:
     /// a save's or an open's error, the prompt).
     fn key_command(&mut self, id: &str) {
+        // an undo key queued behind a close in Pixel has no document left: nothing to undo
+        let document = id.starts_with("document.");
+        if !document && self.document.is_none() {
+            return;
+        }
         if let Err(e) = self.run(id)
-            && !id.starts_with("document.")
+            && !document
         {
             self.error = Some(("History".to_owned(), e));
         }

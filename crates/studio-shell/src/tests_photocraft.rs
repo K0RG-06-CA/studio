@@ -1202,6 +1202,23 @@ fn a_stroke_dragged_out_of_the_window_then_cut_short_by_focus_loss_stays_where_i
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// Ctrl+W then Ctrl+Z in one frame in Pixel: the document closes, and the undo queued behind it
+/// is dropped without a word (there is nothing left to undo).
+#[test]
+fn an_undo_key_queued_after_a_close_is_dropped_silently() {
+    let dir = temp_dir("close-undo");
+    let path = dir.join("trip.studio");
+    let mut h = studio();
+    ready_to_paint(&mut h, &path);
+    key(&mut h, egui::Modifiers::COMMAND, egui::Key::W);
+    key(&mut h, egui::Modifiers::COMMAND, egui::Key::Z);
+    h.run_steps(2);
+    assert!(h.state().document.is_none(), "closed");
+    assert_eq!(h.state().error, None, "no error for the undo");
+    assert!(h.state().held.is_empty());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// A stroke undone, then saved (the keys in one frame, as typed fast): the file hasn't got it.
 #[test]
 fn an_undone_stroke_isnt_saved() {
