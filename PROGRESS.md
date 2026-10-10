@@ -449,6 +449,17 @@ debug info), so CI builds without it (`CARGO_PROFILE_DEV_DEBUG: 0`). The smoke s
 steps in one slow frame (`app.quit`, then the prompt's cancel before the close request came back):
 it now runs one step a frame, two frames apart at least.
 
+## Review (M5 task 4): LOW findings left open
+
+- Several files dropped on Pixel at once: only the first opens, the rest silently not.
+- Every import warning goes into one modal, uncapped (a PSD with hundreds of odd layers).
+- A `.studio` file renamed without its extension goes the image way and fails as "not an
+  image" (sniffing the zip would open it).
+- The open dialog's image filter is a fixed list (no "All files"); PhotoCraft reads more.
+- An image (like a `.studio`) is read whole and imported on the UI thread.
+- `reopen()` clears the error modal when the launch's reopen fails (the app reports it; at
+  launch nothing else is shown yet).
+
 ## Review (M5 task 3): LOW findings left open
 
 - Pixel's History tab clones every row and lays every row out each frame (no `show_rows`):
