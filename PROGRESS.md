@@ -247,7 +247,10 @@ See [`PRD.md`](PRD.md) → *Milestones for Claude Code*.
     past a newer Develop step, so Studio's jump took that step and the Pixel step under it;
     only Free Transform (whose box PhotoCraft's `run` steps) is PhotoCraft's now, anything else
     open is applied first, then Studio's undo (design §2; the plan's "type / pen" routing was
-    wrong: PhotoCraft has no undo of its own for them).
+    wrong: PhotoCraft has no undo of its own for them). MEDIUM: a Free Transform left open
+    on leaving Pixel took Ctrl+Z in Develop (it stepped the hidden box, the Develop edit stayed);
+    the shell's `flush` (every persona switch, `unsaved()`) now applies what PhotoCraft has open,
+    after the barrier, as design §2's flush says.
   - [ ] 4. A document without a photo: PNG/JPEG/TIFF/PSD straight into Pixel
   - [ ] 5. Save/close flush and render identity
   - [ ] 6. Round trip end to end, smoke, docs, limitations

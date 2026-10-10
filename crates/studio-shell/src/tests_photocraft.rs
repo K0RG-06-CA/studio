@@ -1023,3 +1023,46 @@ fn ctrl_z_with_a_pen_path_open_undoes_one_step() {
     assert!(layer_names(doc).iter().any(|n| n == "Paint"), "the Pixel step under the Develop one stays");
     assert_eq!(doc.history.entries().len() - 1 - doc.history.position(), 1, "one step undone");
 }
+
+/// Review: leaving Pixel applies what PhotoCraft has open (design §2's flush), so a Free
+/// Transform left open doesn't take Ctrl+Z in Develop: the Develop edit made there is undone,
+/// then the transform, in the order they were made.
+#[test]
+fn leaving_pixel_applies_a_free_transform_so_ctrl_z_elsewhere_is_the_historys() {
+    let mut h = studio();
+    h.run_steps(3);
+    pick_first(&mut h);
+    h.state_mut().run("document.new").unwrap();
+    settle_base(&mut h);
+    h.state_mut().run("persona.pixel").unwrap();
+    h.run_steps(3);
+    let session = &mut h.state_mut().pixel.as_mut().unwrap().app.session;
+    session
+        .edit("Paint", |d, active| {
+            let mut l = Layer::raster("Painted", PixelFormat::RGBA16);
+            l.surface_mut().unwrap().write_region(photocraft_geom::Rect::from_xywh(10, 10, 20, 20), &[1.0, 0.0, 0.0, 1.0].repeat(400));
+            *active = Some(l.id);
+            d.layers.push(l);
+            Ok(())
+        })
+        .unwrap();
+    h.run_steps(2);
+    press(&mut h, egui::Modifiers::COMMAND, egui::Key::T);
+    press(&mut h, egui::Modifiers::NONE, egui::Key::ArrowRight);
+    h.run_steps(3);
+    assert!(h.state().pixel.as_ref().unwrap().app.ui.transform.is_some());
+    h.state_mut().run("persona.develop").unwrap();
+    assert!(h.state().pixel.as_ref().unwrap().app.ui.transform.is_none(), "applied on the way out");
+    h.run_steps(2);
+    set_exposure(&mut h, 1.0);
+    let left = |h: &Harness<'_, crate::StudioShell>| {
+        let doc = &h.state().document.as_ref().unwrap().pixel;
+        let l = doc.layers.iter().find(|l| l.name == "Painted").unwrap();
+        photocraft_compose::bounds::content_bounds(l.surface().unwrap()).x0
+    };
+    assert_eq!(left(&h), 11);
+    press(&mut h, egui::Modifiers::COMMAND, egui::Key::Z);
+    assert_eq!((exposure(&h), left(&h)), (0.0, 11), "the Develop edit, made last");
+    press(&mut h, egui::Modifiers::COMMAND, egui::Key::Z);
+    assert_eq!(left(&h), 10, "then the transform");
+}

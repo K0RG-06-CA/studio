@@ -433,7 +433,6 @@ impl StudioShell {
         // lands before (one that can't render was undone, and says so)
         let _ = self.flush();
         if let (Some(doc), Some(px)) = (&mut self.document, &mut self.pixel) {
-            px.apply_pending();
             doc.copy_back(&mut px.app.session);
         }
         self.document.as_ref().is_some_and(Document::unsaved)
@@ -441,10 +440,13 @@ impl StudioShell {
 
     /// Settle the document before a decision on it ([`Document::flush`]): a drag ends, a Develop
     /// geometry change waiting for its render lands as the step's Pixel half (see
-    /// `studio_doc::follow`), PhotoCraft's edits are reconciled.
+    /// `studio_doc::follow`), PhotoCraft's edits are reconciled, and what it has open (a Free
+    /// Transform, type, a pen path) is applied, as picking another tool would: leaving Pixel
+    /// leaves nothing open for an undo key elsewhere to reach.
     fn flush(&mut self) -> Result<(), String> {
         let (Some(doc), Some(lr), Some(px)) = (&mut self.document, &mut self.lightroom, &mut self.pixel) else { return Ok(()) };
         let r = doc.flush(&mut lr.app.session, &mut px.app.session, &mut self.base);
+        px.apply_pending();
         if let Err(e) = &r {
             self.base_error = Some(e.clone());
         }
