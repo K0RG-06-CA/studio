@@ -290,7 +290,10 @@ See [`PRD.md`](PRD.md) → *Milestones for Claude Code*.
     through the prompt); the document's photo is now made the picked one whenever a document
     becomes the open one (a multi-selection that already has it active is kept). The M4
     fixture (9,216 bytes) names a demo scene, which LightCraft generates in code: both fixture
-    tests passed with `samples/` moved away, the shell one's base render included.
+    tests passed with `samples/` moved away, the shell one's base render included. MEDIUM:
+    the `.studio`-only save refused a name typed without an extension (Linux's save dialog
+    passes it on as typed), which saved before task 4; such a name now gets `.studio`, only
+    another extension is refused.
   - [ ] 5. Save/close flush and render identity
   - [ ] 6. Round trip end to end, smoke, docs, limitations
 

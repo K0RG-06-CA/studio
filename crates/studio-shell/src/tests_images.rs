@@ -243,3 +243,20 @@ fn an_opened_document_becomes_the_picked_photo_so_pixel_keeps_it() {
     let doc = h.state().document.as_ref().unwrap();
     assert_eq!((doc.photo(), doc.path.as_deref(), h.state().prompt.as_ref()), (Some(photos[0]), Some(path.as_path()), None));
 }
+
+/// Review: a name typed without an extension in the save dialog (Linux's doesn't add one) is
+/// saved as a `.studio` file; only another extension is refused.
+#[test]
+fn a_save_to_a_name_without_an_extension_gets_studios() {
+    let dir = temp_dir("image-noext");
+    let png = image(&dir, "flat.png");
+    let mut h = studio();
+    h.run_steps(3);
+    open(&mut h, &png).unwrap();
+    let typed = dir.join("trip");
+    h.state_mut().pick_save_path = Some(Box::new(move |_| Some(typed.clone())));
+    h.state_mut().run("document.saveAs").unwrap();
+    let want = dir.join("trip.studio");
+    assert_eq!(h.state().document.as_ref().unwrap().path.as_deref(), Some(want.as_path()));
+    assert!(want.exists() && !dir.join("trip").exists());
+}

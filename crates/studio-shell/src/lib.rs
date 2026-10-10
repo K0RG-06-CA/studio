@@ -402,10 +402,14 @@ impl StudioShell {
             (None, None) if save_as => return Err("document.saveAs needs a `path`".into()),
             (None, None) => return Err("this document has no file yet: use document.saveAs".into()),
         };
-        // only ever a .studio file: a document opened from an image is never written over it
-        if !path.extension().is_some_and(|e| e.eq_ignore_ascii_case(studio_doc::file::EXTENSION)) {
-            return Err(format!("Studio saves .{} documents, not {}", studio_doc::file::EXTENSION, path.display()));
-        }
+        // only ever a .studio file: a document opened from an image is never written over it (a
+        // name typed without an extension, which some save dialogs pass on as typed, gets it)
+        let ext = studio_doc::file::EXTENSION;
+        let path = match path.extension() {
+            None => path.with_extension(ext),
+            Some(e) if e.eq_ignore_ascii_case(ext) => path,
+            Some(_) => return Err(format!("Studio saves .{ext} documents, not {}", path.display())),
+        };
         self.document.as_mut().ok_or("no document is open")?.save(&path)?;
         self.document_path = Some(path);
         Ok(())
