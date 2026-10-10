@@ -315,6 +315,12 @@ See [`PRD.md`](PRD.md) → *Milestones for Claude Code*.
     before undo keys, no focus-loss release, the queue only on a release event, the stale-render
     hash check and marking a failed save saved each turn a test red. Closes the task 3 LOW on
     releases egui never sees.
+    Review of task 5 (2026-10-10, one commit per fix, test red first). HIGH: a stroke dragged
+    out of the window and then cut short by losing focus was released at (0,0) (egui forgets
+    the pointer once it leaves), painting a segment to the window's corner; the release now
+    goes where the shell last saw the pointer. Asked by the user: an undo key queued behind a
+    close (Ctrl+W then Ctrl+Z in one frame) is dropped silently instead of showing "History: no
+    document is open".
   - [ ] 6. Round trip end to end, smoke, docs, limitations
 
   **Upstream limitations found so far (each gets its failing-when-fixed test in task 6):**
@@ -468,6 +474,22 @@ After the review: CI ran out of disk on ubuntu-latest (`ld` Bus error, 30 MB lef
 debug info), so CI builds without it (`CARGO_PROFILE_DEV_DEBUG: 0`). The smoke script ran several
 steps in one slow frame (`app.quit`, then the prompt's cancel before the close request came back):
 it now runs one step a frame, two frames apart at least.
+
+## Review (M5 task 5): LOW findings left open
+
+- In Pixel, Studio's keys run at the end of the frame, PhotoCraft's own keys during it: two
+  keys in one frame from both (Ctrl+Z then Shift+Ctrl+N) run PhotoCraft's first. Before task 5
+  the mirror case (Shift+Ctrl+N then Ctrl+Z) was the wrong one.
+- Persona keys (Ctrl+1..4) still run at once, ahead of document keys pressed before them in
+  the same frame; a Ctrl+S then Ctrl+2 in one frame isn't a save (it was the same before).
+- A real release and a focus loss in the same input batch get a second, synthetic release for
+  the same button (egui's state is the previous frame's); for a short click that may count as a
+  double click.
+- `document.new` from Ctrl+N failing (no photo picked) is silent, as before task 5.
+- `StudioShell::pointer` is `pub` for the same reason as `held` (`main.rs`'s
+  `..Default::default()`).
+- The interrupted-save test relies on a read-only folder refusing new files on Unix: it would
+  fail run as root.
 
 ## Review (M5 task 4): LOW findings left open
 
