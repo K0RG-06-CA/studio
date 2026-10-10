@@ -23,12 +23,13 @@ use studio_shell::StudioShell;
 /// Milestone 5: first an image file (`smoke.png`, written at start) opens as a document without a
 /// photo, in Pixel, is edited, undone and closed; later, on the photo's document, one history
 /// across personas: a Develop edit and a Pixel layer undone and redone in order, and a rotation
-/// (the layers follow) undone. An entry `id file` runs `id` on that file in the data folder.
+/// (the layers follow) undone. An entry `id arg` runs `id` with an argument: a file in the data
+/// folder, or `discard` for a close that throws the changes away.
 const SCRIPT: &[&str] = &[
     "document.open smoke.png",
     "pixel.layer.new.layer",
     "edit.undo",
-    "document.close",
+    "document.close discard",
     "persona.develop",
     "window.resetWorkspace",
     "document.new",
@@ -79,13 +80,14 @@ const PNG: [u8; 82] = [
     78, 68, 174, 66, 96, 130,
 ];
 
-/// A script command's parameters (`file`: the entry's file, if it names one).
-fn params(id: &str, file: Option<&str>) -> serde_json::Value {
-    match id {
-        "document.saveAs" | "document.open" => serde_json::json!({"path": dir().join(file.unwrap_or(DOCUMENT))}),
-        // the image's edit is thrown away (its undo leaves the document changed)
-        "document.close" => serde_json::json!({"discard": true}),
-        "pixel.tool" => serde_json::json!({"name": "brush"}),
+/// A script command's parameters (`arg`: the entry's argument, if it has one).
+fn params(id: &str, arg: Option<&str>) -> serde_json::Value {
+    match (id, arg) {
+        ("document.saveAs" | "document.open", file) => serde_json::json!({"path": dir().join(file.unwrap_or(DOCUMENT))}),
+        // the image's edit is thrown away (its undo leaves the document changed); any other close
+        // must find the document saved, or it fails
+        ("document.close", Some("discard")) => serde_json::json!({"discard": true}),
+        ("pixel.tool", _) => serde_json::json!({"name": "brush"}),
         _ => serde_json::Value::Null,
     }
 }
@@ -183,7 +185,7 @@ impl Script {
         self.frames = self.frames.saturating_add(1);
         if self.next < SCRIPT.len() && self.frames > 2 && now - start.max(self.last) >= STEP {
             let entry = SCRIPT[self.next];
-            let (id, file) = entry.split_once(' ').map_or((entry, None), |(id, file)| (id, Some(file)));
+            let (id, arg) = entry.split_once(' ').map_or((entry, None), |(id, arg)| (id, Some(arg)));
             println!("smoke: {entry} ({:.1} s)", now - start);
             if id == "document.prompt.cancel" && shell.prompt.is_none() {
                 fail("app.quit with an unsaved document didn't ask first");
@@ -201,7 +203,7 @@ impl Script {
                     }
                     _ => Err("no document open in LightCraft".into()),
                 },
-                None => shell.run_with(id, &params(id, file)),
+                None => shell.run_with(id, &params(id, arg)),
             };
             if let Err(e) = r {
                 fail(format!("{id}: {e}"));
@@ -261,4 +263,18 @@ pub fn finish(result: eframe::Result) -> ExitCode {
     }
     println!("smoke: ok");
     ExitCode::SUCCESS
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Review: only the image's close discards; the close right after the save must find the
+    /// document saved (a save that left it unsaved fails the script there).
+    #[test]
+    fn only_the_close_marked_discard_discards() {
+        assert!(SCRIPT.contains(&"document.close discard") && SCRIPT.contains(&"document.close"));
+        assert_eq!(params("document.close", Some("discard")), serde_json::json!({"discard": true}));
+        assert_eq!(params("document.close", None), serde_json::Value::Null);
+    }
 }
