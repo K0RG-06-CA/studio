@@ -294,7 +294,27 @@ See [`PRD.md`](PRD.md) → *Milestones for Claude Code*.
     the `.studio`-only save refused a name typed without an extension (Linux's save dialog
     passes it on as typed), which saved before task 4; such a name now gets `.studio`, only
     another extension is refused.
-  - [ ] 5. Save/close flush and render identity
+  - [x] 5. Save/close flush and render identity (2026-10-10). Most of it was already in place
+    and tested: every `document.*` command, a window close and `save_for_exit` settle the
+    document first (`unsaved()` → `flush`); renders carry (generation, settings hash) since
+    task 2; saves go through PhotoCraft's `atomic_write` (temp file + rename). New tests: a
+    late render for an undone Develop edit lands nowhere (the base keeps the saved settings,
+    nothing renders again, the file stays byte for byte); a save over an existing file that
+    can't complete (file and folder read-only) keeps the old bytes, shows why, leaves the
+    document unsaved and no temp file. Neither needed code. What did (design change, approved
+    by the user): Studio's keys in Pixel ran by kind at the start of the frame, before
+    PhotoCraft committed a stroke, so Ctrl+S in the release frame or mid-stroke wrote the file
+    without it, and Ctrl+Z then Ctrl+S in one frame saved first. Now the document keys and the
+    undo keys in Pixel are taken in the order pressed (`take_keys`) into the `held` queue,
+    which runs at the end of every frame in which no button is down, after the stroke is in.
+    egui keeps a button down whose release it never sees (focus lost mid-stroke, Alt+Tab): the
+    shell's raw input hook in Pixel releases every button down when the window loses focus, so
+    the stroke ends (Photoshop's way) and held keys run. Tests: Ctrl+S in the release frame and
+    mid-stroke save the stroke; an undone stroke isn't saved; a stroke cut short by focus loss
+    ends and its held save runs. Mutation-checked: running Pixel keys at once, document keys
+    before undo keys, no focus-loss release, the queue only on a release event, the stale-render
+    hash check and marking a failed save saved each turn a test red. Closes the task 3 LOW on
+    releases egui never sees.
   - [ ] 6. Round trip end to end, smoke, docs, limitations
 
   **Upstream limitations found so far (each gets its failing-when-fixed test in task 6):**
@@ -464,8 +484,8 @@ it now runs one step a frame, two frames apart at least.
 
 - Pixel's History tab clones every row and lays every row out each frame (no `show_rows`):
   O(steps) per frame, at most `HISTORY_STEPS` (1000).
-- An undo key held for a stroke whose release egui never sees (button let go outside the
-  window) runs at the next release.
+- ~~An undo key held for a stroke whose release egui never sees (button let go outside the
+  window) runs at the next release.~~ Fixed in task 5: losing focus releases the buttons.
 - A Free Transform opened before a Develop rotation stays open over the rotated layers until
   applied (its box predates the follow); applying it is PhotoCraft's own transform of the box.
 - `history.goto` with a non-integer index says it "needs an `index`".

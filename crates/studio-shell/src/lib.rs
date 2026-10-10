@@ -87,8 +87,9 @@ pub struct StudioShell {
     /// prompt's answer): (title, why), shown until dismissed (`document.dismissError`).
     #[serde(skip)]
     pub error: Option<(String, String)>,
-    /// Undo keys pressed during a stroke or drag in Pixel, in order: each runs once the gesture
-    /// has ended and its edit is in (PhotoCraft's gesture is its own until release).
+    /// Studio's keys pressed in Pixel (document and undo keys), in order: each runs at the end of
+    /// the frame once no button is down, so a stroke has ended and its edit is in (PhotoCraft's
+    /// gesture is its own until release).
     #[serde(skip)]
     pub held: Vec<&'static str>,
 }
@@ -586,6 +587,9 @@ impl StudioShell {
     /// egui-winit turns Ctrl+C/X/V into Copy/Cut/Paste events (and drops Ctrl+V when the
     /// clipboard holds an image), which PhotoCraft gives back to its pixel commands as key presses.
     pub fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
+        if self.persona == Persona::Pixel {
+            release_on_focus_loss(ctx, raw);
+        }
         if let Some(px) = self.pixel.as_mut().filter(|_| self.persona == Persona::Pixel) {
             eframe::App::raw_input_hook(&mut px.app, ctx, raw);
         }
@@ -634,10 +638,11 @@ impl StudioShell {
             px.overlays(ui.ctx());
         }
         self.settle();
-        // undo keys held for a gesture in Pixel: the gesture ended this frame (its edit is in)
+        // Studio's keys pressed in Pixel, in order, once no button is down (checked every frame):
+        // a stroke that ended this frame is in first, so a save writes it and an undo takes it
         if !ui.input(|i| i.pointer.any_down()) {
             for id in std::mem::take(&mut self.held) {
-                self.undo_key(id);
+                self.key_command(id);
             }
         }
         self.document_prompt(ui.ctx());
@@ -862,41 +867,26 @@ impl StudioShell {
         if !self.persona.lightroom() && ui.input_mut(|i| i.consume_shortcut(&quit)) {
             let _ = self.run("app.quit");
         }
-        // Pixel: PhotoCraft's own file shortcuts would act on its session, not on the document.
-        // Photoshop's keys for Studio's document commands instead (Open and Save As through the
-        // desktop's dialogs).
-        if self.persona == Persona::Pixel {
-            let (cmd, shift) = (egui::Modifiers::COMMAND, egui::Modifiers::COMMAND | egui::Modifiers::SHIFT);
-            let keys = [
-                (shift, egui::Key::S, "document.saveAs"),
-                (cmd, egui::Key::S, "document.save"),
-                (cmd, egui::Key::N, "document.new"),
-                (cmd, egui::Key::W, "document.close"),
-                (cmd, egui::Key::O, "document.open"),
-            ];
-            for (mods, key, id) in keys {
-                if ui.input_mut(|i| consume_exact(i, mods, key)) {
-                    // failures show themselves (a save's or an open's error, the prompt)
-                    let _ = self.run(id);
-                }
-            }
-        }
         // The document's one history: Photoshop's undo keys in every persona while a document is
         // open (without one, LightCraft's own in its personas), never while typing (a text field's
-        // own undo). Taken here, so neither engine's own undo sees them.
+        // own undo). Pixel: PhotoCraft's own file shortcuts would act on its session, not on the
+        // document; Photoshop's keys for Studio's document commands instead (Open and Save As
+        // through the desktop's dialogs). Taken here, so neither engine sees them.
+        let mut keys = Vec::new();
+        if self.persona == Persona::Pixel {
+            keys.extend(DOCUMENT_KEYS);
+        }
         if self.document.is_some() && !ui.ctx().egui_wants_keyboard_input() {
-            let (cmd, shift, alt) = (egui::Modifiers::COMMAND, egui::Modifiers::SHIFT, egui::Modifiers::ALT);
-            for (mods, id) in [(cmd, "edit.undo"), (cmd | shift, "edit.redo"), (cmd | alt, "edit.toggleLastState")] {
-                if !ui.input_mut(|i| consume_exact(i, mods, egui::Key::Z)) {
-                    continue;
-                }
-                // mid-stroke in Pixel: PhotoCraft commits the stroke at release, then these run, in
-                // order (a key in the release frame, before the commit, waits behind them too)
-                if self.persona == Persona::Pixel && (ui.input(|i| i.pointer.any_down()) || !self.held.is_empty()) {
-                    self.held.push(id);
-                } else {
-                    self.undo_key(id);
-                }
+            keys.extend(UNDO_KEYS);
+        }
+        let pressed = ui.input_mut(|i| take_keys(i, &keys));
+        if self.persona == Persona::Pixel {
+            // PhotoCraft commits a stroke at release, later in the frame: they run in the order
+            // pressed at the end of the frame, once no button is down (see `ui`)
+            self.held.extend(pressed);
+        } else {
+            for id in pressed {
+                self.key_command(id);
             }
         }
         // Lightroom's single keys belong to the Lightroom personas (in Pixel, G and E are Photoshop
@@ -912,20 +902,66 @@ impl StudioShell {
         }
     }
 
-    /// An undo key's command; what stops it is shown.
-    fn undo_key(&mut self, id: &str) {
-        if let Err(e) = self.run(id) {
+    /// A Studio key's command; what stops it is shown (a document command's failure shows itself:
+    /// a save's or an open's error, the prompt).
+    fn key_command(&mut self, id: &str) {
+        if let Err(e) = self.run(id)
+            && !id.starts_with("document.")
+        {
             self.error = Some(("History".to_owned(), e));
         }
     }
 }
 
-/// Take a press of `key` with exactly `mods` (egui's `consume_shortcut` ignores extra Shift and
-/// Alt, so Ctrl+N would take PhotoCraft's Shift+Ctrl+N New Layer).
-fn consume_exact(i: &mut egui::InputState, mods: egui::Modifiers, key: egui::Key) -> bool {
-    let before = i.events.len();
-    i.events.retain(|e| !matches!(e, egui::Event::Key { key: k, pressed: true, modifiers: m, .. } if *k == key && m.matches_exact(mods)));
-    i.events.len() != before
+/// A button let go while the window has no focus (Alt+Tab mid-stroke) is never reported, and
+/// egui keeps it down until the next click: the window losing focus releases every button egui
+/// has down, so a stroke ends (Photoshop's way) and the keys held for it run.
+fn release_on_focus_loss(ctx: &egui::Context, raw: &mut egui::RawInput) {
+    if !raw.events.iter().any(|e| matches!(e, egui::Event::WindowFocused(false))) {
+        return;
+    }
+    use egui::PointerButton::{Extra1, Extra2, Middle, Primary, Secondary};
+    let (pos, down) = ctx.input(|i| {
+        let pos = i.pointer.interact_pos().or(i.pointer.latest_pos()).unwrap_or_default();
+        (pos, [Primary, Secondary, Middle, Extra1, Extra2].into_iter().filter(|&b| i.pointer.button_down(b)).collect::<Vec<_>>())
+    });
+    for button in down {
+        raw.events.push(egui::Event::PointerButton { pos, button, pressed: false, modifiers: egui::Modifiers::NONE });
+    }
+}
+
+const CMD: egui::Modifiers = egui::Modifiers::COMMAND;
+
+/// Studio's document keys in Pixel.
+const DOCUMENT_KEYS: [(egui::Modifiers, egui::Key, &str); 5] = [
+    (CMD.plus(egui::Modifiers::SHIFT), egui::Key::S, "document.saveAs"),
+    (CMD, egui::Key::S, "document.save"),
+    (CMD, egui::Key::N, "document.new"),
+    (CMD, egui::Key::W, "document.close"),
+    (CMD, egui::Key::O, "document.open"),
+];
+
+/// The document's history keys (Photoshop's).
+const UNDO_KEYS: [(egui::Modifiers, egui::Key, &str); 3] = [
+    (CMD, egui::Key::Z, "edit.undo"),
+    (CMD.plus(egui::Modifiers::SHIFT), egui::Key::Z, "edit.redo"),
+    (CMD.plus(egui::Modifiers::ALT), egui::Key::Z, "edit.toggleLastState"),
+];
+
+/// Take the presses of `keys`, each with exactly its modifiers (egui's `consume_shortcut`
+/// ignores extra Shift and Alt, so Ctrl+N would take PhotoCraft's Shift+Ctrl+N New Layer): their
+/// commands, in the order pressed.
+fn take_keys(i: &mut egui::InputState, keys: &[(egui::Modifiers, egui::Key, &'static str)]) -> Vec<&'static str> {
+    let mut ids = Vec::new();
+    i.events.retain(|e| {
+        let id = match e {
+            egui::Event::Key { key, pressed: true, modifiers, .. } => keys.iter().find(|(m, k, _)| k == key && modifiers.matches_exact(*m)),
+            _ => None,
+        };
+        ids.extend(id.map(|k| k.2));
+        id.is_none()
+    });
+    ids
 }
 
 fn shortcut_text(ui: &egui::Ui, p: Persona) -> String {

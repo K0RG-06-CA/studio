@@ -1073,3 +1073,182 @@ fn undo_keys_pressed_twice_mid_stroke_each_count_in_order() {
         h.state_mut().run_with("history.goto", &serde_json::json!({"index": 0})).unwrap();
     }
 }
+
+// --- Milestone 5, task 5: save and close settle the document first ---
+
+/// A rendered document saved to `path`, open in Pixel with the brush on a new empty layer
+/// (saved too).
+fn ready_to_paint(h: &mut Harness<'_, crate::StudioShell>, path: &std::path::Path) {
+    h.run_steps(3);
+    pick_first(h);
+    h.state_mut().run("document.new").unwrap();
+    settle_base(h);
+    h.state_mut().run("persona.pixel").unwrap();
+    h.run_steps(3);
+    h.state_mut().run("pixel.layer.new.layer").unwrap();
+    h.state_mut().run_with("pixel.tool", &serde_json::json!({"name": "brush"})).unwrap();
+    h.state_mut().run_with("document.saveAs", &serde_json::json!({"path": path})).unwrap();
+    h.run_steps(2);
+}
+
+/// Press the button on the canvas and drag: a stroke in progress (not released).
+fn stroke_down(h: &mut Harness<'_, crate::StudioShell>) -> egui::Pos2 {
+    let c = pixel_leaf(h, &crate::dock::Tab::Canvas).center();
+    h.event(egui::Event::PointerMoved(c));
+    h.event(egui::Event::PointerButton { pos: c, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE });
+    h.run_steps(1);
+    for i in 1..6 {
+        h.event(egui::Event::PointerMoved(c + egui::vec2(8.0 * i as f32, 4.0 * i as f32)));
+        h.run_steps(1);
+    }
+    c + egui::vec2(40.0, 20.0)
+}
+
+fn release(h: &mut Harness<'_, crate::StudioShell>, at: egui::Pos2) {
+    h.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE });
+}
+
+fn key(h: &mut Harness<'_, crate::StudioShell>, modifiers: egui::Modifiers, key: egui::Key) {
+    h.input_mut().events.push(egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers });
+}
+
+/// The top layer of the file at `path` has paint on it.
+fn saved_painted(path: &std::path::Path) -> bool {
+    let saved = studio_doc::Document::open(path).unwrap();
+    saved.pixel.layers.last().unwrap().surface().unwrap().tile_count() > 0
+}
+
+/// Ctrl+S in the frame a stroke ends, or while it is still being drawn: the file has the stroke
+/// (a save never writes half a stroke, nor one without it) and the document is saved.
+#[test]
+fn ctrl_s_with_a_stroke_ending_or_in_progress_saves_the_stroke() {
+    let dir = temp_dir("stroke-save");
+    for held in [false, true] {
+        let path = dir.join(format!("held-{held}.studio"));
+        let mut h = studio();
+        ready_to_paint(&mut h, &path);
+        let end = stroke_down(&mut h);
+        if held {
+            key(&mut h, egui::Modifiers::COMMAND, egui::Key::S);
+            h.run_steps(1);
+            assert!(!saved_painted(&path), "held: nothing is saved under the stroke");
+        }
+        release(&mut h, end);
+        if !held {
+            key(&mut h, egui::Modifiers::COMMAND, egui::Key::S);
+        }
+        h.run_steps(2);
+        assert!(saved_painted(&path), "held: {held}: the stroke is in the file");
+        assert!(!h.state().document.as_ref().unwrap().unsaved(), "held: {held}: and saved");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The window loses focus mid-stroke (Alt+Tab), so its release is never reported: the stroke
+/// ends anyway, and a save pressed during it runs, with it, instead of waiting for a next click.
+#[test]
+fn a_stroke_cut_short_by_losing_focus_ends_and_the_save_held_for_it_runs() {
+    let dir = temp_dir("focus-save");
+    let path = dir.join("trip.studio");
+    let mut h = studio();
+    ready_to_paint(&mut h, &path);
+    stroke_down(&mut h);
+    key(&mut h, egui::Modifiers::COMMAND, egui::Key::S);
+    h.run_steps(2);
+    assert!(!saved_painted(&path) && !h.state().held.is_empty(), "waiting for the stroke");
+    let mut raw = egui::RawInput { events: vec![egui::Event::WindowFocused(false)], ..Default::default() };
+    let ctx = h.ctx.clone();
+    h.state_mut().raw_input_hook(&ctx, &mut raw);
+    h.input_mut().events.extend(raw.events);
+    h.run_steps(2);
+    assert!(!h.ctx.input(|i| i.pointer.any_down()), "the button is up");
+    assert!(saved_painted(&path), "the stroke ended and the held save wrote it");
+    assert!(h.state().held.is_empty() && !h.state().document.as_ref().unwrap().unsaved());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A stroke undone, then saved (the keys in one frame, as typed fast): the file hasn't got it.
+#[test]
+fn an_undone_stroke_isnt_saved() {
+    let dir = temp_dir("undo-save");
+    let path = dir.join("trip.studio");
+    let mut h = studio();
+    ready_to_paint(&mut h, &path);
+    let end = stroke_down(&mut h);
+    release(&mut h, end);
+    h.run_steps(2);
+    assert!(h.state().document.as_ref().unwrap().unsaved());
+    key(&mut h, egui::Modifiers::COMMAND, egui::Key::Z);
+    key(&mut h, egui::Modifiers::COMMAND, egui::Key::S);
+    h.run_steps(2);
+    assert!(!saved_painted(&path), "the undone stroke isn't in the file");
+    assert!(!h.state().document.as_ref().unwrap().unsaved());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A render still in flight for a Develop edit that is undone and saved: it lands nowhere (the
+/// base keeps showing the saved settings, nothing renders again) and the file stays as saved.
+#[test]
+fn a_late_render_for_an_undone_develop_edit_is_dropped_and_the_file_is_unchanged() {
+    let dir = temp_dir("late-render");
+    let path = dir.join("trip.studio");
+    let mut h = studio();
+    h.run_steps(3);
+    pick_first(&mut h);
+    h.state_mut().run("document.new").unwrap();
+    settle_base(&mut h);
+    h.state_mut().run_with("document.saveAs", &serde_json::json!({"path": path})).unwrap();
+    let shown = h.state().document.as_ref().unwrap().shown_hash();
+    let started = h.state().base.started();
+    set_exposure(&mut h, 1.0);
+    assert!(h.state().base.rendering() && h.state().base.started() == started + 1, "the edit's render is in flight");
+    h.state_mut().run("edit.undo").unwrap();
+    h.state_mut().run("document.save").unwrap();
+    let bytes = std::fs::read(&path).unwrap();
+    let t0 = std::time::Instant::now();
+    while h.state().base.rendering() {
+        assert!(t0.elapsed() < std::time::Duration::from_secs(300), "the render never finished");
+        h.run_steps(1);
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    h.run_steps(2);
+    let doc = h.state().document.as_ref().unwrap();
+    assert_eq!(doc.shown_hash(), shown, "the base still shows the saved settings");
+    assert_eq!(h.state().base.started(), started + 1, "and needs no new render");
+    assert!(!doc.unsaved());
+    assert_eq!(std::fs::read(&path).unwrap(), bytes, "the file is as saved");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A save over an existing file that can't be completed (the file and its folder read-only:
+/// Windows refuses to replace the file, Unix to create the temporary one beside it) leaves the
+/// old file as it was, says why, and keeps the document unsaved.
+#[test]
+fn an_interrupted_save_keeps_the_old_file_and_says_why() {
+    let dir = temp_dir("save-interrupted");
+    let path = dir.join("trip.studio");
+    let mut h = studio();
+    pixel_edited(&mut h, &path);
+    let old = std::fs::read(&path).unwrap();
+    let readonly = |p: &std::path::Path| {
+        let before = std::fs::metadata(p).unwrap().permissions();
+        let mut ro = before.clone();
+        ro.set_readonly(true);
+        std::fs::set_permissions(p, ro).unwrap();
+        before
+    };
+    let (file, folder) = (readonly(&path), readonly(&dir));
+    let r = h.state_mut().run("document.save");
+    h.run_steps(2);
+    std::fs::set_permissions(&dir, folder).unwrap();
+    std::fs::set_permissions(&path, file).unwrap();
+    let why = r.unwrap_err();
+    assert_eq!(std::fs::read(&path).unwrap(), old, "the old file is untouched");
+    assert!(h.state().document.as_ref().unwrap().unsaved(), "the edit is still unsaved");
+    let name = h.state().document.as_ref().unwrap().name.clone();
+    h.get_by_label(format!("Couldn\u{2019}t save \u{201c}{name}\u{201d}").as_str());
+    h.get_by_label(why.as_str());
+    let left: Vec<_> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name()).collect();
+    assert_eq!(left, [std::ffi::OsString::from("trip.studio")], "no temporary file left behind");
+    let _ = std::fs::remove_dir_all(&dir);
+}
