@@ -1066,3 +1066,44 @@ fn leaving_pixel_applies_a_free_transform_so_ctrl_z_elsewhere_is_the_historys() 
     press(&mut h, egui::Modifiers::COMMAND, egui::Key::Z);
     assert_eq!(left(&h), 10, "then the transform");
 }
+
+/// Review: every undo key pressed during one stroke counts, in order, once the stroke is in:
+/// Ctrl+Z twice undoes the stroke and the step before it; Ctrl+Z then Shift+Ctrl+Z undoes the
+/// stroke and redoes it.
+#[test]
+fn undo_keys_pressed_twice_mid_stroke_each_count_in_order() {
+    let mut h = studio();
+    h.run_steps(3);
+    pick_first(&mut h);
+    h.state_mut().run("document.new").unwrap();
+    settle_base(&mut h);
+    h.state_mut().run("persona.pixel").unwrap();
+    h.run_steps(3);
+    h.state_mut().run_with("pixel.tool", &serde_json::json!({"name": "brush"})).unwrap();
+    let painted = |h: &Harness<'_, crate::StudioShell>| {
+        let doc = &h.state().document.as_ref().unwrap().pixel;
+        doc.layers.len() == 2 && doc.layers[1].surface().unwrap().tile_count() > 0
+    };
+    let c = pixel_leaf(&h, &crate::dock::Tab::Canvas).center();
+    let (cmd, shift) = (egui::Modifiers::COMMAND, egui::Modifiers::SHIFT);
+    for (keys, want) in [([cmd, cmd], (1, false)), ([cmd, cmd | shift], (2, true))] {
+        h.state_mut().run("pixel.layer.new.layer").unwrap();
+        h.run_steps(2);
+        h.event(egui::Event::PointerMoved(c));
+        h.event(egui::Event::PointerButton { pos: c, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE });
+        h.run_steps(1);
+        for i in 1..6 {
+            h.event(egui::Event::PointerMoved(c + egui::vec2(8.0 * i as f32, 4.0 * i as f32)));
+            h.run_steps(1);
+        }
+        for mods in keys {
+            press(&mut h, mods, egui::Key::Z);
+        }
+        let end = c + egui::vec2(40.0, 20.0);
+        h.event(egui::Event::PointerButton { pos: end, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE });
+        h.run_steps(3);
+        assert_eq!((layer_count(&h), painted(&h)), want, "{keys:?}");
+        // back to just the Develop layer for the next round
+        h.state_mut().run_with("history.goto", &serde_json::json!({"index": 0})).unwrap();
+    }
+}

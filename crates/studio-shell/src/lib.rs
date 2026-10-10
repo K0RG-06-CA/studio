@@ -80,10 +80,10 @@ pub struct StudioShell {
     /// prompt's answer): (title, why), shown until dismissed (`document.dismissError`).
     #[serde(skip)]
     pub error: Option<(String, String)>,
-    /// An undo key pressed during a stroke or drag in Pixel: it runs once the gesture has ended
-    /// and its edit is in (PhotoCraft's gesture is its own until release).
+    /// Undo keys pressed during a stroke or drag in Pixel, in order: each runs once the gesture
+    /// has ended and its edit is in (PhotoCraft's gesture is its own until release).
     #[serde(skip)]
-    pub held: Option<&'static str>,
+    pub held: Vec<&'static str>,
 }
 
 /// What a save returns when its dialog was cancelled: not a failure, nothing to show.
@@ -120,7 +120,7 @@ impl Default for StudioShell {
             close_window: false,
             pick_save_path: None,
             error: None,
-            held: None,
+            held: Vec::new(),
         }
     }
 }
@@ -527,11 +527,11 @@ impl StudioShell {
             px.overlays(ui.ctx());
         }
         self.settle();
-        // an undo key held for a gesture in Pixel: the gesture ended this frame (its edit is in)
-        if !ui.input(|i| i.pointer.any_down())
-            && let Some(id) = self.held.take()
-        {
-            self.undo_key(id);
+        // undo keys held for a gesture in Pixel: the gesture ended this frame (its edit is in)
+        if !ui.input(|i| i.pointer.any_down()) {
+            for id in std::mem::take(&mut self.held) {
+                self.undo_key(id);
+            }
         }
         self.document_prompt(ui.ctx());
         self.error_notice(ui.ctx());
@@ -784,9 +784,10 @@ impl StudioShell {
                 if !ui.input_mut(|i| consume_exact(i, mods, egui::Key::Z)) {
                     continue;
                 }
-                // mid-stroke in Pixel: PhotoCraft commits the stroke at release, then this runs
-                if self.persona == Persona::Pixel && ui.input(|i| i.pointer.any_down()) {
-                    self.held = Some(id);
+                // mid-stroke in Pixel: PhotoCraft commits the stroke at release, then these run, in
+                // order (a key in the release frame, before the commit, waits behind them too)
+                if self.persona == Persona::Pixel && (ui.input(|i| i.pointer.any_down()) || !self.held.is_empty()) {
+                    self.held.push(id);
                 } else {
                     self.undo_key(id);
                 }

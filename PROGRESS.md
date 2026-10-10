@@ -250,7 +250,10 @@ See [`PRD.md`](PRD.md) → *Milestones for Claude Code*.
     wrong: PhotoCraft has no undo of its own for them). MEDIUM: a Free Transform left open
     on leaving Pixel took Ctrl+Z in Develop (it stepped the hidden box, the Develop edit stayed);
     the shell's `flush` (every persona switch, `unsaved()`) now applies what PhotoCraft has open,
-    after the barrier, as design §2's flush says.
+    after the barrier, as design §2's flush says. MEDIUM: a second undo key during one stroke
+    replaced the first (Ctrl+Z twice undid only the stroke; Ctrl+Z then Shift+Ctrl+Z lost the
+    undo); held keys are a queue now, each runs in order once the stroke is in: Ctrl+Z twice =
+    the stroke and the step before it (user's question: defined, tested).
   - [ ] 4. A document without a photo: PNG/JPEG/TIFF/PSD straight into Pixel
   - [ ] 5. Save/close flush and render identity
   - [ ] 6. Round trip end to end, smoke, docs, limitations
