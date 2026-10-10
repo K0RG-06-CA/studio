@@ -526,6 +526,19 @@ impl History {
     }
 }
 
+#[cfg(test)]
+impl History {
+    /// No step owns more than one PhotoCraft state (a Pixel step is made with one, a Develop step
+    /// gets at most its follow): what a kept step's undo and the review's MEDIUM (task 2) rest
+    /// on. Steps get states only in the diff and are made only there and in `note_develop`, so
+    /// checking after those two checks it after every operation of every test in this crate.
+    fn assert_one_state_per_step(&self) {
+        for s in self.steps.iter().chain(&self.redo) {
+            assert!(s.pixel.len() <= 1, "step \u{201c}{}\u{201d} owns {} PhotoCraft states", s.label, s.pixel.len());
+        }
+    }
+}
+
 /// How many of the newest `steps` own exactly the states `wanted` (oldest first): `Some(Some(n))`
 /// when they are all Pixel-only, `Some(None)` when a Develop step is among them, `None` when the
 /// states aren't theirs.
@@ -569,6 +582,8 @@ impl Document {
             self.develop = (*now).clone();
             self.revision += 1;
         }
+        #[cfg(test)]
+        self.history.assert_one_state_per_step();
     }
 
     pub(crate) fn reconcile_pixel(&mut self, px: &mut PixelSession) {
@@ -576,6 +591,8 @@ impl Document {
             self.history.reconcile(px, id);
             self.link.forget_gone();
         }
+        #[cfg(test)]
+        self.history.assert_one_state_per_step();
     }
 
     /// Copy back what PhotoCraft changed, and finish a jump it began itself (its own undo or redo

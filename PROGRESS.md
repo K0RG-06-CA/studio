@@ -210,7 +210,10 @@ See [`PRD.md`](PRD.md) → *Milestones for Claude Code*.
     PhotoCraft's undo/redo returns false mid-loop"); tests: PhotoCraft's history gone behind
     Studio's back, and injected move failures (`History::fail_moves`, tests only). MEDIUM not
     applicable: no step ever owns more than one PhotoCraft state (a Pixel step is made with one,
-    a Develop step gets at most its follow), so a kept step can't point at a pruned state. Not done here: `bench.rs` peak bytes during
+    a Develop step gets at most its follow), so a kept step can't point at a pruned state; this
+    is now asserted after every reconcile and every Develop note in every studio-doc test
+    (`History::assert_one_state_per_step`, tests only; mutation-checked: giving one step every
+    state appended in one reconcile fails three tests) (2026-10-10). Not done here: `bench.rs` peak bytes during
     a follow (waits for the slow-frame fix); a single-channel Channels-panel restriction
     on `edit.transform` during a follow is untested.
   - [ ] 3. Shell: commands, shortcuts, Studio's History panel, reconcile points
