@@ -333,6 +333,10 @@ See [`PRD.md`](PRD.md) → *Milestones for Claude Code*.
     document a Develop edit and a Pixel layer undone ×2 and redone ×2, a rotation undone; the
     relaunch now expects 3 Pixel layers); PRD note (the undo history is per session). Left:
     the smoke test on DX12 (asks first).
+    Review of task 6 (2026-10-10, one commit per fix, test red first). MEDIUM: every
+    `document.close` in the smoke script discarded, so the close right after the save no
+    longer failed if the save left the document unsaved; only the image's close
+    (`document.close discard`) discards now (unit test on the script's parameters).
 
   **Upstream limitations (M5), each with a test that fails once upstream fixes it:**
   - L8 PhotoCraft `History` can't jump to or replace a state: Studio jumps step by step, and an
@@ -503,6 +507,17 @@ After the review: CI ran out of disk on ubuntu-latest (`ld` Bus error, 30 MB lef
 debug info), so CI builds without it (`CARGO_PROFILE_DEV_DEBUG: 0`). The smoke script ran several
 steps in one slow frame (`app.quit`, then the prompt's cancel before the close request came back):
 it now runs one step a frame, two frames apart at least.
+
+## Review (M5 task 6): LOW findings left open
+
+- L8 and L12 call the missing method (`st.history.state_mut(0)`, `pop_oldest()`) instead of
+  naming it as a path: Studio can't name `photocraft_ops::History` without a new dependency, so
+  a method upstream adds with other arguments keeps the doctest passing.
+- The smoke script checks that the M5 commands run without an error, not what they did (the
+  undo order, the follow): the kittests check that.
+- The embedded `smoke.png` is only decoded by the smoke test (no unit test opens it).
+- `lightcraft:` commands other than `photo.rotateLeft` all get the exposure parameters.
+- The journey test destructures with `let … else { panic!() }` (tests only; allowed).
 
 ## Review (M5 task 5): LOW findings left open
 
