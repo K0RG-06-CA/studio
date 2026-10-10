@@ -45,6 +45,6 @@ fn smoke() {
     let (ok, out, err) = run(&dir, 2);
     assert!(ok && out.contains("smoke: ok"), "run 2 failed\n{out}\n{err}");
     assert!(out.contains("smoke: restored persona develop") && out.contains("smoke: restored document smoke.studio"), "{out}");
-    assert!(out.contains("smoke: restored pixel layers 2"), "the Pixel layer was saved: {out}");
+    assert!(out.contains("smoke: restored pixel layers 3"), "both Pixel layers were saved: {out}");
     let _ = std::fs::remove_dir_all(&dir);
 }

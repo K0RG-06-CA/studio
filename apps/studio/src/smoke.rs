@@ -19,8 +19,16 @@ use studio_shell::StudioShell;
 /// (`lightcraft:` runs a LightCraft command), and quit with: the quit must stop at the "save
 /// changes?" prompt, which is cancelled before saving. Then Pixel (PhotoCraft) adds a layer, undoes
 /// and redoes it, and the quit must ask again before it is saved. The next run opens it at launch,
-/// with its Pixel layer.
+/// with its Pixel layers.
+/// Milestone 5: first an image file (`smoke.png`, written at start) opens as a document without a
+/// photo, in Pixel, is edited, undone and closed; later, on the photo's document, one history
+/// across personas: a Develop edit and a Pixel layer undone and redone in order, and a rotation
+/// (the layers follow) undone. An entry `id file` runs `id` on that file in the data folder.
 const SCRIPT: &[&str] = &[
+    "document.open smoke.png",
+    "pixel.layer.new.layer",
+    "edit.undo",
+    "document.close",
     "persona.develop",
     "window.resetWorkspace",
     "document.new",
@@ -43,6 +51,16 @@ const SCRIPT: &[&str] = &[
     "app.quit",
     "document.prompt.cancel",
     "document.save",
+    "lightcraft:develop.set",
+    "persona.pixel",
+    "pixel.layer.new.layer",
+    "edit.undo",
+    "edit.undo",
+    "edit.redo",
+    "edit.redo",
+    "lightcraft:photo.rotateLeft",
+    "edit.undo",
+    "document.save",
     "persona.library",
     "window.resetWorkspace",
     "view.loupe",
@@ -53,11 +71,20 @@ const SCRIPT: &[&str] = &[
 const STEP: f64 = 0.4;
 /// The document file the script saves and opens.
 const DOCUMENT: &str = "smoke.studio";
+/// The image file the script opens as a document without a photo (16 × 16, one colour).
+const IMAGE: &str = "smoke.png";
+const PNG: [u8; 82] = [
+    137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 16, 0, 0, 0, 16, 8, 6, 0, 0, 0, 31, 243, 255, 97, 0, 0, 0, 25, 73, 68, 65,
+    84, 120, 218, 99, 56, 17, 160, 241, 159, 18, 204, 48, 106, 192, 168, 1, 163, 6, 12, 23, 3, 0, 2, 0, 63, 31, 39, 32, 101, 142, 0, 0, 0, 0, 73, 69,
+    78, 68, 174, 66, 96, 130,
+];
 
-/// A script command's parameters.
-fn params(id: &str) -> serde_json::Value {
+/// A script command's parameters (`file`: the entry's file, if it names one).
+fn params(id: &str, file: Option<&str>) -> serde_json::Value {
     match id {
-        "document.saveAs" | "document.open" => serde_json::json!({"path": dir().join(DOCUMENT)}),
+        "document.saveAs" | "document.open" => serde_json::json!({"path": dir().join(file.unwrap_or(DOCUMENT))}),
+        // the image's edit is thrown away (its undo leaves the document changed)
+        "document.close" => serde_json::json!({"discard": true}),
         "pixel.tool" => serde_json::json!({"name": "brush"}),
         _ => serde_json::Value::Null,
     }
@@ -131,6 +158,9 @@ impl Script {
         if let Some(d) = &shell.document {
             println!("smoke: restored pixel layers {}", d.pixel.layers.len());
         }
+        if let Err(e) = std::fs::write(dir().join(IMAGE), PNG) {
+            fail(format!("{IMAGE}: {e}"));
+        }
         Script { start: None, last: 0.0, frames: 0, next: 0, closing: false }
     }
 
@@ -152,8 +182,9 @@ impl Script {
         }
         self.frames = self.frames.saturating_add(1);
         if self.next < SCRIPT.len() && self.frames > 2 && now - start.max(self.last) >= STEP {
-            let id = SCRIPT[self.next];
-            println!("smoke: {id} ({:.1} s)", now - start);
+            let entry = SCRIPT[self.next];
+            let (id, file) = entry.split_once(' ').map_or((entry, None), |(id, file)| (id, Some(file)));
+            println!("smoke: {entry} ({:.1} s)", now - start);
             if id == "document.prompt.cancel" && shell.prompt.is_none() {
                 fail("app.quit with an unsaved document didn't ask first");
             }
@@ -162,11 +193,15 @@ impl Script {
                 Some(lc) => match (&mut shell.lightroom, &shell.document) {
                     (Some(lr), Some(doc)) => {
                         let value = (doc.develop.light.exposure + 0.25) % 2.0;
-                        lr.app.run(lc, serde_json::json!({"control": "light.exposure", "value": value})).map(|_| ()).map_err(|e| e.to_string())
+                        let params = match (lc, doc.photo()) {
+                            ("photo.rotateLeft", Some(id)) => serde_json::json!({"ids": [id.0]}),
+                            _ => serde_json::json!({"control": "light.exposure", "value": value}),
+                        };
+                        lr.app.run(lc, params).map(|_| ()).map_err(|e| e.to_string())
                     }
                     _ => Err("no document open in LightCraft".into()),
                 },
-                None => shell.run_with(id, &params(id)),
+                None => shell.run_with(id, &params(id, file)),
             };
             if let Err(e) = r {
                 fail(format!("{id}: {e}"));

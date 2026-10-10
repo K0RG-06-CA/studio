@@ -1304,3 +1304,87 @@ fn an_interrupted_save_keeps_the_old_file_and_says_why() {
     assert_eq!(left, [std::ffi::OsString::from("trip.studio")], "no temporary file left behind");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+// --- Milestone 5, task 6: the round trip end to end ---
+
+/// What a journey step changes: (exposure, layers, the paint's bounds if any, canvas size).
+type Snap = (f64, usize, Option<(i32, i32, i32, i32)>, (u32, u32));
+
+fn snap(h: &Harness<'_, crate::StudioShell>) -> Snap {
+    let doc = &h.state().document.as_ref().unwrap().pixel;
+    let paint = doc.layers.get(1).and_then(|l| l.surface()).filter(|s| s.tile_count() > 0).map(|s| {
+        let b = photocraft_compose::bounds::content_bounds(s);
+        (b.x0, b.y0, b.x1, b.y1)
+    });
+    (exposure(h), doc.layers.len(), paint, (doc.size.width, doc.size.height))
+}
+
+/// Milestone 5 from start to end: a photo picked, Pixel makes its document; a Develop edit, a new
+/// layer and a stroke in Pixel, a rotation in Develop that the paint follows; Ctrl+Z walks the one
+/// history back in order and Shift+Ctrl+Z forward again, from Develop and from Pixel; saved,
+/// reopened (settings and layers kept, the history starts empty) and closed.
+#[test]
+fn journey_pick_pixel_develop_paint_rotate_undo_redo_save_reopen_close() {
+    let dir = temp_dir("journey");
+    let path = dir.join("journey.studio");
+    let mut h = studio();
+    h.run_steps(3);
+    pick_first(&mut h);
+    h.state_mut().run("persona.pixel").unwrap();
+    settle_base(&mut h);
+    let mut states = vec![snap(&h)];
+    // Develop: an edit
+    h.state_mut().run("persona.develop").unwrap();
+    set_exposure(&mut h, 1.0);
+    settle_base(&mut h);
+    states.push(snap(&h));
+    // Pixel: a new layer, and a brush stroke on it
+    h.state_mut().run("persona.pixel").unwrap();
+    h.run_steps(3);
+    h.state_mut().run("pixel.layer.new.layer").unwrap();
+    h.state_mut().run_with("pixel.tool", &serde_json::json!({"name": "brush"})).unwrap();
+    h.run_steps(2);
+    states.push(snap(&h));
+    let end = stroke_down(&mut h);
+    release(&mut h, end);
+    h.run_steps(2);
+    states.push(snap(&h));
+    // Develop: rotate left; the paint follows the photo
+    h.state_mut().run("persona.develop").unwrap();
+    h.run_steps(2);
+    rotate_left(&mut h);
+    settle_base(&mut h);
+    states.push(snap(&h));
+    let (_, _, Some((x0, y0, x1, y1)), (w, height)) = states[3] else { panic!("no paint: {:?}", states[3]) };
+    assert_eq!(states[4].3, (height, w), "the canvas turned");
+    assert_eq!(states[4].2, Some((y0, w as i32 - x1, y1, w as i32 - x0)), "the paint turned with the photo");
+    let kinds: Vec<_> = h.state().document.as_ref().unwrap().history.entries().into_iter().map(|e| (e.develop, e.pixel)).collect();
+    assert_eq!(kinds, [(false, false), (true, false), (false, true), (false, true), (true, true)]);
+    let (cmd, shift) = (egui::Modifiers::COMMAND, egui::Modifiers::COMMAND | egui::Modifiers::SHIFT);
+    for persona in ["persona.develop", "persona.pixel"] {
+        h.state_mut().run(persona).unwrap();
+        h.run_steps(2);
+        for i in (0..4).rev() {
+            press(&mut h, cmd, egui::Key::Z);
+            assert_eq!(snap(&h), states[i], "{persona}: undo to {i}");
+        }
+        for (i, state) in states.iter().enumerate().skip(1) {
+            press(&mut h, shift, egui::Key::Z);
+            assert_eq!(&snap(&h), state, "{persona}: redo to {i}");
+        }
+    }
+    settle_base(&mut h);
+    h.state_mut().run_with("document.saveAs", &serde_json::json!({"path": path})).unwrap();
+    h.state_mut().run("document.close").unwrap();
+    assert!(h.state().document.is_none());
+    h.state_mut().run_with("document.open", &serde_json::json!({"path": path})).unwrap();
+    settle_base(&mut h);
+    assert_eq!(snap(&h), states[4], "reopened as saved");
+    let doc = h.state().document.as_ref().unwrap();
+    assert_ne!(doc.develop.orientation, Default::default(), "the rotation kept");
+    assert_eq!(doc.history.entries().len(), 1, "the history is per session: only the original");
+    h.state_mut().run("document.close").unwrap();
+    assert!(h.state().document.is_none());
+    assert!(h.state().pixel.as_ref().unwrap().app.session.documents().is_empty());
+    let _ = std::fs::remove_dir_all(&dir);
+}

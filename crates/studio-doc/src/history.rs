@@ -26,6 +26,56 @@
 //! prunes Develop-only steps from the oldest end itself; a step that owns a Pixel state can only
 //! go when PhotoCraft drops that state, which it does only inside `record` (`max_states`) or `trim`
 //! (bytes), never on demand (L12), so the step cap can lag by one Pixel state.
+//!
+//! PhotoCraft's limitations (`d836e34`); each `compile_fail` example compiles, and so its doctest
+//! fails, once upstream adds what it names. The example after each is the same shape with an API
+//! that exists, so the first can't pass on a typo.
+//!
+//! **L8** `History` can't jump to or replace a state: Studio jumps step by step, and an old base
+//! render stays alive in every state that shows it until the byte cap prunes it.
+//!
+//! ```compile_fail
+//! fn replace(st: &mut photocraft_engine::DocState) {
+//!     let _ = st.history.state_mut(0);
+//! }
+//! ```
+//!
+//! ```
+//! fn read(st: &mut photocraft_engine::DocState) {
+//!     let _ = st.history.state(0);
+//! }
+//! ```
+//!
+//! **L9** `History` isn't `Serialize`: the undo history doesn't survive save and reopen (it is
+//! per session).
+//!
+//! ```compile_fail
+//! fn saved<T: serde::Serialize>(_: &T) {}
+//! fn save(st: &photocraft_engine::DocState) {
+//!     saved(&st.history);
+//! }
+//! ```
+//!
+//! ```
+//! fn saved<T: serde::Serialize>(_: &T) {}
+//! fn save(st: &photocraft_engine::DocState) {
+//!     saved(&st.path);
+//! }
+//! ```
+//!
+//! **L12** `History` can't drop its oldest state on demand (see Memory above).
+//!
+//! ```compile_fail
+//! fn prune(st: &mut photocraft_engine::DocState) {
+//!     let _ = st.history.pop_oldest();
+//! }
+//! ```
+//!
+//! ```
+//! fn prune(st: &mut photocraft_engine::DocState) {
+//!     let _ = st.history.purge_last();
+//! }
+//! ```
 
 use std::collections::HashSet;
 use std::sync::{Arc, Weak};

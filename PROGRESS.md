@@ -321,12 +321,41 @@ See [`PRD.md`](PRD.md) → *Milestones for Claude Code*.
     goes where the shell last saw the pointer. Asked by the user: an undo key queued behind a
     close (Ctrl+W then Ctrl+Z in one frame) is dropped silently instead of showing "History: no
     document is open".
-  - [ ] 6. Round trip end to end, smoke, docs, limitations
+  - [ ] 6. Round trip end to end, smoke, docs, limitations (in progress, 2026-10-10). Done:
+    journey kittest (`journey_pick_pixel_develop_paint_rotate_undo_redo_save_reopen_close`:
+    pick → Pixel makes the document → Develop exposure → a new layer and a brush stroke in
+    Pixel → Rotate Left in Develop, the stroke's bounds turn with the photo → Ctrl+Z ×4 back to
+    the original, each state as it was, then Shift+Ctrl+Z ×4, from Develop and again from Pixel
+    → save → close → reopen: same settings, layers and paint, the history only the original →
+    close, PhotoCraft empty); L8–L12 `compile_fail` doctests, each with a compiling twin (L9
+    through a generic `T: Serialize` bound); smoke script with the M5 commands (`smoke.png`, an
+    embedded 16 × 16 PNG written at start, opened, edited, undone, closed; on the photo's
+    document a Develop edit and a Pixel layer undone ×2 and redone ×2, a rotation undone; the
+    relaunch now expects 3 Pixel layers); PRD note (the undo history is per session). Left:
+    the smoke test on DX12 (asks first).
 
-  **Upstream limitations found so far (each gets its failing-when-fixed test in task 6):**
+  **Upstream limitations (M5), each with a test that fails once upstream fixes it:**
+  - L8 PhotoCraft `History` can't jump to or replace a state: Studio jumps step by step, and an
+    old base render stays alive in every state that shows it until the byte cap prunes it
+    (`compile_fail` doctest naming `state_mut`, `history.rs`).
+  - L9 PhotoCraft `History` isn't `Serialize`: undo doesn't survive save and reopen
+    (`compile_fail` doctest, a `T: Serialize` bound on `DocState.history`).
+  - L10 PhotoCraft has no multi-layer `edit.transform`, and `transform_cmds::transform_layer` is
+    `pub(crate)`: a follow runs one command per top-level layer under a copy of the history
+    (`compile_fail` doctest, `follow.rs`).
+  - L11 LightCraft's lens warp maps rendered → source only: layers can't follow a change of the
+    lens corrections (`compile_fail` doctest naming `optics::Warp::from_source`).
   - L12 PhotoCraft `History` can't drop its oldest state on demand (only inside `record` via
     `max_states` or `trim` via bytes): a Pixel step at the oldest end of Studio's history goes at
-    PhotoCraft's next `record` (Studio lowers `max_states` for it), so the step cap can lag by one.
+    PhotoCraft's next `record` (Studio lowers `max_states` for it), so the step cap can lag by one
+    (`compile_fail` doctest naming `pop_oldest`).
+
+  **Left for later (not M5):** layers following an Upright change (a homography; Studio's own
+  simplification, not upstream) or a lens-correction change (L11); the undo history surviving
+  save and reopen (L9); a Pixel selection following a Develop geometry change; a History tab in
+  Develop (Pixel has Studio's; Develop shows LightCraft's own); asking before picking another
+  photo replaces a saved document; raws and SVGs passed to `document.open` going through
+  Library instead of PhotoCraft's importer.
 - [ ] **6. MCP** — one MCP server exposing commands from every persona.
 - [ ] **7. ARM64 + Linux builds** — CI on Windows ARM64/x64 and Linux ARM64/x64; downloadable .exe and AppImage/.deb.
 

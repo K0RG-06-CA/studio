@@ -14,6 +14,33 @@
 //! offsets, bicubic otherwise. The per-layer steps run under a copy of PhotoCraft's history, which
 //! is put back afterwards, so the follow is one recorded state ("Develop: Rotate Left") and
 //! `past_len()` grows by exactly one.
+//!
+//! Upstream limitations; each `compile_fail` example compiles, and so its doctest fails, once
+//! upstream makes public what it names. The example after each names a public neighbour, so the
+//! first can't pass on a typo.
+//!
+//! **L10** PhotoCraft has no multi-layer `edit.transform`, and the per-layer function under it is
+//! `pub(crate)` (`d836e34`): hence one command per top-level layer under a copy of the history.
+//!
+//! ```compile_fail
+//! let _ = photocraft_engine::transform_cmds::transform_layer;
+//! ```
+//!
+//! ```
+//! let _ = photocraft_engine::transform_cmds::transform_bounds;
+//! ```
+//!
+//! **L11** LightCraft's lens warp maps rendered → source only (`eeb136b`): layers can't follow a
+//! change of the lens corrections (they stay, with a notice). Upright, a homography, is a Studio
+//! simplification left for later, not an upstream limit.
+//!
+//! ```compile_fail
+//! let _ = lightcraft_engine::pipeline::optics::Warp::from_source;
+//! ```
+//!
+//! ```
+//! let _ = lightcraft_engine::pipeline::optics::Warp::from_settings;
+//! ```
 
 use std::sync::Arc;
 

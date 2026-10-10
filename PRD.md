@@ -239,7 +239,7 @@ Each milestone ends with something you can open and click. Give Claude Code one 
 2. **Library + Develop:** embed LightCraft's library and develop views as two personas. Match Lightroom Classic panel positions and shortcuts (G, D, E, R, \\).
 3. **Shared document:** define the one document model (layer tree + develop settings) and save format. Develop edits become a non-destructive base layer.
 4. **Pixel persona:** bring in PhotoCraft tools with Photoshop's layout: tool bar left, options bar on top, Layers and Properties on the right.
-5. **Round trip:** Library to Develop to Pixel and back on one document, with one undo history across personas.
+5. **Round trip:** Library to Develop to Pixel and back on one document, with one undo history across personas. The undo history is per session, as in Photoshop: a saved document reopens with its settings and layers and an empty history (PhotoCraft's history can't be saved, L9).
 6. **MCP:** one MCP server that exposes commands from every persona.
 7. **ARM64 + Linux builds:** CI builds and runs tests on Windows ARM64, Windows x64, Linux ARM64 and Linux x64; downloadable builds for each (.exe and a Linux AppImage or .deb). Check this from milestone 1 onward, not only at the end.
 
