@@ -1003,3 +1003,23 @@ fn a_pixel_edit_and_a_develop_command_right_after_it_keep_their_order() {
     let kinds: Vec<_> = h.state().document.as_ref().unwrap().history.entries().into_iter().map(|e| (e.develop, e.pixel)).collect();
     assert_eq!(kinds, [(false, false), (false, true), (true, false)]);
 }
+
+/// Review: what PhotoCraft has open is no reason to skip Studio's order. A pen path still open
+/// (no keyboard focus, so Ctrl+Z is Studio's) is applied, then the newest step goes: one step,
+/// never the Develop step and the Pixel step under it.
+#[test]
+fn ctrl_z_with_a_pen_path_open_undoes_one_step() {
+    let mut h = studio();
+    both_engines_edited(&mut h);
+    h.state_mut().run("persona.pixel").unwrap();
+    h.run_steps(3);
+    let app = &mut h.state_mut().pixel.as_mut().unwrap().app;
+    app.ui.tool = photocraft_ui_egui::state::Tool::Pen;
+    photocraft_ui_egui::vector_ui::pen_down(app, 50.0, 50.0);
+    photocraft_ui_egui::vector_ui::pen_up(app);
+    assert!(app.ui.pen.is_some(), "a pen path is open");
+    press(&mut h, egui::Modifiers::COMMAND, egui::Key::Z);
+    let doc = h.state().document.as_ref().unwrap();
+    assert!(layer_names(doc).iter().any(|n| n == "Paint"), "the Pixel step under the Develop one stays");
+    assert_eq!(doc.history.entries().len() - 1 - doc.history.position(), 1, "one step undone");
+}

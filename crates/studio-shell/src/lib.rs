@@ -303,15 +303,15 @@ impl StudioShell {
     /// `edit.undo`, `edit.redo`, `edit.toggleLastState` (redo if there is one, else undo, as
     /// PhotoCraft's) and `history.goto {index}` on the open document's one history
     /// (`studio_doc::history`), whichever engine made the steps. While PhotoCraft has a Free
-    /// Transform, type or a pen path open, undo, redo and the toggle are its own (the box's steps,
-    /// say); a jump applies what is open first.
+    /// Transform open, undo, redo and the toggle are its own (they step the box, which its
+    /// `run` intercepts); anything else open (type, a pen path) is applied first, as before a
+    /// jump, so it is the newest step (PhotoCraft's plain undo would reach past a Develop step).
     fn run_history(&mut self, id: &str, params: &Value) -> Result<(), String> {
         let index = params.get("index").and_then(Value::as_u64);
         let (Some(doc), Some(lr), Some(px)) = (&mut self.document, &mut self.lightroom, &mut self.pixel) else {
             return Err("no document is open".into());
         };
-        let ui = &px.app.ui;
-        if id != "history.goto" && (ui.transform.is_some() || ui.text_edit.is_some() || ui.pen.is_some()) {
+        if id != "history.goto" && px.app.ui.transform.is_some() {
             return px.app.run(id, serde_json::json!({})).map(|_| ());
         }
         px.apply_pending();

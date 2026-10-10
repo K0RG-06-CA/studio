@@ -242,7 +242,12 @@ See [`PRD.md`](PRD.md) → *Milestones for Claude Code*.
     margin-less tab; fixed). Mutation-checked: the end-of-frame reconcile, holding the key
     mid-stroke, the text-field guard and the document guard each turn their test red. Not
     done: Studio's History tab in Develop (left for later, plan); the smoke script's new
-    commands (task 6).
+    commands (task 6). Review of task 3 (2026-10-10, one commit per fix, test red first):
+    HIGH: with a pen path (or type) open, undo went to PhotoCraft's plain undo, which reached
+    past a newer Develop step, so Studio's jump took that step and the Pixel step under it;
+    only Free Transform (whose box PhotoCraft's `run` steps) is PhotoCraft's now, anything else
+    open is applied first, then Studio's undo (design §2; the plan's "type / pen" routing was
+    wrong: PhotoCraft has no undo of its own for them).
   - [ ] 4. A document without a photo: PNG/JPEG/TIFF/PSD straight into Pixel
   - [ ] 5. Save/close flush and render identity
   - [ ] 6. Round trip end to end, smoke, docs, limitations
