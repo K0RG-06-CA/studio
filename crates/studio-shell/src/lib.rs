@@ -437,6 +437,14 @@ impl StudioShell {
         if let Some(px) = &mut self.pixel {
             doc.attach(&mut px.app.session);
         }
+        // its photo is the one picked: Develop shows it, and clicking Pixel again keeps the
+        // document instead of replacing it with whatever was picked before it was opened
+        if let (Some(id), Some(lr)) = (doc.photo(), &mut self.lightroom)
+            && lr.app.session.selection.active != Some(id)
+        {
+            lr.app.session.selection.ids = vec![id];
+            lr.app.session.selection.active = Some(id);
+        }
         let photo = doc.source.is_some();
         self.document = Some(doc);
         self.base = self.base.renewed();

@@ -216,3 +216,30 @@ fn a_file_saved_by_milestone_4_opens() {
     assert_eq!(lr.develop_of(doc.photo().unwrap()).unwrap().light.exposure, 0.7);
     assert!(doc.base_layer().unwrap().surface().unwrap().tile_count() > 0, "its base renders");
 }
+
+/// Review: the document opened (or reopened at launch) is the photo picked in LightCraft, so a
+/// trip to Library and back to Pixel keeps it rather than replacing it with whatever was picked
+/// before (and Develop shows its photo).
+#[test]
+fn an_opened_document_becomes_the_picked_photo_so_pixel_keeps_it() {
+    let dir = temp_dir("image-reopen");
+    let path = dir.join("a.studio");
+    let mut h = studio();
+    h.run_steps(3);
+    let photos: Vec<_> = h.state().lightroom.as_ref().unwrap().app.session.catalog.photos().map(|p| p.id).take(2).collect();
+    let active = |h: &Harness<'_, StudioShell>| h.state().lightroom.as_ref().unwrap().app.session.selection.active;
+    h.state_mut().lightroom.as_mut().unwrap().app.session.selection.active = Some(photos[0]);
+    h.state_mut().run("document.new").unwrap();
+    settle_base(&mut h);
+    h.state_mut().run_with("document.saveAs", &serde_json::json!({"path": path})).unwrap();
+    h.state_mut().run("document.close").unwrap();
+    // another photo picked, then the file opened from Pixel
+    h.state_mut().lightroom.as_mut().unwrap().app.session.selection.active = Some(photos[1]);
+    h.state_mut().run("persona.pixel").unwrap();
+    h.state_mut().run_with("document.open", &serde_json::json!({"path": path, "discard": true})).unwrap();
+    assert_eq!(active(&h), Some(photos[0]), "its photo is the one picked");
+    h.state_mut().run("persona.library").unwrap();
+    h.state_mut().run("persona.pixel").unwrap();
+    let doc = h.state().document.as_ref().unwrap();
+    assert_eq!((doc.photo(), doc.path.as_deref(), h.state().prompt.as_ref()), (Some(photos[0]), Some(path.as_path()), None));
+}

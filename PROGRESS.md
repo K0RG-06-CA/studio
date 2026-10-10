@@ -284,6 +284,13 @@ See [`PRD.md`](PRD.md) → *Milestones for Claude Code*.
     drop, not replacing a photo-less document, the warnings modal and opening in Pixel each
     turn a test red. Not done: raws and SVGs opened this way go through PhotoCraft too (its
     importer takes them; a raw belongs in Library, left for later).
+    Review of task 4 (2026-10-10, one commit per fix, test red first). HIGH: opening a
+    `.studio` (or reopening one at launch) left LightCraft's earlier pick in place, so the next
+    Library-and-back-to-Pixel replaced the document with that photo (at once if saved, else
+    through the prompt); the document's photo is now made the picked one whenever a document
+    becomes the open one (a multi-selection that already has it active is kept). The M4
+    fixture (9,216 bytes) names a demo scene, which LightCraft generates in code: both fixture
+    tests passed with `samples/` moved away, the shell one's base render included.
   - [ ] 5. Save/close flush and render identity
   - [ ] 6. Round trip end to end, smoke, docs, limitations
 
