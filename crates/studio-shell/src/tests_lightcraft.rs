@@ -377,6 +377,36 @@ fn open_library_is_off_while_a_document_is_open() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// LightCraft's Settings has its own Open Library… button (it runs `app.openLibrary` directly,
+/// past the menu): off while a document is open too, and the folder dialog is back for its other
+/// uses once Settings closes.
+#[test]
+fn settings_open_library_is_off_while_a_document_is_open() {
+    let dir = temp_dir("t2m-settings-library");
+    let mut h = file_library(&dir, &dir.join("beach.png"));
+    let button = |h: &mut Harness<'_, StudioShell>| {
+        let lr = h.state_mut().lightroom.as_mut().unwrap();
+        lr.app.run("app.settings", serde_json::json!({"tab": "general"})).unwrap();
+        h.run_steps(3);
+        let on = !h.get_by_label("Open Library\u{2026}").accesskit_node().is_disabled();
+        h.state_mut().lightroom.as_mut().unwrap().app.ui.dialog = None;
+        h.run_steps(2);
+        on
+    };
+    assert!(button(&mut h), "on without a document");
+    h.state_mut().run("document.new").unwrap();
+    settle_base(&mut h);
+    assert!(!button(&mut h), "off with one");
+    assert!(lc(&h).services.pick_folder.is_some(), "the folder dialog is back once Settings closes");
+    h.state_mut().run("document.close").unwrap();
+    h.run_steps(2);
+    assert!(button(&mut h), "on again once it closes");
+    let lr = h.state_mut().lightroom.as_mut().unwrap();
+    lr.app.session.close_library().unwrap();
+    drop(h);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// Photo › Delete (and its Delete key) never takes the document's photo; another photo's still
 /// goes.
 #[test]

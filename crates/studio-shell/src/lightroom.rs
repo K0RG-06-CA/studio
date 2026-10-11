@@ -119,9 +119,18 @@ impl Lightroom {
         }
     }
 
-    /// LightCraft's whole window (panels, overlays, its Quit), in `ui`.
-    pub fn ui(&mut self, ui: &mut egui::Ui) {
+    /// LightCraft's whole window (panels, overlays, its Quit), in `ui`. With a document open
+    /// (`document`), the library under it stays: its Settings' Open Library… and its
+    /// library-problem window's Choose… open another library through its folder dialog, which is
+    /// held back while either shows (LightCraft greys the button); its Import from Folder and
+    /// Export's folder choice, elsewhere, keep it.
+    pub fn ui(&mut self, ui: &mut egui::Ui, document: bool) {
+        let settings = matches!(self.app.ui.dialog, Some(lightcraft_ui_egui::state::Dialog::Settings { .. }));
+        let held = if document && (settings || self.app.library_problem.is_some()) { self.app.services.pick_folder.take() } else { None };
         self.app.ui(ui);
+        if held.is_some() {
+            self.app.services.pick_folder = held;
+        }
     }
 
     /// Whether the window may close now. LightCraft asks this in its `logic`, which only runs in its

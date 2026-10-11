@@ -786,7 +786,7 @@ impl StudioShell {
         let t = theme::TOKENS;
         let p = self.persona;
         if let Some(lr) = self.lightroom.as_mut().filter(|_| p.lightroom()) {
-            lr.ui(ui);
+            lr.ui(ui, self.document.is_some());
             return;
         }
         let chrome = egui::Frame::NONE.fill(t.chrome);

@@ -81,6 +81,9 @@ In this order, ahead of PRD milestone 6:
      - Accepted parity difference (Studio owns the document keys): in Library and Develop,
        LightCraft's Create Version loses Ctrl+Shift+S and New Album loses Ctrl+N (both stay in
        its menus, with no shortcut), as Save Metadata to File loses Ctrl+S.
+     - Review fixes (one commit each, each test seen failing with its fix reverted):
+       LightCraft's Settings › Open Library… (and its library-problem window's Choose…) is off
+       while a document is open: its folder dialog is held back while either shows.
    - Temporarily unavailable keys (T3 until T3m): none yet.
 2. [ ] **Pixel slow-frame fix** (Open items: frames over 0.4 s); the deferred `bench.rs` peak
    bytes during a follow waits on it.
