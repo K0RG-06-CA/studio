@@ -101,6 +101,14 @@ const SAVE_CANCELLED: &str = "the save was cancelled";
 /// The top bar's busy mark while a Develop geometry change renders on its way into Pixel.
 const BUSY: &str = "Develop rendering\u{2026}";
 
+/// Why a document PhotoCraft opened itself was closed.
+const STRAY_DOCUMENT: &str =
+    "Studio opens documents: pick a photo in Library, or open a file with Ctrl+O (PhotoCraft\u{2019}s own New and Open don\u{2019}t make one).";
+
+/// Studio's floating History panel in Pixel: its width, and its rows' height before they scroll.
+const HISTORY_W: f32 = 220.0;
+const HISTORY_H: f32 = 240.0;
+
 /// See [`StudioShell::pick_save_path`].
 pub type PickSavePath = Box<dyn FnMut(&str) -> Option<PathBuf>>;
 /// See [`StudioShell::pick_open_path`].
@@ -551,6 +559,12 @@ impl StudioShell {
     /// [`Document::reconcile`]).
     fn settle(&mut self) {
         self.keep_document_photo();
+        // PhotoCraft holds Studio's document and nothing else (`Document::copy_back`): with none
+        // open, what it opened itself (its home screen's New, its palette) is closed too, and said
+        if let Some(px) = self.pixel.as_mut().filter(|px| self.document.is_none() && !px.app.session.documents().is_empty()) {
+            studio_doc::pixel::close_all(&mut px.app.session);
+            self.error = Some(("Pixel".to_owned(), STRAY_DOCUMENT.to_owned()));
+        }
         let (Some(doc), Some(lr), Some(px)) = (&mut self.document, &mut self.lightroom, &mut self.pixel) else { return };
         doc.note_develop(&lr.app.session);
         if let Err(e) = doc.reconcile(&mut lr.app.session, &mut px.app.session) {
@@ -647,18 +661,9 @@ impl StudioShell {
         // LightCraft's keys may have changed its view: the bar shows the persona it asks for
         self.follow_lightcraft();
         self.top_bar(ui);
-        // a Develop geometry change on its way into the layers: Pixel takes no input meanwhile
-        // (its canvas, panels and windows would edit the layers the render is about to turn)
-        let barred = self.persona == Persona::Pixel && self.develop_rendering();
-        if barred {
-            ui.disable();
-        }
         self.persona_area(ui);
         // and its clicks
         self.follow_lightcraft();
-        if let Some(px) = self.pixel.as_mut().filter(|_| self.persona == Persona::Pixel && !barred) {
-            px.overlays(ui.ctx());
-        }
         self.settle();
         // Studio's keys pressed in Pixel, in order, once no button is down (checked every frame):
         // a stroke that ended this frame is in first, so a save writes it and an undo takes it
@@ -675,6 +680,14 @@ impl StudioShell {
     /// Develop and Film; PhotoCraft's in Pixel), so the document's history only ever sees one
     /// engine change between two looks (milestone 5). There is no second call site.
     fn engine_logic(&mut self, ctx: &egui::Context) {
+        // each app's style is the global one only while its personas show: Studio's comes back
+        // first, so the app whose persona shows now takes over from Studio's, not the other app's
+        if let Some(lr) = self.lightroom.as_mut().filter(|_| !self.persona.lightroom()) {
+            lr.give_back_style(ctx);
+        }
+        if let Some(px) = self.pixel.as_mut().filter(|_| self.persona != Persona::Pixel) {
+            px.give_back_style(ctx);
+        }
         match self.persona {
             // not while a Develop geometry change is on its way into the layers (its shortcuts and
             // tools would edit them meanwhile)
@@ -690,10 +703,6 @@ impl StudioShell {
                 }
             }
             _ => {}
-        }
-        // LightCraft's style is the global one only while its personas show
-        if let Some(lr) = self.lightroom.as_mut().filter(|_| !self.persona.lightroom()) {
-            lr.give_back_style(ctx);
         }
     }
 
@@ -798,9 +807,8 @@ impl StudioShell {
         }
     }
 
-    /// Everything under the top bar. Library and Develop: LightCraft's whole window. Elsewhere,
-    /// fixed chrome (options bar, tool strip, filmstrip) is plain panels, as in Adobe's apps; the
-    /// canvas and panel groups are the persona's dock.
+    /// Everything under the top bar. Library and Develop: LightCraft's whole window. Pixel:
+    /// PhotoCraft's (see [`Self::pixel_area`]). Film, until it is built: a placeholder dock.
     fn persona_area(&mut self, ui: &mut egui::Ui) {
         let t = theme::TOKENS;
         let p = self.persona;
@@ -808,17 +816,11 @@ impl StudioShell {
             lr.ui(ui, self.document.is_some());
             return;
         }
-        let chrome = egui::Frame::NONE.fill(t.chrome);
-        // Pixel: PhotoCraft's own options bar and tool bar (Photoshop's), once its fonts are in.
-        // Its views follow its documents first: its `logic` (which syncs them) didn't run on the
-        // frame Pixel was clicked in the top bar, and its panels index them unchecked.
-        if let Some(px) = self.pixel.as_mut().filter(|_| p == Persona::Pixel) {
-            px.app.sync_views();
+        if p == Persona::Pixel {
+            return self.pixel_area(ui);
         }
-        let photocraft = self.pixel.as_ref().is_some_and(|px| p == Persona::Pixel && px.ready());
-        if let Some(px) = self.pixel.as_mut().filter(|_| photocraft) {
-            px.options_bar(ui);
-        } else if p.photoshop_layout() {
+        let chrome = egui::Frame::NONE.fill(t.chrome);
+        if p.photoshop_layout() {
             egui::Panel::top("studio.options_bar").exact_size(t.options_bar_h).resizable(false).frame(chrome).show(ui, |_| {});
         }
         egui::Panel::bottom("studio.filmstrip")
@@ -826,17 +828,10 @@ impl StudioShell {
             .resizable(false)
             .frame(egui::Frame::NONE.fill(t.canvas))
             .show(ui, |ui| ui.centered_and_justified(|ui| ui.label(theme::placeholder("Filmstrip"))));
-        if let Some(px) = self.pixel.as_mut().filter(|_| photocraft) {
-            px.tool_bar(ui);
-        } else if p.photoshop_layout() {
+        if p.photoshop_layout() {
             egui::Panel::left("studio.tools").exact_size(t.tool_strip_w).resizable(false).frame(chrome).show(ui, |_| {});
         }
-        let pixel = self.pixel.as_mut().filter(|_| p == Persona::Pixel);
-        let rendering = self.document.as_ref().is_some_and(|d| !self.base.up_to_date(d));
-        let document = self.document.as_ref().map(|d| d.name.clone());
-        let history = self.document.as_ref().filter(|_| p == Persona::Pixel).map(|d| (d.history.entries(), d.history.position()));
-        let barred = p == Persona::Pixel && self.document.as_ref().is_some_and(|d| d.history.pending_follow());
-        let mut viewer = dock::Viewer { persona: p, pixel, rendering, document, reset_requested: false, history, goto: None, barred };
+        let mut viewer = dock::Viewer { persona: p, reset_requested: false };
         egui::CentralPanel::default().frame(egui::Frame::NONE.fill(t.divider)).show(ui, |ui| {
             DockArea::new(&mut self.layouts[p as usize])
                 .id(egui::Id::new(("studio.dock", p.id())))
@@ -846,10 +841,50 @@ impl StudioShell {
                 .show_leaf_close_all_buttons(false)
                 .show_inside(ui, &mut viewer);
         });
-        let (reset, goto) = (viewer.reset_requested, viewer.goto);
-        if reset {
+        if viewer.reset_requested {
             let _ = self.run("window.resetWorkspace");
         }
+    }
+
+    /// Pixel: PhotoCraft's whole window, as it ships. Studio adds only what the document needs:
+    /// - nothing at all while a Develop geometry change is on its way into the layers (its
+    ///   `logic` doesn't run then, so neither does its `ui`: its canvas, panels and windows would
+    ///   edit the layers the render is about to turn);
+    /// - its document tab strip covered (L15: its × and Close would close the document past
+    ///   Studio's close; Ctrl+W and Studio's commands close it);
+    /// - "Rendering Develop…" over its canvas while the base layer is behind Develop;
+    /// - Studio's History, floating at the left edge of its dock (D1; until T4 restyles it).
+    fn pixel_area(&mut self, ui: &mut egui::Ui) {
+        let Some(px) = self.pixel.as_mut() else { return };
+        // its views follow its documents first: a document Studio opened since its `logic`
+        // (which syncs them) ran, and its panels index them unchecked
+        px.app.sync_views();
+        px.ui(ui);
+        if let Some(strip) = px.tab_strip(ui.ctx()) {
+            ui.interact(strip, egui::Id::new("studio.pixel.tab_strip"), egui::Sense::click());
+        }
+        let Some(doc) = self.document.as_ref() else { return };
+        let canvas = px.app.last_canvas_rect;
+        let t = photocraft_ui_egui::theme::Tokens::get(ui.ctx());
+        if !self.base.up_to_date(doc) {
+            let at = canvas.left_top() + egui::vec2(8.0, 8.0);
+            ui.painter().text(at, egui::Align2::LEFT_TOP, "Rendering Develop\u{2026}", egui::FontId::proportional(12.0), t.text_dim);
+        }
+        let (rows, at) = (doc.history.entries(), doc.history.position());
+        let pos = egui::pos2(canvas.max.x - HISTORY_W - 8.0, canvas.min.y + 8.0);
+        let goto = egui::Area::new(egui::Id::new("studio.history"))
+            .fixed_pos(pos)
+            .show(ui.ctx(), |ui| {
+                egui::Frame::popup(ui.style())
+                    .show(ui, |ui| {
+                        ui.set_width(HISTORY_W);
+                        ui.set_max_height(HISTORY_H);
+                        ui.strong("History");
+                        history_panel::show(ui, &rows, at)
+                    })
+                    .inner
+            })
+            .inner;
         if let Some(index) = goto
             && let Err(e) = self.run_with("history.goto", &serde_json::json!({"index": index}))
         {
@@ -962,6 +997,11 @@ impl StudioShell {
         {
             ui.input_mut(|i| take_keys(i, &DELETE_KEYS));
         }
+        // PhotoCraft's keys for the File items Studio will hide (T3m) act on its own session, not
+        // on the document: dropped until then
+        if self.persona == Persona::Pixel {
+            ui.input_mut(|i| take_keys(i, &HIDDEN_FILE_KEYS));
+        }
         let pressed = ui.input_mut(|i| take_keys(i, &keys));
         if self.persona == Persona::Pixel {
             // PhotoCraft commits a stroke at release, later in the frame: they run in the order
@@ -1016,6 +1056,17 @@ const CMD: egui::Modifiers = egui::Modifiers::COMMAND;
 /// LightCraft's Delete key (Delete or Backspace, as it reads it), taken and dropped.
 const DELETE_KEYS: [(egui::Modifiers, egui::Key, &str); 2] =
     [(egui::Modifiers::NONE, egui::Key::Delete, "photo.delete"), (egui::Modifiers::NONE, egui::Key::Backspace, "photo.delete")];
+
+/// PhotoCraft's keys for the File items Studio will hide when it hosts its menus (T3m), taken and
+/// dropped in Pixel until then: Revert, Close All, Close Others, Open As, Save a Copy. (New is
+/// Studio's Ctrl+N; Open Recent and Purge have no key.)
+const HIDDEN_FILE_KEYS: [(egui::Modifiers, egui::Key, &str); 5] = [
+    (egui::Modifiers::NONE, egui::Key::F12, "file.revert"),
+    (CMD.plus(egui::Modifiers::ALT), egui::Key::W, "file.closeAll"),
+    (CMD.plus(egui::Modifiers::ALT), egui::Key::P, "file.closeOthers"),
+    (CMD.plus(egui::Modifiers::ALT).plus(egui::Modifiers::SHIFT), egui::Key::O, "file.openAs"),
+    (CMD.plus(egui::Modifiers::ALT), egui::Key::S, "file.saveACopy"),
+];
 
 /// Studio's document keys, in every persona.
 const DOCUMENT_KEYS: [(egui::Modifiers, egui::Key, &str); 5] = [

@@ -107,6 +107,12 @@ pub(crate) fn photocraft(builder: HarnessBuilder<Pc>, app: PhotocraftApp, under_
         move |ui, pc: &mut Pc| {
             let ctx = ui.ctx().clone();
             if !std::mem::replace(&mut pc.set_up, true) {
+                // egui as its desktop app gets it from eframe (see `lightcraft`)
+                ctx.set_theme(egui::ThemePreference::System);
+                ctx.options_mut(|o| {
+                    o.dark_style = std::sync::Arc::new(egui::Theme::Dark.default_style());
+                    o.light_style = std::sync::Arc::new(egui::Theme::Light.default_style());
+                });
                 PhotocraftApp::setup_context(&ctx, Default::default());
             }
             if under_bar {
@@ -379,6 +385,10 @@ fn render_parity() {
         let (mut studio, mut bare) = lightcraft_case(case, Harness::builder().wgpu(), Harness::builder().wgpu());
         assert_render_parity(case, &mut studio, &mut bare, &[]);
     }
+    for case in PHOTOCRAFT_CASES {
+        let (mut studio, mut bare, allow) = photocraft_case(case, Harness::builder().wgpu(), Harness::builder().wgpu());
+        assert_render_parity(case, &mut studio, &mut bare, &allow);
+    }
 }
 
 // --- T2: Library and Develop are LightCraft's own window ---
@@ -443,6 +453,114 @@ fn library_and_develop_are_lightcrafts_own_window() {
         assert_eq!(s.state().persona, persona, "{case}");
         assert_tree_parity(&s, &b, &[]);
         assert_style_parity(&s.ctx, &b.ctx, App::LightCraft);
+    }
+}
+
+// --- T3: Pixel is PhotoCraft's own window ---
+
+/// Pixel with no document, with the test image and a second layer, the brush picked, Levels
+/// (Image › Adjustments) open.
+const PHOTOCRAFT_CASES: [&str; 4] = ["pixel-empty", "pixel-layers", "pixel-brush", "pixel-levels"];
+
+/// Studio in `case`, and the bare PhotoCraft in the same state: the same PNG, given to it as
+/// Studio gives it its document, its History panel off and its menus hidden as in Studio, the same texture limit. Both
+/// settled. The allow-list: Studio's floating History (D1, until T4 puts it in PhotoCraft's
+/// style and place).
+fn photocraft_case(
+    case: &str,
+    studio: HarnessBuilder<crate::StudioShell>,
+    bare: HarnessBuilder<Pc>,
+) -> (Harness<'static, crate::StudioShell>, Harness<'static, Pc>, Vec<Allow>) {
+    let mut s = crate::tests_lightcraft::studio_with(studio.with_size(SIZE));
+    // no photo picked: Pixel opens empty, or with the image file
+    s.state_mut().lightroom.as_mut().unwrap().app.session.selection.active = None;
+    s.run_steps(3);
+    let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), photocraft_ui_egui::Services::default());
+    app.ui.panels.history = false;
+    crate::pixel::hide_menus(&mut app);
+    if case == "pixel-empty" {
+        s.state_mut().run("persona.pixel").unwrap();
+    } else {
+        let png = crate::tests_images::image(&crate::tests_lightcraft::temp_dir(case), "art.png");
+        s.state_mut().run_with("document.open", &serde_json::json!({"path": png})).unwrap();
+        // the document Studio gives PhotoCraft for it: imported as Studio imports it
+        let mut doc = photocraft_io::import("art.png", &std::fs::read(&png).unwrap()).unwrap().document;
+        doc.name = "art".into();
+        app.session.add_document(doc, None);
+        app.sync_views();
+    }
+    let mut b = photocraft(bare, app, false);
+    crate::tests_lightcraft::real_gpu_textures(&mut b);
+    s.run_steps(3);
+    b.run_steps(3);
+    if case != "pixel-empty" {
+        s.state_mut().run("pixel.layer.new.layer").unwrap();
+        b.state_mut().app.run("layer.new.layer", serde_json::json!({})).unwrap();
+    }
+    if case == "pixel-brush" {
+        s.state_mut().run_with("pixel.tool", &serde_json::json!({"name": "brush"})).unwrap();
+        b.state_mut().app.ui.tool = photocraft_ui_egui::state::Tool::from_name("brush").unwrap();
+    }
+    if case == "pixel-levels" {
+        for h in [&mut s as &mut dyn KeyTarget, &mut b] {
+            h.ctrl(egui::Key::L);
+        }
+    }
+    s.run_steps(2);
+    // saving is Studio's: PhotoCraft's own "unsaved" is kept clear in Studio, so in the bare app
+    if let Some(st) = b.state_mut().app.session.active_mut() {
+        st.saved_revision = st.revision;
+    }
+    settle(&mut s, |_| false);
+    settle(&mut b, |_| false);
+    let layers = |app: &PhotocraftApp| app.session.active().map(|st| st.doc.layers.len());
+    assert_eq!(layers(&s.state().pixel.as_ref().unwrap().app), layers(&b.state().app), "{case}");
+    let up = egui::vec2(0.0, -bar_h());
+    let history = s.ctx.memory(|m| m.area_rect(egui::Id::new("studio.history")));
+    let mut allow: Vec<Allow> = history
+        .map(|r| Allow { rect: r.translate(up).expand(SHADOW), reason: "Studio's History (D1), until T4, with its shadow" })
+        .into_iter()
+        .collect();
+    if let (Some(studio), Some(bare)) = (dialog(&s.ctx), dialog(&b.ctx)) {
+        let reason = "PhotoCraft centres its dialogs (and their shadows) on the whole window, the persona bar included";
+        allow.push(Allow { rect: studio.translate(up).union(bare).expand(SHADOW), reason });
+    }
+    (s, b, allow)
+}
+
+/// How far a popup's shadow reaches past it (egui's default popup shadow: 8 pt blur, 6 pt offset).
+const SHADOW: f32 = 16.0;
+
+/// Where PhotoCraft's open dialog is (a modal: a foreground area; not its window-wide backdrop).
+fn dialog(ctx: &egui::Context) -> Option<Rect> {
+    let small = |r: &Rect| r.width() < SIZE[0] / 2.0;
+    ctx.memory(|m| {
+        m.layer_ids().filter(|l| l.order == egui::Order::Foreground).filter_map(|l| m.area_rect(l.id)).filter(small).reduce(|a, b| a.union(b))
+    })
+}
+
+/// A harness a key can be pressed in, whatever its state.
+trait KeyTarget {
+    fn ctrl(&mut self, key: egui::Key);
+}
+
+impl<S> KeyTarget for Harness<'_, S> {
+    fn ctrl(&mut self, key: egui::Key) {
+        let modifiers = egui::Modifiers::COMMAND;
+        for pressed in [true, false] {
+            self.input_mut().events.push(egui::Event::Key { key, physical_key: None, pressed, repeat: false, modifiers });
+            self.run_steps(1);
+        }
+    }
+}
+
+#[test]
+fn pixel_is_photocrafts_own_window_in_parity() {
+    for case in PHOTOCRAFT_CASES {
+        let (s, b, allow) = photocraft_case(case, Harness::builder(), Harness::builder());
+        assert_eq!(s.state().persona, crate::Persona::Pixel, "{case}");
+        assert_tree_parity(&s, &b, &allow);
+        assert_style_parity(&s.ctx, &b.ctx, App::PhotoCraft);
     }
 }
 

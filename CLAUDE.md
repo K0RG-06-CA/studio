@@ -13,9 +13,11 @@ Studio is an Affinity-style all-in-one photo app built in Rust on the storytold 
   ```bash
   cargo fmt --check
   cargo clippy --workspace --all-targets --locked -- -D warnings
-  cargo test --workspace --locked -- --test-threads=4
+  cargo test -p studio-doc --locked -- --test-threads=2
+  cargo test -p studio-shell --locked -- --test-threads=2
+  cargo test -p studio --locked -- --test-threads=2
   ```
-  Local runs use `--test-threads=4`: with every core at once, a loaded dev machine can keep LightCraft's demo renders waiting past the tests' time limits. CI runs the plain command.
+  Locally, test one crate at a time on 2 threads (and any crate added later the same way): a whole-workspace run on more threads runs this machine out of memory, and with every core at once LightCraft's demo renders wait past the tests' time limits. CI runs the full workspace (`cargo test --workspace --locked`).
 - Never push or add a remote unless asked.
 
 ## Checking a milestone

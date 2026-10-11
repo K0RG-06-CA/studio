@@ -1,9 +1,7 @@
-//! Milestone 4 spike: can PhotoCraft's editor be drawn piece by piece in Studio's places?
+//! Studio with PhotoCraft: Pixel is PhotoCraft's own window, the home of the document's pixels.
 //!
-//! (a) its tool bar (left), options bar (top), right dock and one canvas view fit around a dock
-//!     tab layout, driven through its `eframe::App` with a test frame;
-//! (b) its fonts and LightCraft's live in one context: both replace all fonts, and each needs its
-//!     own named families.
+//! Milestone 4 spike (b), kept: PhotoCraft's fonts and LightCraft's live in one context: both
+//! replace all fonts, and each needs its own named families.
 
 use egui::{Rect, Ui, UiBuilder, pos2};
 use egui_kittest::Harness;
@@ -49,10 +47,6 @@ pub(crate) fn pixel_doc() -> Document {
     doc
 }
 
-fn harness() -> Harness<'static, Spike> {
-    Harness::builder().with_size([1400.0, 900.0]).build_ui_state(frame, Spike { app: harness_app(), frame: eframe::Frame::_new_kittest(), frames: 0 })
-}
-
 fn painted_text(output: &egui::FullOutput) -> String {
     output
         .shapes
@@ -63,16 +57,6 @@ fn painted_text(output: &egui::FullOutput) -> String {
         })
         .collect::<Vec<_>>()
         .join(" | ")
-}
-
-#[test]
-fn spike_a_photocraft_pieces_draw_in_studio_places() {
-    let mut h = harness();
-    h.run_steps(6);
-    let text = painted_text(h.output());
-    for panel in ["Layers", "Properties", "Opacity:"] {
-        assert!(text.contains(panel), "{panel}: {text}");
-    }
 }
 
 /// Studio with LightCraft, and PhotoCraft's pieces drawn over it while `photocraft` is on.
@@ -224,26 +208,34 @@ fn in_pixel_a_new_render_waits_while_a_button_is_held_and_goes_in_on_release() {
     assert!(h.state().base_up_to_date());
 }
 
-/// The rectangle of the dock group holding `tab` in Pixel.
-fn pixel_leaf(h: &Harness<'_, crate::StudioShell>, tab: &crate::dock::Tab) -> Rect {
-    let dock = &h.state().layouts[crate::Persona::Pixel as usize];
-    let path = dock.find_tab(tab).unwrap();
-    match &dock[path.surface][path.node] {
-        egui_dock::Node::Leaf(l) => l.rect,
-        _ => panic!("{tab:?} isn't in a leaf"),
-    }
+/// Where PhotoCraft's canvas is in Pixel (its own document area says so).
+pub(crate) fn canvas(h: &Harness<'_, crate::StudioShell>) -> Rect {
+    h.state().pixel.as_ref().unwrap().app.last_canvas_rect
 }
 
+/// Where Studio's floating History panel is in Pixel.
+fn history_rect(h: &Harness<'_, crate::StudioShell>) -> Rect {
+    h.ctx.memory(|m| m.area_rect(egui::Id::new("studio.history"))).expect("Studio's History shows")
+}
+
+/// T3: Pixel is PhotoCraft's own window (its parity with the bare app is `tests_parity`'s):
+/// Studio's placeholders are gone, its menus are hidden, "Rendering Develop…" shows over its
+/// canvas while the base renders, and its own tool keys pick its tools.
 #[test]
-fn pixel_is_photoshops_layout_on_photocraft() {
+fn pixel_is_photocrafts_own_window() {
     let mut h = studio();
     h.run_steps(3);
-    // no photo picked, no document: the canvas says how to get one
+    // no photo picked, no document: PhotoCraft's own home screen, nothing of Studio's dock
     h.state_mut().lightroom.as_mut().unwrap().app.session.selection.active = None;
     h.state_mut().run("persona.pixel").unwrap();
     h.run_steps(4);
     assert!(h.state().document.is_none());
-    assert!(painted_text(h.output()).contains("No document"), "{}", painted_text(h.output()));
+    let text = painted_text(h.output());
+    assert!(text.contains("Create a new document or open an existing file.") && !text.contains("Filmstrip"), "{text}");
+    // its menus are hidden (until Studio hosts them, T3m), and LightCraft's aren't shown here
+    for menu in ["File", "Image", "Photo"] {
+        assert!(h.query_by_label(menu).is_none(), "{menu} shows");
+    }
     h.state_mut().run("persona.library").unwrap();
     h.run_steps(2);
     pick_first(&mut h);
@@ -256,14 +248,11 @@ fn pixel_is_photoshops_layout_on_photocraft() {
     h.run_steps(3);
     let text = painted_text(h.output());
     assert!(!text.contains("Rendering Develop"));
-    // PhotoCraft's options bar, Layers panel (with the document's base layer) and History
-    for want in ["Opacity:", "Layers", "Properties", "History", studio_doc::BASE_LAYER] {
+    // its Layers panel shows the document's base layer, and its canvas the document's image
+    for want in ["Layers", studio_doc::BASE_LAYER] {
         assert!(text.contains(want), "{want}: {text}");
     }
-    // its canvas fills Studio's canvas tab, which is titled with the document's name
-    let name = h.state().document.as_ref().unwrap().name.clone();
-    assert_eq!(h.get_all_by_label(name.as_str()).count(), 2, "the top bar's and the canvas tab's");
-    let tab = pixel_leaf(&h, &crate::dock::Tab::Canvas);
+    let rect = canvas(&h);
     let images: Vec<Rect> = h
         .output()
         .shapes
@@ -273,7 +262,7 @@ fn pixel_is_photoshops_layout_on_photocraft() {
             _ => None,
         })
         .collect();
-    assert!(images.iter().any(|r| tab.contains_rect(*r) && r.width() > 100.0), "the document's image in {tab:?}: {images:?}");
+    assert!(images.iter().any(|r| rect.contains_rect(*r) && r.width() > 100.0), "the document's image in {rect:?}: {images:?}");
     // Photoshop's tool keys pick from their tool's group: V Move, B a brush, M a marquee, E an eraser
     for (key, group) in [(egui::Key::V, 'V'), (egui::Key::B, 'B'), (egui::Key::M, 'M'), (egui::Key::E, 'E')] {
         h.key_press(key);
@@ -281,8 +270,6 @@ fn pixel_is_photoshops_layout_on_photocraft() {
         let tool = h.state().pixel.as_ref().unwrap().app.ui.tool;
         assert_eq!(tool.key(), group, "{key:?}: {tool:?}");
     }
-    // and the theme stays Studio's around it
-    assert_eq!(h.ctx.global_style().visuals.panel_fill, crate::theme::TOKENS.chrome);
 }
 
 #[test]
@@ -509,9 +496,9 @@ fn pixels_canvas_tells_photocraft_where_it_is_and_records_free_transform_steps()
     let dir = temp_dir("pixel-canvas-rect");
     let mut h = studio();
     pixel_edited(&mut h, &dir.join("trip.studio"));
-    let tab = pixel_leaf(&h, &crate::dock::Tab::Canvas);
-    let canvas = h.state().pixel.as_ref().unwrap().app.last_canvas_rect;
-    assert!(tab.expand(1.0).contains_rect(canvas) && canvas.width() > tab.width() * 0.8, "{canvas:?} in {tab:?}");
+    // PhotoCraft's own document area sets it: under the persona bar, most of the window
+    let rect = canvas(&h);
+    assert!(rect.min.y > crate::theme::TOKENS.top_bar_h && rect.width() > 700.0 && rect.height() > 500.0, "{rect:?}");
     // Free Transform on a painted layer (an empty one has nothing to transform), nudged with an
     // arrow key: each nudge is a step
     let session = &mut h.state_mut().pixel.as_mut().unwrap().app.session;
@@ -640,8 +627,6 @@ fn photocrafts_dialogs_show_over_pixel_ctrl_l_opens_levels() {
     h.run_steps(3);
     let text = painted_text(h.output());
     assert!(text.contains("Levels"), "{text}");
-    // in Studio's frame: its theme around the dialog stays Studio's
-    assert_eq!(h.ctx.global_style().visuals.panel_fill, crate::theme::TOKENS.chrome);
 }
 
 fn harness_app() -> PhotocraftApp {
@@ -851,7 +836,7 @@ fn pixels_history_tab_lists_both_engines_steps_and_a_click_jumps() {
     h.state_mut().run("persona.pixel").unwrap();
     h.run_steps(3);
     // Studio's History tab; PhotoCraft's own History panel is off (its footer did nothing: L4)
-    let tab = pixel_leaf(&h, &crate::dock::Tab::Panel("History".to_owned()));
+    let tab = history_rect(&h);
     assert!(!h.state().pixel.as_ref().unwrap().app.ui.panels.history);
     // a widget labelled `label` in the tab (the Layers panel names "Paint" too)
     let in_tab = |h: &Harness<'_, crate::StudioShell>, label: &str| h.get_all_by_label(label).filter(|n| tab.contains(n.rect().center())).count();
@@ -926,7 +911,7 @@ fn ctrl_z_mid_stroke_commits_the_stroke_then_undoes_it() {
         doc.layers.last().unwrap().surface().unwrap().tile_count() > 0
     };
     assert!(!painted(&h));
-    let c = pixel_leaf(&h, &crate::dock::Tab::Canvas).center();
+    let c = canvas(&h).center();
     h.event(egui::Event::PointerMoved(c));
     h.event(egui::Event::PointerButton { pos: c, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE });
     h.run_steps(1);
@@ -1050,7 +1035,7 @@ fn undo_keys_pressed_twice_mid_stroke_each_count_in_order() {
         let doc = &h.state().document.as_ref().unwrap().pixel;
         doc.layers.len() == 2 && doc.layers[1].surface().unwrap().tile_count() > 0
     };
-    let c = pixel_leaf(&h, &crate::dock::Tab::Canvas).center();
+    let c = canvas(&h).center();
     let (cmd, shift) = (egui::Modifiers::COMMAND, egui::Modifiers::SHIFT);
     for (keys, want) in [([cmd, cmd], (1, false)), ([cmd, cmd | shift], (2, true))] {
         h.state_mut().run("pixel.layer.new.layer").unwrap();
@@ -1093,7 +1078,7 @@ fn ready_to_paint(h: &mut Harness<'_, crate::StudioShell>, path: &std::path::Pat
 
 /// Press the button on the canvas and drag: a stroke in progress (not released).
 fn stroke_down(h: &mut Harness<'_, crate::StudioShell>) -> egui::Pos2 {
-    let c = pixel_leaf(h, &crate::dock::Tab::Canvas).center();
+    let c = canvas(h).center();
     h.event(egui::Event::PointerMoved(c));
     h.event(egui::Event::PointerButton { pos: c, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE });
     h.run_steps(1);
@@ -1420,4 +1405,87 @@ fn a_stroke_on_the_canvas_while_a_rotation_renders_paints_nothing() {
     let b = photocraft_compose::bounds::content_bounds(l.surface().unwrap());
     assert_eq!((b.x0, b.y0, b.x1, b.y1), (100, 299, 101, 300), "only the old pixel, turned");
     assert_eq!(past(&h), before + 1, "the rotation is the one new state");
+}
+
+// --- T3: Pixel is PhotoCraft's own window ---
+
+/// A pointer click at `pos` (a real click: kittest's `click()` goes past what covers a widget).
+fn click_at(h: &mut Harness<'_, crate::StudioShell>, pos: egui::Pos2, button: egui::PointerButton) {
+    h.event(egui::Event::PointerMoved(pos));
+    h.run_steps(1);
+    for pressed in [true, false] {
+        h.event(egui::Event::PointerButton { pos, button, pressed, modifiers: egui::Modifiers::NONE });
+        h.run_steps(1);
+    }
+    h.run_steps(2);
+}
+
+/// L15: PhotoCraft's document tab × (and the tab's Close menu) would close its document straight
+/// through its engine, past Studio's close (and Studio would only put it back, its undo history
+/// gone). Studio covers its tab strip: the × and a right-click do nothing, the history stays.
+#[test]
+fn l15_photocrafts_document_tab_cant_close_the_document() {
+    let dir = temp_dir("l15-tab");
+    let mut h = studio();
+    pixel_edited(&mut h, &dir.join("trip.studio"));
+    h.run_steps(2);
+    let close = h.get_by_label("Close").rect();
+    let strip = h.state().pixel.as_ref().unwrap().tab_strip(&h.ctx).unwrap();
+    assert!(strip.contains_rect(close), "the × {close:?} is in the covered strip {strip:?}");
+    click_at(&mut h, close.center(), egui::PointerButton::Primary);
+    let s = h.state();
+    let pc = &s.pixel.as_ref().unwrap().app.session;
+    assert_eq!(pc.documents().len(), 1, "PhotoCraft still holds the document");
+    assert!(pc.active().unwrap().history.can_undo() && s.error.is_none(), "its undo history stays, and nothing was put back");
+    // the tab's right-click menu (Close, Close Others, Close All) doesn't open
+    click_at(&mut h, strip.left_center() + egui::vec2(30.0, 0.0), egui::PointerButton::Secondary);
+    assert!(h.query_by_label("Close Others").is_none() && h.query_by_label("Close All").is_none());
+    assert!(h.state().document.is_some());
+}
+
+/// PhotoCraft holds Studio's document and nothing else, with none open too: a document it makes
+/// itself (its home screen's New, its palette) is closed, and Studio says how to get one.
+#[test]
+fn a_document_photocraft_makes_itself_without_studios_is_closed() {
+    let mut h = studio();
+    h.run_steps(3);
+    // no photo picked: Pixel opens with no document
+    h.state_mut().lightroom.as_mut().unwrap().app.session.selection.active = None;
+    h.state_mut().run("persona.pixel").unwrap();
+    h.run_steps(3);
+    assert!(h.state().document.is_none());
+    h.state_mut().pixel.as_mut().unwrap().app.session.add_document(pixel_doc(), None);
+    h.run_steps(1);
+    assert!(h.state().pixel.as_ref().unwrap().app.session.documents().is_empty());
+    assert!(h.state().document.is_none());
+    assert!(h.state().error.as_ref().is_some_and(|(_, why)| why.contains("Ctrl+O")), "{:?}", h.state().error);
+}
+
+/// Until Studio hosts PhotoCraft's menus (T3m), the keys of the File items it will hide are
+/// dropped in Pixel: each leaves PhotoCraft's session (its documents, the document's state) and
+/// Studio's document as they were.
+#[test]
+fn keys_of_photocraft_file_items_studio_will_hide_do_nothing() {
+    let dir = temp_dir("t3-hidden-keys");
+    let mut h = studio();
+    pixel_edited(&mut h, &dir.join("trip.studio"));
+    let (cmd, alt, shift) = (egui::Modifiers::COMMAND, egui::Modifiers::ALT, egui::Modifiers::SHIFT);
+    let state = |h: &Harness<'_, crate::StudioShell>| {
+        let pc = &h.state().pixel.as_ref().unwrap().app.session;
+        let docs: Vec<_> = pc.documents().iter().map(|d| (d.doc.id, d.revision, d.history.past_len())).collect();
+        (docs, layer_names(h.state().document.as_ref().unwrap()), h.state().error.clone(), h.state().prompt.clone())
+    };
+    let before = state(&h);
+    for (mods, k) in [
+        (egui::Modifiers::NONE, egui::Key::F12),
+        (cmd | alt, egui::Key::W),
+        (cmd | alt, egui::Key::P),
+        (cmd | alt | shift, egui::Key::O),
+        (cmd | alt, egui::Key::S),
+    ] {
+        press(&mut h, mods, k);
+        h.run_steps(2);
+        assert_eq!(state(&h), before, "{mods:?}+{k:?}");
+        assert!(h.query_by_label("Save a Copy").is_none() && h.query_by_label("Open As").is_none(), "{mods:?}+{k:?} opened a dialog");
+    }
 }

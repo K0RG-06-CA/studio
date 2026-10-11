@@ -71,12 +71,10 @@ fn each_persona_shows_its_adobe_layout() {
     h.get_by_label("Film").click();
     h.run();
     h.get_by_label("Halation");
-    // Pixel: one tab for PhotoCraft's right dock (its tools, options bar and panels need
-    // PhotoCraft, see `tests_photocraft::pixel_is_photoshops_layout_on_photocraft`).
+    // Pixel is PhotoCraft's own window, no dock (`tests_photocraft::pixel_is_photocrafts_own_window`)
     h.get_by_label("Pixel").click();
     h.run();
-    h.get_by_label("Layers");
-    assert!(h.query_by_label("Folders").is_none());
+    assert!(h.query_by_label("Folders").is_none() && h.query_by_label("Layers").is_none());
 }
 
 /// The dock leaf (surface, node) a panel tab sits in.
@@ -123,7 +121,8 @@ fn dragging_a_panel_tab_regroups_it_and_the_layout_survives_switching() {
 #[test]
 fn every_panel_tab_of_every_persona_has_an_accessible_name() {
     let mut h = harness();
-    for p in Persona::ALL.into_iter().filter(|p| p.enabled()) {
+    // (Pixel is PhotoCraft's own window: its dock layout is drawn no more)
+    for p in Persona::ALL.into_iter().filter(|p| p.enabled() && *p != Persona::Pixel) {
         h.state_mut().run(&p.command()).unwrap();
         h.run();
         let panels: Vec<String> = h.state().layouts[p as usize]

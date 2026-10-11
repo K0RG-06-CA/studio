@@ -7,7 +7,6 @@ use egui_dock::{DockState, Node, NodeIndex, NodePath, Surface, TabStyle, TabView
 use serde::{Deserialize, Serialize};
 
 use crate::Persona;
-use crate::pixel::Pixel;
 use crate::theme::{self, TOKENS};
 
 /// A dock tab: the persona's canvas or a named panel.
@@ -130,27 +129,14 @@ pub fn tabs_known(p: Persona, dock: &DockState<Tab>) -> bool {
 }
 
 /// Draws the tabs of one persona's dock.
-pub struct Viewer<'a> {
+pub struct Viewer {
     pub persona: Persona,
-    /// PhotoCraft, in Pixel: its canvas and its right dock.
-    pub pixel: Option<&'a mut Pixel>,
-    /// The document's base layer is behind its develop settings (the canvas says so).
-    pub rendering: bool,
-    /// The open document's name, Pixel's canvas tab title.
-    pub document: Option<String>,
     /// Set when the user picks Reset Workspace from a tab's right-click menu; the shell then runs
     /// `window.resetWorkspace` after the dock is drawn (the layout can't change while it is).
     pub reset_requested: bool,
-    /// The open document's history rows and the row it is at, for Pixel's History tab.
-    pub history: Option<(Vec<studio_doc::history::Entry>, usize)>,
-    /// A History row clicked: the shell runs `history.goto` to it after the dock is drawn.
-    pub goto: Option<usize>,
-    /// Every tab takes no input (Pixel while a Develop geometry change is on its way into the
-    /// layers); the dock's tabs don't inherit the shell's disabled `Ui`.
-    pub barred: bool,
 }
 
-impl TabViewer for Viewer<'_> {
+impl TabViewer for Viewer {
     type Tab = Tab;
 
     fn id(&mut self, tab: &mut Tab) -> Id {
@@ -162,34 +148,12 @@ impl TabViewer for Viewer<'_> {
 
     fn title(&mut self, tab: &mut Tab) -> WidgetText {
         match tab {
-            Tab::Canvas => match &self.document {
-                Some(name) if self.persona == Persona::Pixel => name.as_str().into(),
-                _ => self.canvas_title().into(),
-            },
+            Tab::Canvas => self.canvas_title().into(),
             Tab::Panel(name) => name.as_str().into(),
         }
     }
 
     fn ui(&mut self, ui: &mut Ui, tab: &mut Tab) {
-        if self.barred {
-            ui.disable();
-        }
-        if let Some(px) = self.pixel.as_deref_mut() {
-            match tab {
-                Tab::Canvas => return px.canvas(ui, self.rendering),
-                Tab::Panel(name) if name == "Layers" => return px.panels(ui),
-                Tab::Panel(name) if name == "History" => {
-                    match &self.history {
-                        Some((rows, at)) => self.goto = crate::history_panel::show(ui, rows, *at),
-                        None => {
-                            ui.label(theme::placeholder("No document"));
-                        }
-                    }
-                    return;
-                }
-                Tab::Panel(_) => {}
-            }
-        }
         match tab {
             Tab::Canvas => {
                 ui.centered_and_justified(|ui| {
@@ -239,8 +203,7 @@ impl TabViewer for Viewer<'_> {
 
     fn tab_style_override(&self, tab: &Tab, global: &TabStyle) -> Option<TabStyle> {
         let canvas = *tab == Tab::Canvas;
-        // PhotoCraft's panels bring their own padding
-        (canvas || self.pixel.is_some()).then(|| {
+        canvas.then(|| {
             let mut s = global.clone();
             if canvas {
                 s.tab_body.bg_fill = TOKENS.canvas;
@@ -251,7 +214,7 @@ impl TabViewer for Viewer<'_> {
     }
 }
 
-impl Viewer<'_> {
+impl Viewer {
     fn canvas_title(&self) -> &'static str {
         match self.persona {
             Persona::Library => "Grid",

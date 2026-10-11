@@ -106,7 +106,27 @@ In this order, ahead of PRD milestone 6:
        PhotoCraft's `session.authorize`; `taking_the_documents_photo_back_leaves_no_trace` checks
        the take-back adds no history step, leaves the document saved, and keeps the photo's id,
        source, hash, edits and file.
-   - Temporarily unavailable keys (T3 until T3m): none yet.
+   - [x] T3 Pixel is PhotoCraft's own window (`eframe::App::ui` under the bar, its default
+     theme unrecoloured; Studio's style goes back when another persona shows, each app's before
+     the other's `logic`, which also fixes T2's LOW on the hand-off order). Studio's pieces of
+     PhotoCraft (options bar, tool bar, canvas, dock tab, overlays, Pro theme in Studio's
+     colours) and their tests are gone; L7 retired. Its in-window menus are hidden (an empty
+     `native_menu` backend), its shortcuts still run. Parity (a) and (b) green for Pixel with no
+     document, two layers, the brush, Levels open; allow-listed: Studio's History, and the open
+     dialog, which PhotoCraft centres on the whole window (the persona bar included, so half the
+     bar higher). Until T3b, Pixel draws nothing while a Develop geometry change renders (its
+     `logic` doesn't run, so neither does its `ui`).
+     - L15: its document tab's × and the tab's Close menu would close the document past Studio:
+       Studio covers its tab strip (`l15_photocrafts_document_tab_cant_close_the_document`, seen
+       failing without the cover).
+     - Studio's History floats at the left edge of PhotoCraft's dock (D1) in Studio's look until
+       T4.
+     - PhotoCraft's home screen (New document…, Open…) and palette can make documents of its
+       own: with no Studio document open, Studio closes them too and says how to get one, as it
+       already did with one open.
+   - Temporarily unavailable keys (T3 until T3m), dropped in Pixel: F12 Revert, Ctrl+Alt+W Close
+     All, Ctrl+Alt+P Close Others, Ctrl+Alt+Shift+O Open As, Ctrl+Alt+S Save a Copy
+     (`keys_of_photocraft_file_items_studio_will_hide_do_nothing`).
 2. [ ] **Pixel slow-frame fix** (Open items: frames over 0.4 s); the deferred `bench.rs` peak
    bytes during a follow waits on it.
 3. [ ] **Film**.

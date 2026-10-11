@@ -127,6 +127,8 @@ Not limitations (behaviour as each app ships, so it stays):
 - LightCraft's dim layers cover the persona bar too.
 - PhotoCraft's title bar drags or maximises the window.
 - PhotoCraft's `fit_window` maximises an oversized window once.
+- PhotoCraft centres its dialogs on the whole window, so in Studio they sit half the persona bar
+  higher over its chrome than in PhotoCraft alone.
 
 ## 4. Checking parity automatically
 
@@ -308,6 +310,19 @@ PROGRESS.md.
   - L15 behaviour test (the document tab's × closes PhotoCraft's document directly). Until
     T3m, Studio puts the document back as when PhotoCraft closes it today, or the × is covered.
     Which one is decided in T3 with a test.
+  - Done 2026-10-11, with these changes to the above:
+    - L15: the tab strip is covered (an input-taking area over it, nothing painted), so its ×
+      and its Close menu do nothing; Ctrl+W and Studio's commands close the document. Studio's
+      put-back stays for any other way PhotoCraft might close it.
+    - Studio's History floats at the dock's left edge already (D1's place, Studio's look until
+      T4), allow-listed in the parity cases.
+    - The "Image › Adjustments open" case is Levels (Ctrl+L): its dialog is allow-listed, as
+      PhotoCraft centres dialogs on the whole window, which in Studio includes the persona bar.
+    - PhotoCraft's home screen shows with no document (as it ships). What its New and Open, or
+      its palette, make is closed with a notice when Studio has no document, as already when it
+      has one.
+    - The bare PhotoCraft in the parity cases starts from egui as eframe gives it (as LightCraft's
+      since T2), and is given the document as Studio gives it (imported by `studio_doc`).
 - **T3m. Studio hosts PhotoCraft's menus** in the persona bar row, through its `native_menu`
   backend. The backend receives the full model in `sync` and sends the clicks Studio forwards in
   `drain`. It is drawn with PhotoCraft's tokens and fonts.

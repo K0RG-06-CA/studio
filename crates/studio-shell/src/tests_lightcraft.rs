@@ -565,21 +565,50 @@ fn a_relaunch_in_develop_stays_in_develop() {
     assert_eq!((h.state().persona, lc(&h).ui.view, lc(&h).ui.right), (Persona::Develop, ViewMode::Detail, RightPanel::Edit));
 }
 
+/// Each persona draws in its app's style: LightCraft's in Library and Develop, PhotoCraft's in
+/// Pixel, Studio's elsewhere. Back and forth, so neither app takes the other's style for Studio's
+/// (each gives Studio's back before the other's `logic` runs).
 #[test]
-fn lightcrafts_style_shows_only_in_its_personas() {
-    let lightcraft = |h: &Harness<'_, StudioShell>| h.ctx.global_style().visuals.override_text_color.is_some();
-    let studio_style = |h: &Harness<'_, StudioShell>| {
+fn each_persona_shows_its_apps_style() {
+    #[derive(Debug, PartialEq)]
+    enum Style {
+        LightCraft,
+        PhotoCraft,
+        Studio,
+    }
+    let style = |h: &Harness<'_, StudioShell>, photocraft: &Option<String>| {
         let s = h.ctx.global_style();
         let body = s.text_styles.get(&egui::TextStyle::Body).map(|f| f.size);
-        (s.visuals.panel_fill, s.visuals.override_text_color, body) == (crate::theme::TOKENS.chrome, None, Some(crate::theme::TOKENS.font_size))
+        if photocraft.as_ref() == Some(&format!("{s:?}")) {
+            Style::PhotoCraft
+        } else if s.visuals.override_text_color.is_some() {
+            Style::LightCraft
+        } else if (s.visuals.panel_fill, body) == (crate::theme::TOKENS.chrome, Some(crate::theme::TOKENS.font_size)) {
+            Style::Studio
+        } else {
+            panic!("an unknown style: {s:?}")
+        }
     };
     let mut h = studio();
     h.run_steps(5);
-    assert!(lightcraft(&h), "Library: LightCraft's");
-    for (p, theirs) in [("film", false), ("develop", true), ("pixel", false), ("library", true), ("film", false)] {
+    assert_eq!(style(&h, &None), Style::LightCraft, "Library");
+    // PhotoCraft's, as it sets it up the first time Pixel shows
+    h.state_mut().run("persona.pixel").unwrap();
+    h.run_steps(3);
+    let photocraft = Some(format!("{:?}", h.ctx.global_style()));
+    let order = [
+        ("film", Style::Studio),
+        ("develop", Style::LightCraft),
+        ("pixel", Style::PhotoCraft),
+        ("library", Style::LightCraft),
+        ("film", Style::Studio),
+        ("pixel", Style::PhotoCraft),
+        ("film", Style::Studio),
+    ];
+    for (p, want) in order {
         h.state_mut().run(&format!("persona.{p}")).unwrap();
         h.run_steps(3);
-        assert!(if theirs { lightcraft(&h) } else { studio_style(&h) }, "{p}: {}", if theirs { "LightCraft's" } else { "Studio's" });
+        assert_eq!(style(&h, &photocraft), want, "{p}");
     }
 }
 
