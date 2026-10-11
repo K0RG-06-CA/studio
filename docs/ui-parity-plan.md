@@ -268,6 +268,95 @@ Order: T0 → T1 → T2 → T3 → T3b → T4 → T5 → T6 → T7 → T8. Each 
   - Update PROGRESS.md's Automated checks and Known untested.
   - Tick roadmap 1.
 
+## T0 findings (2026-10-10; tests in `crates/studio-shell/src/tests_parity_spike.rs`)
+
+1. **Both whole windows nest under a host bar.** In a host with a 34 pt bar, each app's
+   accessibility tree is identical to the bare app's, moved down by the bar:
+   `t0_lightcrafts_whole_window_nests_under_a_host_bar` and
+   `t0_photocrafts_whole_window_nests_under_a_host_bar`. Parity check (a) works as planned.
+2. **Fonts: the last installer wins.**
+   - After a visit to Pixel, Library draws with PhotoCraft's fonts, because LightCraft installs
+     its fonts only once (`t0_after_a_visit_to_pixel_library_draws_with_photocrafts_fonts`).
+   - What T5 has to handle:
+     - `set_fonts` takes effect at the next pass, and egui panics on an unbound named family
+       (PhotoCraft's "medium"). So the new persona draws from the frame after its fonts go in.
+     - PhotoCraft also adds a font-size plugin that rescales whatever fonts are installed when
+       its UI font size preference changes.
+     - So T5 caches each app's `FontDefinitions` once that app has set them up, and installs the
+       cached copy on a switch rather than calling the app's install again.
+3. **LightCraft's menus can't be routed in place.**
+   - `run` has no hook or filter.
+   - Its Edit › Undo click is recorded by Studio as a new Develop step, not as Studio's undo
+     (`t0_lightcrafts_edit_undo_menu_item_is_recorded_as_a_new_develop_step`).
+   - What a host can do: `native_menu = true` hides the in-window menus; the model
+     (`menubar::menu_bar`) and `run_item` are public; `native_shortcuts` lets the host claim
+     keys.
+   - Items:
+     - Edit › Undo/Redo: must route to Studio's history.
+     - Quit: already reaches Studio's close guard (ViewportCommand::Close).
+     - Open Library: closes the library under the open document.
+     - Save Metadata to File (Ctrl+S): writes an XMP sidecar beside the source and never the
+       source itself.
+     - Photo › Delete: can delete the document's photo.
+     - Export: never writes over an original (upstream guard).
+     - Paste, Sync, Reset, Read Metadata: ordinary Develop edits.
+4. **PhotoCraft's Edit › Undo undoes two steps at once.**
+   - Studio reads PhotoCraft's undo of its own Pixel step as a jump to before it, so a newer
+     Develop step goes too (`t0_photocrafts_edit_undo_menu_item_undoes_two_steps_at_once`).
+   - Levers:
+     - `session.authorize`: an engine-command gate whose rejection shows as an error in its
+       status bar;
+     - `prefs.menus.hidden` and `prefs.shortcuts`;
+     - consuming keys before its `logic`;
+     - the `Services` pickers;
+     - `services.native_menu`: the host gets the whole menu model and owns every click; the
+       title bar stays and only the menus leave it.
+   - Items to route: Open, Save, Save As, Close (also the document tab's ×), Exit, Undo, Redo,
+     Toggle Last State.
+   - Items with no Studio meaning, to hide: New, Open As, Open Recent, Save a Copy, Revert,
+     Close All, Close Others, Purge.
+5. **History toggle (D1).**
+   - The rail button can be routed: its click lands after the dock reads its flags, so Studio
+     resets the flag after `ui` and PhotoCraft's History is never drawn.
+   - Window › History can be routed once Studio owns the menus (`native_menu`).
+   - Not routable: the title bar's workspace dropdown (Photography, saved custom workspaces)
+     turns History on before the dock draws, in the same frame. PhotoCraft's History shows for
+     one frame.
+   - Turning History off also hides PhotoCraft's Actions and Layer Comps tabs (dock.rs:108).
+
+**New limitations** (each gets its test in the task named):
+
+- **L13 (LightCraft):** no host hook on menu commands. An L5-style note, plus the T0 undo test
+  as its behaviour test. (T2)
+- **L14 (PhotoCraft):** the workspace dropdown shows its own History for one frame. Behaviour
+  test: the frame a workspace with History is picked draws PhotoCraft's History tab. (T4)
+- **L15 (PhotoCraft):** the document tab's × and its context-menu Close go straight to the
+  engine. Routing them through `session.authorize` flashes a status-bar error. Behaviour test.
+  (T3)
+- **L16 (PhotoCraft):** Actions and Layer Comps share History's flag, so Pixel loses them. Test:
+  with `panels.history` off, no Actions tab is drawn. (T4)
+
+**Task list changes:**
+
+- **New D4:** where the apps' menus go (below).
+- **New T2m / T3m:** Studio hosts LightCraft's and PhotoCraft's menu bars from their public
+  models, with the routing table above. Each routed item is tested to go through Studio's prompt,
+  history, key queue and never-overwrite-source rule; each hidden item is tested to be absent.
+  - The T0 undo tests flip to the fixed behaviour there.
+- **T5** is as above, with font caching.
+
+**D4 (needs your decision): where the apps' menus go.** Neither app lets a host route menu
+clicks in place. Both support a host-drawn ("native") menu bar.
+
+- Recommended: Studio draws the persona's app menus (from its public model) in the persona bar
+  row, left of the persona buttons. This is how each app looks with a native menu bar (macOS),
+  and it is the only way every item can be routed.
+- The cost: the menus move up one row from where LightCraft's and PhotoCraft's Windows builds
+  put them. The parity check allow-lists the empty menu slot.
+- Alternative (PhotoCraft only): keep its in-window menus and gate commands with
+  `session.authorize`. Every routed item would flash a status-bar error, and LightCraft has no
+  equivalent.
+
 ## Decisions (approved 2026-10-10)
 
 - **D1. Studio's History in Pixel is a floating panel.**

@@ -33,6 +33,9 @@ mod tests_photocraft;
 #[cfg(test)]
 mod tests_images;
 
+#[cfg(test)]
+mod tests_parity_spike;
+
 /// Lightroom Classic's module keys: (key, command, persona, what LightCraft shows).
 const LIGHTROOM_KEYS: [(egui::Key, &str, Persona, lightroom::Go); 4] = [
     (egui::Key::G, "view.grid", Persona::Library, lightroom::Go::Grid),

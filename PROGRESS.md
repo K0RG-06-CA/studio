@@ -13,7 +13,11 @@ In this order, ahead of PRD milestone 6:
    Affinity-style persona bar and the minimum the shared document needs (its History tab, styled
    as a native storytold panel in PhotoCraft's History spot; notices; prompts; disabled states).
    Undoes milestones 1, 2 and 4's Adobe recolouring and re-docking, so upstream UI updates port
-   with no restyling. Not planned yet.
+   with no restyling. Plan: `docs/ui-parity-plan.md` (approved, D1–D3).
+   - [x] T0 spike (`tests_parity_spike.rs`): both windows nest under a host bar; fonts: the last
+     installer wins; neither app's menu clicks can be routed in place (LightCraft's Undo becomes
+     a new Develop step; PhotoCraft's undoes two steps at once). New L13–L16 and decision D4
+     (menus in the persona bar row) are in the plan's "T0 findings". Waiting on D4 before T1.
 2. [ ] **Pixel slow-frame fix** (Open items: frames over 0.4 s); the deferred `bench.rs` peak
    bytes during a follow waits on it.
 3. [ ] **Film**.
