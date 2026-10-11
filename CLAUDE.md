@@ -13,8 +13,9 @@ Studio is an Affinity-style all-in-one photo app built in Rust on the storytold 
   ```bash
   cargo fmt --check
   cargo clippy --workspace --all-targets --locked -- -D warnings
-  cargo test --workspace --locked
+  cargo test --workspace --locked -- --test-threads=4
   ```
+  Local runs use `--test-threads=4`: with every core at once, a loaded dev machine can keep LightCraft's demo renders waiting past the tests' time limits. CI runs the plain command.
 - Never push or add a remote unless asked.
 
 ## Checking a milestone
