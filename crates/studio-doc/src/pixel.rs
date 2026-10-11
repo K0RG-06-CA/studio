@@ -355,7 +355,9 @@ impl Link {
     /// landed on the other side of a geometry change). One of other settings is put right by
     /// `restored` (the current render back in, the layers shifted by whole pixels for a crop),
     /// unless that would take more than a shift (the current render is in another frame: the
-    /// state is from the other side of a geometry change, whose render was replaced since). Then
+    /// state is from the other side of a geometry change, whose render was replaced since), or a
+    /// shift to a render that isn't of `want` either (a crop redone over a later render: the
+    /// state is in the frame `want` puts it, and the stale render in another). Then
     /// the document stays as it is and has no current render: the next render of `want` lands
     /// into it, in the state's own frame, and nothing is resampled.
     fn adopt(&mut self, doc: &photocraft_doc::Document, want: u64) {
@@ -365,10 +367,18 @@ impl Link {
             self.current = Some((shown.clone(), doc.size, Some(anchor)));
             return;
         }
-        let shifts = |(_, size, to): &(Surface, Size, Option<Anchor>)| {
-            to.as_ref().is_none_or(|to| matches!(map(&anchor, doc.size, to, *size), Map::Same | Map::Shift(..)))
+        // the current render goes back in when it is in the state's frame, or a crop away from it
+        // and of the settings wanted (the layers then shift into its frame); a stale one a crop
+        // away would shift them out of the frame the settings wanted put them in (a crop redone
+        // over a later render)
+        let fits = |(_, size, to): &(Surface, Size, Option<Anchor>)| {
+            to.as_ref().is_none_or(|to| match map(&anchor, doc.size, to, *size) {
+                Map::Same => true,
+                Map::Shift(..) => to.hash == want,
+                _ => false,
+            })
         };
-        if self.current.as_ref().is_some_and(|c| !shifts(c)) {
+        if self.current.as_ref().is_some_and(|c| !fits(c)) {
             self.current = None;
         }
     }

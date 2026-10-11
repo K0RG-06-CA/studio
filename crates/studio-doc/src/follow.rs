@@ -899,4 +899,35 @@ mod tests {
         assert!(!t.doc.history.pending_follow());
         assert_eq!((t.size(), dot(&t.doc.pixel, "Paint")), ((400, 600), (100, 299)));
     }
+
+    /// Review (HIGH 1): a crop (a whole-pixel shift), then an exposure rendered over it; back
+    /// before both, then the crop redone and saved at once, before any render: the file has the
+    /// cropped settings and the layers where the crop put them.
+    #[test]
+    fn a_crop_redone_after_a_later_render_saves_its_layers_where_the_crop_put_them() {
+        let mut t = open();
+        t.paint("Paint", 300, 200);
+        // keep the bottom three quarters: the long side stays, so a pure shift up by 100
+        t.develop("Crop", |s| s.crop.geometry.rect.y0 = 0.25);
+        t.settle();
+        assert_eq!((t.size(), dot(&t.doc.pixel, "Paint")), ((600, 300), (300, 100)));
+        t.develop("Exposure", |s| s.light.exposure = 1.0);
+        t.settle();
+        t.doc.goto(&mut t.lr, &mut t.px, &mut t.base, 1).unwrap();
+        assert_eq!((t.size(), dot(&t.doc.pixel, "Paint")), ((600, 400), (300, 200)));
+        assert!(t.redo());
+        let path = std::env::temp_dir().join(format!("studio-crop-redo-{}.studio", std::process::id()));
+        t.doc.flush(&mut t.lr, &mut t.px, &mut t.base).unwrap();
+        t.doc.save(&path).unwrap();
+        let saved = Document::open(&path).unwrap();
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(saved.develop.crop.geometry.rect.y0, 0.25, "the cropped settings");
+        let size = (saved.pixel.size.width, saved.pixel.size.height);
+        assert_eq!((size, dot(&saved.pixel, "Paint")), ((600, 300), (300, 100)), "and the layers as cropped");
+        // the base was stale: the crop's own render lands in that frame, the layers stay
+        assert!(!t.base.up_to_date(&t.doc));
+        t.settle();
+        assert_eq!((t.size(), dot(&t.doc.pixel, "Paint")), ((600, 300), (300, 100)));
+        assert_eq!(t.doc.take_notice(), None);
+    }
 }
