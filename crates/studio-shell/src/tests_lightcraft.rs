@@ -236,6 +236,24 @@ fn a_relaunch_in_develop_stays_in_develop() {
 }
 
 #[test]
+fn lightcrafts_style_shows_only_in_its_personas() {
+    let lightcraft = |h: &Harness<'_, StudioShell>| h.ctx.global_style().visuals.override_text_color.is_some();
+    let studio_style = |h: &Harness<'_, StudioShell>| {
+        let s = h.ctx.global_style();
+        let body = s.text_styles.get(&egui::TextStyle::Body).map(|f| f.size);
+        (s.visuals.panel_fill, s.visuals.override_text_color, body) == (crate::theme::TOKENS.chrome, None, Some(crate::theme::TOKENS.font_size))
+    };
+    let mut h = studio();
+    h.run_steps(5);
+    assert!(lightcraft(&h), "Library: LightCraft's");
+    for (p, theirs) in [("film", false), ("develop", true), ("pixel", false), ("library", true), ("film", false)] {
+        h.state_mut().run(&format!("persona.{p}")).unwrap();
+        h.run_steps(3);
+        assert!(if theirs { lightcraft(&h) } else { studio_style(&h) }, "{p}: {}", if theirs { "LightCraft's" } else { "Studio's" });
+    }
+}
+
+#[test]
 fn ctrl_numbers_only_switch_personas() {
     let mut h = studio();
     h.run_steps(10);
