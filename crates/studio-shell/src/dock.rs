@@ -148,6 +148,9 @@ pub struct Viewer<'a> {
     pub history: Option<(Vec<studio_doc::history::Entry>, usize)>,
     /// A History row clicked: the shell runs `history.goto` to it after the dock is drawn.
     pub goto: Option<usize>,
+    /// Every tab takes no input (Pixel while a Develop geometry change is on its way into the
+    /// layers); the dock's tabs don't inherit the shell's disabled `Ui`.
+    pub barred: bool,
 }
 
 impl TabViewer for Viewer<'_> {
@@ -172,6 +175,9 @@ impl TabViewer for Viewer<'_> {
     }
 
     fn ui(&mut self, ui: &mut Ui, tab: &mut Tab) {
+        if self.barred {
+            ui.disable();
+        }
         if let Some(px) = self.pixel.as_deref_mut() {
             match tab {
                 Tab::Canvas => return px.canvas(ui, self.rendering),

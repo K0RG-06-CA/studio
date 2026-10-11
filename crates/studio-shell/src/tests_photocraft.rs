@@ -1388,3 +1388,36 @@ fn journey_pick_pixel_develop_paint_rotate_undo_redo_save_reopen_close() {
     assert!(h.state().pixel.as_ref().unwrap().app.session.documents().is_empty());
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+// --- Milestone 5, Codex review ---
+
+/// Review (HIGH 2): while a Develop rotation is on its way into the layers, Pixel takes no
+/// pointer input either (its canvas, panels and windows), not only no commands: a brush stroke
+/// on the canvas then paints nothing, and the rotation is the one state added, the paint turned.
+#[test]
+fn a_stroke_on_the_canvas_while_a_rotation_renders_paints_nothing() {
+    let mut h = studio();
+    painted_document(&mut h);
+    h.state_mut().run("persona.pixel").unwrap();
+    h.run_steps(3);
+    h.state_mut().run_with("pixel.tool", &serde_json::json!({"name": "brush"})).unwrap();
+    h.run_steps(2);
+    let past = |h: &Harness<'_, crate::StudioShell>| h.state().pixel.as_ref().unwrap().app.session.active().unwrap().history.past_len();
+    let before = past(&h);
+    // a scripted rotation while Pixel shows (as MCP will do it); the frame that sees it starts
+    // the render, and the button held for the stroke keeps it from landing meanwhile
+    rotate_left(&mut h);
+    h.run_steps(1);
+    assert!(h.state().develop_rendering());
+    let end = stroke_down(&mut h);
+    assert!(h.state().develop_rendering(), "still waiting under the held button");
+    release(&mut h, end);
+    settle_base(&mut h);
+    h.run_steps(2);
+    assert!(!h.state().develop_rendering());
+    let doc = &h.state().pixel.as_ref().unwrap().app.session.active().unwrap().doc;
+    let l = doc.layers.iter().find(|l| l.name == "Paint").unwrap();
+    let b = photocraft_compose::bounds::content_bounds(l.surface().unwrap());
+    assert_eq!((b.x0, b.y0, b.x1, b.y1), (100, 299, 101, 300), "only the old pixel, turned");
+    assert_eq!(past(&h), before + 1, "the rotation is the one new state");
+}

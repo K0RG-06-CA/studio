@@ -637,11 +637,17 @@ impl StudioShell {
         }
         self.engine_logic(ui.ctx());
         self.top_bar(ui);
+        // a Develop geometry change on its way into the layers: Pixel takes no input meanwhile
+        // (its canvas, panels and windows would edit the layers the render is about to turn)
+        let barred = self.persona == Persona::Pixel && self.develop_rendering();
+        if barred {
+            ui.disable();
+        }
         self.persona_area(ui);
         if let Some(lr) = self.lightroom.as_mut().filter(|_| self.persona.lightroom()) {
             lr.overlays(ui.ctx());
         }
-        if let Some(px) = self.pixel.as_mut().filter(|_| self.persona == Persona::Pixel) {
+        if let Some(px) = self.pixel.as_mut().filter(|_| self.persona == Persona::Pixel && !barred) {
             px.overlays(ui.ctx());
         }
         self.settle();
@@ -802,7 +808,8 @@ impl StudioShell {
         let rendering = self.document.as_ref().is_some_and(|d| !self.base.up_to_date(d));
         let document = self.document.as_ref().map(|d| d.name.clone());
         let history = self.document.as_ref().filter(|_| p == Persona::Pixel).map(|d| (d.history.entries(), d.history.position()));
-        let mut viewer = dock::Viewer { persona: p, lightroom, pixel, rendering, document, reset_requested: false, history, goto: None };
+        let barred = p == Persona::Pixel && self.document.as_ref().is_some_and(|d| d.history.pending_follow());
+        let mut viewer = dock::Viewer { persona: p, lightroom, pixel, rendering, document, reset_requested: false, history, goto: None, barred };
         egui::CentralPanel::default().frame(egui::Frame::NONE.fill(t.divider)).show(ui, |ui| {
             DockArea::new(&mut self.layouts[p as usize])
                 .id(egui::Id::new(("studio.dock", p.id())))
