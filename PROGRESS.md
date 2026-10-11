@@ -17,7 +17,11 @@ In this order, ahead of PRD milestone 6:
    - [x] T0 spike (`tests_parity_spike.rs`): both windows nest under a host bar; fonts: the last
      installer wins; neither app's menu clicks can be routed in place (LightCraft's Undo becomes
      a new Develop step; PhotoCraft's undoes two steps at once). New L13–L16 and decision D4
-     (menus in the persona bar row) are in the plan's "T0 findings". Waiting on D4 before T1.
+     (menus in the persona bar row) are in the plan's "T0 findings".
+   - D4 approved: Studio hosts both apps' menu bars in the persona bar row (T2m, T3m). No commit
+     draws either app's in-window menus before they're routed. Ctrl+S saves the document in
+     every persona (T2m). L14 and L16 accepted.
+   - Temporarily unavailable keys (T3 until T3m): none yet.
 2. [ ] **Pixel slow-frame fix** (Open items: frames over 0.4 s); the deferred `bench.rs` peak
    bytes during a follow waits on it.
 3. [ ] **Film**.
@@ -460,6 +464,10 @@ Former hand checks and the tests that replaced them:
 - **Milestone 3** (`studio-doc` unit tests + shell tests): the base layer equals LightCraft's own render within 1/255 → `the_first_sync_renders_the_photo_into_the_base_as_lightcraft_renders_it`; a settings change re-renders it (and a drag renders once, at release; a crop resizes the document) → `changing_develop_settings_in_the_catalog_re_renders_the_base`, `a_slider_drag_renders_once_at_release`, `a_crop_resizes_the_document_with_the_base`, `editing_in_develop_re_renders_the_documents_base_layer`; save/open round trip, bad files → `save_and_open_keep_everything_but_the_base_pixels`, `bad_files_are_errors_not_crashes`; opening into a library (found by hash, imported, the file's settings as a History step) → `open::tests::*`; the commands, the top-bar name, relaunch → `document_new_needs_a_picked_photo_and_puts_its_name_in_the_top_bar`, `a_saved_document_comes_back_after_a_relaunch`, smoke test (document saved, reopened at the relaunch, base rendered on the real app).
 
 ## Open items
+
+- **User-visible gap (L16, accepted):** Pixel has no Actions or Layer Comps panels. PhotoCraft
+  shows them with its History panel, which stays off because the document's history is
+  Studio's.
 
 - **Film track needs a pipeline hook in LightCraft** (smallest possible, offered upstream per PRD › Staying
   in sync): LightCraft `eeb136b` has no way to register an extra develop step, and `PRD-halation.md` needs

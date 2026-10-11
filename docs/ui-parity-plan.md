@@ -179,7 +179,33 @@ There are three layers, and none needs a person.
 
 ## 5. Tasks (one commit each, validation green before every commit)
 
-Order: T0 → T1 → T2 → T3 → T3b → T4 → T5 → T6 → T7 → T8. Each task updates PROGRESS.md.
+Order: T0 → T1 → T2 → T2m → T3 → T3m → T3b → T4 → T5 → T6 → T7 → T8. Each task updates
+PROGRESS.md.
+
+**Rules for the menus** (approved with D4, 2026-10-10):
+
+- **Neither app's in-window menus before they are routed.** No commit draws LightCraft's
+  in-window menus before T2m, or PhotoCraft's before T3m, so the T0 undo bugs never reach main.
+  T2 and T3 run each app with its in-window menus hidden:
+  - LightCraft: `native_menu = true`;
+  - PhotoCraft: `services.native_menu` set to a backend that draws nothing and sends no clicks.
+- **Every app shortcut is accounted for while the menus are hidden** (T2 to T2m, T3 to T3m).
+  - Hiding the menus doesn't unbind keys: each app's shortcuts still run in its `logic`.
+  - Studio's tables keep the document keys:
+    - `UNDO_KEYS` in every persona while a document is open;
+    - `DOCUMENT_KEYS` in Pixel.
+  - Undo, redo, save, open and close keys keep working as they do at `2ca1b17`. T2 and T3 each
+    test them:
+    - Library/Develop: Ctrl+Z and Shift+Ctrl+Z with a document;
+    - Pixel: Ctrl+Z, Shift+Ctrl+Z, Ctrl+S, Ctrl+O and Ctrl+W.
+  - A PhotoCraft key whose item will be hidden in T3m acts on PhotoCraft's own session today. T3
+    takes those keys before PhotoCraft's `logic` and drops them, and lists them in PROGRESS.md as
+    temporarily unavailable until T3m: F12 Revert, Ctrl+Alt+W Close All, Ctrl+Alt+P Close
+    Others, Ctrl+Alt+Shift+O Open As, Ctrl+Alt+S Save a Copy.
+  - Any other key that only a hidden menu would reach gets the same treatment.
+- **Ctrl+S saves the `.studio` document in every persona** (one document, one save). This comes
+  in T2m. Until then, Ctrl+S in Library and Develop stays LightCraft's Save Metadata to File,
+  which writes an XMP sidecar and never the photo.
 
 - **T0. Spike: pin what upstream does inside Studio.** Tests only, no production change.
   - LightCraft's `ui` nested under a 34 pt bar: its top bar starts at the bar's bottom.
@@ -210,7 +236,35 @@ Order: T0 → T1 → T2 → T3 → T3b → T4 → T5 → T6 → T7 → T8. Each 
     config loads without error (D3).
   - Test: with a photo-less document, LightCraft's detail view doesn't take the bar into Develop
     (D2).
-  - Parity tests (a) and (b) green for Library and Develop.
+  - LightCraft's in-window menus hidden (`native_menu = true`; see the rules for the menus).
+  - Test: undo and redo keys with a document still go to Studio's history.
+  - L13 note and its behaviour test (the T0 undo test, moved).
+  - Parity tests (a) and (b) green for Library and Develop. The empty menu slot in LightCraft's
+    top bar is allow-listed (L13).
+- **T2m. Studio hosts LightCraft's menus** in the persona bar row, left of the persona buttons.
+  - Built from `menubar::menu_bar` and run through `run_item`, drawn with LightCraft's tokens
+    and fonts.
+  - Routing:
+    - Edit › Undo/Redo: Studio's `edit.undo`/`edit.redo` while a document is open, LightCraft's
+      own otherwise.
+    - Quit: Studio's close guard.
+    - Open Library: disabled while a document is open.
+    - Photo › Delete: disabled when the selection holds the document's photo.
+    - Save Metadata to File: stays, with no shortcut.
+    - Everything else: as LightCraft runs it.
+  - Keys:
+    - Ctrl+S runs `document.save` in Library and Develop. Ctrl+Shift+S, Ctrl+O, Ctrl+N and
+      Ctrl+W run `document.*` there too, as in Pixel.
+    - Ctrl+Z and Ctrl+Shift+Z are Studio's while a document is open.
+    - All of these are claimed through `native_shortcuts`, so LightCraft never sees them.
+  - Tests:
+    - the T0 undo test flips: a menu Undo moves Studio's history back one step and adds none;
+    - Ctrl+S in Library and in Develop writes the `.studio` file, never writes an XMP and
+      leaves the photo's bytes and modification time unchanged;
+    - Open Library is disabled while a document is open, and enabled again after it closes;
+    - Photo › Delete is disabled for the document's photo and enabled for another;
+    - Quit from the menu shows Studio's save prompt;
+    - the menu items in the accessibility tree match `menu_bar` minus the disabled ones.
 - **T3. Pixel is PhotoCraft's own window.**
   - Call `eframe::App::ui` in the area under the bar.
   - Use its default theme, unrecoloured.
@@ -220,6 +274,37 @@ Order: T0 → T1 → T2 → T3 → T3b → T4 → T5 → T6 → T7 → T8. Each 
   - Parity tests green for Pixel, with History allow-listed until T4.
   - Until T3b lands, Pixel shows nothing while a follow is pending (PhotoCraft's `ui` isn't
     called), so it is never left open to input.
+  - PhotoCraft's in-window menus hidden (`services.native_menu` with an empty backend; see the
+    rules for the menus).
+  - The keys of items T3m will hide are taken and dropped. They are listed in PROGRESS.md as
+    temporarily unavailable.
+  - Test:
+    - Ctrl+Z, Shift+Ctrl+Z, Ctrl+S, Ctrl+O and Ctrl+W still run Studio's commands;
+    - each dropped key leaves PhotoCraft's session unchanged.
+  - L15 behaviour test (the document tab's × closes PhotoCraft's document directly). Until
+    T3m, Studio puts the document back as when PhotoCraft closes it today, or the × is covered.
+    Which one is decided in T3 with a test.
+- **T3m. Studio hosts PhotoCraft's menus** in the persona bar row, through its `native_menu`
+  backend. The backend receives the full model in `sync` and sends the clicks Studio forwards in
+  `drain`. It is drawn with PhotoCraft's tokens and fonts.
+  - Routing:
+    - Open → `document.open`.
+    - Save → `document.save`.
+    - Save As → `document.saveAs`.
+    - Close → `document.close`.
+    - Exit → Studio's close guard.
+    - Undo, Redo, Toggle Last State → Studio's history.
+    - Window › History → Studio's History panel (D1).
+  - Hidden: New, Open As, Open Recent, Save a Copy, Revert, Close All, Close Others, Purge.
+  - The dropped keys from T3 come back where they now map to a routed item, or stay dropped and
+    listed.
+  - The PROGRESS.md list of temporarily unavailable keys is cleared or moved to the limitations.
+  - Tests:
+    - the T0 undo test flips: a menu Undo takes only the newest step;
+    - every routed item goes through Studio's prompt, history, key queue and never-overwrite
+      rule;
+    - every hidden item is absent from the model Studio draws;
+    - Window › History opens Studio's panel, and PhotoCraft's History is never drawn.
 - **T3b. Pixel input block during a pending Develop render. HIGH RISK: run on `/effort high`.**
   - The input-blocking layer replaces `ui.disable()` and `Viewer.barred`, so Pixel stays
     visible while it waits.
@@ -328,12 +413,15 @@ Order: T0 → T1 → T2 → T3 → T3b → T4 → T5 → T6 → T7 → T8. Each 
 
 - **L13 (LightCraft):** no host hook on menu commands. An L5-style note, plus the T0 undo test
   as its behaviour test. (T2)
-- **L14 (PhotoCraft):** the workspace dropdown shows its own History for one frame. Behaviour
+  - Accepted (D4): on Windows, both apps' menus sit in Studio's persona bar row instead of in
+    each app's own top bar, as on macOS with a native menu bar.
+- **L14 (PhotoCraft, accepted):** the workspace dropdown shows its own History for one frame. Behaviour
   test: the frame a workspace with History is picked draws PhotoCraft's History tab. (T4)
 - **L15 (PhotoCraft):** the document tab's × and its context-menu Close go straight to the
   engine. Routing them through `session.authorize` flashes a status-bar error. Behaviour test.
   (T3)
-- **L16 (PhotoCraft):** Actions and Layer Comps share History's flag, so Pixel loses them. Test:
+- **L16 (PhotoCraft, accepted; a gap users will notice, listed in PROGRESS.md):** Actions and
+  Layer Comps share History's flag, so Pixel loses them. Test:
   with `panels.history` off, no Actions tab is drawn. (T4)
 
 **Task list changes:**
@@ -345,7 +433,7 @@ Order: T0 → T1 → T2 → T3 → T3b → T4 → T5 → T6 → T7 → T8. Each 
   - The T0 undo tests flip to the fixed behaviour there.
 - **T5** is as above, with font caching.
 
-**D4 (needs your decision): where the apps' menus go.** Neither app lets a host route menu
+**D4 (approved 2026-10-10): where the apps' menus go.** Neither app lets a host route menu
 clicks in place. Both support a host-drawn ("native") menu bar.
 
 - Recommended: Studio draws the persona's app menus (from its public model) in the persona bar
