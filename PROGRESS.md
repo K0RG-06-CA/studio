@@ -338,6 +338,20 @@ See [`PRD.md`](PRD.md) → *Milestones for Claude Code*.
     `document.close` in the smoke script discarded, so the close right after the save no
     longer failed if the save left the document unsaved; only the image's close
     (`document.close discard`) discards now (unit test on the script's parameters).
+  - Codex review of all of M5 (2026-10-10, one commit per fix, test red first):
+    - HIGH: during a pending follow only PhotoCraft's logic was skipped; its canvas, panels
+      and windows still took the pointer, so a stroke painted the unrotated layers and the
+      follow left them unturned. Pixel's area and every dock tab are disabled meanwhile
+      (egui_dock's tabs don't inherit a disabled `Ui`), its windows not drawn.
+    - HIGH: PhotoCraft's coalescing (one key, one state: a slider drag) merged an edit into
+      the state before a Develop step; a Develop step now clears its key. (Studio's undo and
+      redo needed nothing: PhotoCraft's own `undo`/`redo` clear it, and a mutation of that
+      showed no test could tell.)
+    - HIGH: a crop redone over a later render kept the stale uncropped render as current and
+      shifted the layers out of the crop's frame; a save before the next render wrote them
+      misplaced. A render a shift away is kept only when it is of the settings wanted.
+    - MEDIUM (open): one Pixel step at the oldest end blocks all pruning (L12's "lag by one"
+      is unbounded); design under discussion.
 
   **Upstream limitations (M5), each with a test that fails once upstream fixes it:**
   - L8 PhotoCraft `History` can't jump to or replace a state: Studio jumps step by step, and an
