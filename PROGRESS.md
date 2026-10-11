@@ -127,7 +127,7 @@ See [`PRD.md`](PRD.md) → *Milestones for Claude Code*.
   a Develop rotate/straighten/flip yet (they stay, with a notice; M5) or a crop that changes the
   render scale (only tests render at a capped size); the Lightroom filmstrip under Pixel is still
   a placeholder; Pixel's undo is PhotoCraft's own, one shared history is M5.
-- [ ] **5. Round trip** — Library → Develop → Pixel and back on one document, one undo history across personas. Plan: [`docs/m5-plan.md`](docs/m5-plan.md) (rev. 3).
+- [x] **5. Round trip** (2026-10-10) — Library → Develop → Pixel and back on one document, one undo history across personas. Plan: [`docs/m5-plan.md`](docs/m5-plan.md) (rev. 3).
   - [x] 1. `studio_doc::history` (2026-10-09): Studio owns the history, the engines keep the
     states. A Develop step is a settings pair Studio records (before/after `Arc<DevelopSettings>`
     plus the photo's History list, lists shared between neighbouring steps), noted by
@@ -321,7 +321,7 @@ See [`PRD.md`](PRD.md) → *Milestones for Claude Code*.
     goes where the shell last saw the pointer. Asked by the user: an undo key queued behind a
     close (Ctrl+W then Ctrl+Z in one frame) is dropped silently instead of showing "History: no
     document is open".
-  - [ ] 6. Round trip end to end, smoke, docs, limitations (in progress, 2026-10-10). Done:
+  - [x] 6. Round trip end to end, smoke, docs, limitations (2026-10-10):
     journey kittest (`journey_pick_pixel_develop_paint_rotate_undo_redo_save_reopen_close`:
     pick → Pixel makes the document → Develop exposure → a new layer and a brush stroke in
     Pixel → Rotate Left in Develop, the stroke's bounds turn with the photo → Ctrl+Z ×4 back to
@@ -331,8 +331,9 @@ See [`PRD.md`](PRD.md) → *Milestones for Claude Code*.
     through a generic `T: Serialize` bound); smoke script with the M5 commands (`smoke.png`, an
     embedded 16 × 16 PNG written at start, opened, edited, undone, closed; on the photo's
     document a Develop edit and a Pixel layer undone ×2 and redone ×2, a rotation undone; the
-    relaunch now expects 3 Pixel layers); PRD note (the undo history is per session). Left:
-    the smoke test on DX12 (asks first).
+    relaunch now expects 3 Pixel layers); PRD note (the undo history is per session).
+  - [x] Smoke test on DX12 (2026-10-10, 91.5 s for both runs: the PNG opened, edited, undone and
+    closed; the photo document's history walked across personas; the relaunch with 3 Pixel layers)
     Review of task 6 (2026-10-10, one commit per fix, test red first). MEDIUM: every
     `document.close` in the smoke script discarded, so the close right after the save no
     longer failed if the save left the document unsaved; only the image's close
