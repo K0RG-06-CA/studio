@@ -216,28 +216,31 @@ fn fonts(ctx: &egui::Context) -> String {
     })
 }
 
-/// What makes a ctx look the way it does: visuals, text styles, fonts and both apps' tokens.
-fn style(ctx: &egui::Context) -> [String; 5] {
+/// What makes a ctx look and behave the way it does, part by part: its style (the parts most
+/// likely to differ named first, then the whole), the options an app sets up, its fonts and both
+/// apps' tokens.
+fn style(ctx: &egui::Context) -> [(&'static str, String); 9] {
     let s = ctx.global_style();
     [
-        format!("{:?}", s.visuals),
-        format!("{:?}", s.text_styles),
-        fonts(ctx),
-        format!("{:?}", ctx.data(|d| d.get_temp::<lightcraft_ui_egui::theme::Tokens>(egui::Id::NULL))),
-        format!("{:?}", ctx.data(|d| d.get_temp::<photocraft_ui_egui::theme::Tokens>(egui::Id::new("photocraft-theme")))),
+        ("visuals", format!("{:?}", s.visuals)),
+        ("text styles", format!("{:?}", s.text_styles)),
+        ("spacing", format!("{:?}", s.spacing)),
+        ("interaction", format!("{:?}", s.interaction)),
+        ("style", format!("{s:?}")),
+        ("options", ctx.options(|o| format!("{:?} zoom_with_keyboard={} {:?}", o.theme_preference, o.zoom_with_keyboard, o.input_options))),
+        ("fonts", fonts(ctx)),
+        ("LightCraft tokens", format!("{:?}", ctx.data(|d| d.get_temp::<lightcraft_ui_egui::theme::Tokens>(egui::Id::NULL)))),
+        ("PhotoCraft tokens", format!("{:?}", ctx.data(|d| d.get_temp::<photocraft_ui_egui::theme::Tokens>(egui::Id::new("photocraft-theme"))))),
     ]
 }
 
 /// The first part of Studio's style that differs from the bare app's.
 fn style_diff(studio: &egui::Context, upstream: &egui::Context) -> Option<String> {
-    let names = ["visuals", "text styles", "fonts", "LightCraft tokens", "PhotoCraft tokens"];
-    names.iter().zip(style(studio)).zip(style(upstream)).find(|((_, s), u)| s != u).map(|((name, s), u)| {
-        format!(
-            "Studio's {name} differ from the bare app's:
-Studio: {s}
-bare:   {u}"
-        )
-    })
+    style(studio)
+        .into_iter()
+        .zip(style(upstream))
+        .find(|((_, s), (_, u))| s != u)
+        .map(|((name, s), (_, u))| format!("Studio's {name} differ from the bare app's:\nStudio: {s}\nbare:   {u}"))
 }
 
 /// Studio draws with the bare app's style.
@@ -430,6 +433,19 @@ fn the_style_check_names_what_differs() {
     assert_eq!(style_diff(&a.ctx, &b.ctx), None);
     b.ctx.global_style_mut(|s| s.visuals.panel_fill = egui::Color32::RED);
     assert!(style_diff(&a.ctx, &b.ctx).is_some_and(|m| m.starts_with("Studio's visuals differ")));
+}
+
+#[test]
+fn the_style_check_covers_spacing_the_whole_style_and_the_options() {
+    let named = |change: &dyn Fn(&egui::Context)| {
+        let (a, b) = (Harness::new_ui(|_| {}), Harness::new_ui(|_| {}));
+        change(&b.ctx);
+        style_diff(&a.ctx, &b.ctx).map(|m| m.lines().next().unwrap_or_default().to_owned())
+    };
+    assert_eq!(named(&|c| c.global_style_mut(|s| s.spacing.item_spacing.x += 1.0)).as_deref(), Some("Studio's spacing differ from the bare app's:"));
+    assert_eq!(named(&|c| c.global_style_mut(|s| s.animation_time += 1.0)).as_deref(), Some("Studio's style differ from the bare app's:"));
+    // PhotoCraft's setup turns egui's keyboard zoom off
+    assert_eq!(named(&|c| c.options_mut(|o| o.zoom_with_keyboard = false)).as_deref(), Some("Studio's options differ from the bare app's:"));
 }
 
 #[test]
