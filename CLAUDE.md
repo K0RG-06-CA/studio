@@ -1,6 +1,6 @@
 # Studio — instructions for Claude Code
 
-Studio is an Affinity-style all-in-one photo app with Adobe-style personas, built in Rust on the storytold Crafting Apps.
+Studio is an Affinity-style all-in-one photo app built in Rust on the storytold Crafting Apps; each persona looks exactly like the storytold app it embeds.
 
 ## Source of truth
 - **Follow [`PRD.md`](PRD.md).** It defines the goals, personas, scope per version and milestones. Work one milestone at a time; don't build ahead.
@@ -31,11 +31,12 @@ Studio is an Affinity-style all-in-one photo app with Adobe-style personas, buil
 - **Never crash.** Non-test code has no `unwrap`/`expect`/`panic!`/`todo!`/`unreachable!` and no `unsafe` (enforced by crate-level lints; `clippy.toml` allows them in tests only). Return errors.
 - **Every action is a command** with a string id (e.g. `persona.develop`), dispatched through `StudioShell::run`, so MCP can drive it later.
 - **egui/eframe versions match storytold's** (currently 0.36). Bump in lockstep with them.
-- **Clean-room:** copy Adobe's layout and shortcuts, never its icons, fonts or assets. Credit borrowed code/values in `NOTICE`.
+- **UI parity:** each persona looks identical to its storytold app (Library/Develop = LightCraft, Pixel = PhotoCraft, Film = FilmCraft): its own theme, fonts, colours, panel layout and shortcuts. Studio adds only the Affinity-style persona bar on top and the minimum the shared document needs (Studio's History tab styled as a native storytold panel in PhotoCraft's History spot, notices, prompts, disabled states). No Adobe recolouring or re-docking: upstream UI updates must port with no restyling. See PRD.md › UI and look.
+- **Clean-room:** never Adobe's icons, fonts or assets. Credit borrowed code/values in `NOTICE`.
 - **License:** GPL-3.0-or-later.
 - **ARM64 is a hard requirement** (this dev machine is Windows ARM64); CI covers Windows/Linux × x64/ARM64.
 
 ## Layout
-- `crates/studio-shell` — top bar, personas, theme, docking (egui + egui_dock, no eframe; headless-testable with egui_kittest).
+- `crates/studio-shell` — persona bar, personas hosting the storytold apps' own UI (egui, no eframe; headless-testable with egui_kittest). Until UI parity lands it still has Studio's own theme and egui_dock layouts.
 - `crates/studio-doc` — the shared document (no egui): LightCraft develop settings as a live base layer under PhotoCraft's layer tree; the `.studio` file.
 - `apps/studio` — the binary (eframe, wgpu; DX12 only on Windows).

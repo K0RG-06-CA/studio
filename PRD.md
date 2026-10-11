@@ -1,14 +1,14 @@
-# Studio PRD — Affinity-style all-in-one app with Adobe UI
+# Studio PRD — Affinity-style all-in-one app on the storytold apps
 
 Oct 8, 2026 · David Ahn
 
 ## Overview
 
-Studio (working name) is one desktop app that does photo library, raw development, pixel editing, vector and layout on a single shared document, like Affinity. It keeps Affinity's top bar for jumping between modes, but every mode looks and works like Lightroom Classic or Photoshop.
+Studio (working name) is one desktop app that does photo library, raw development, pixel editing, vector and layout on a single shared document, like Affinity. It keeps Affinity's top bar for jumping between modes, and every mode looks and works exactly like the storytold app it embeds (see UI and look).
 
 It is built in Rust on top of the open-source storytold Crafting Apps ([LightCraft](https://github.com/storytold/lightcraft), [PhotoCraft](https://github.com/storytold/photocraft), [VectorCraft](https://github.com/storytold/vectorcraft), [DesignCraft](https://github.com/storytold/designcraft)), so most editing features already exist as separate apps.
 
-**The problem:** Affinity lets you do everything in one app, but its UI feels unfamiliar. Adobe's UI feels right, but the work is split across Lightroom and Photoshop, with round trips and exports between them.
+**The problem:** Affinity lets you do everything in one app, but its UI feels unfamiliar. The storytold apps (modelled on Lightroom and Photoshop) feel right, but the work is split across separate apps, with round trips and exports between them.
 
 ## Goals and non-goals
 
@@ -16,8 +16,7 @@ It is built in Rust on top of the open-source storytold Crafting Apps ([LightCra
 
 - One document that every mode edits, with no export or reimport between modes.
 - An Affinity-style top bar to switch modes in one click, keeping the current selection and zoom.
-- Lightroom Classic layout and shortcuts in Library and Develop.
-- Photoshop layout and shortcuts in Pixel (tools on the left, Layers and Properties on the right).
+- Each persona looks identical to its storytold app: LightCraft in Library and Develop, PhotoCraft in Pixel, FilmCraft in Film (own theme, fonts, colours, panel layout and shortcuts).
 - Runs natively on ARM64 and x64, on Windows and Linux (macOS as a bonus). ARM64 is a hard requirement: every feature, including RW2 decoding and the film effects, must work on ARM64.
 - Every action is a command, so Claude can drive the app over MCP, like LightCraft already does.
 
@@ -29,49 +28,45 @@ It is built in Rust on top of the open-source storytold Crafting Apps ([LightCra
 
 ## UI and look
 
-Affinity's top bar never moves; everything under it changes per persona and always looks like the Adobe app that persona replaces. The default theme is Adobe-style dark grey (confirmed).
+**UI parity (direction change, 2026-10-10).** Each persona looks identical to the storytold app it embeds: Library and Develop are LightCraft, Pixel is PhotoCraft, Film is FilmCraft, each with its own theme, fonts, colours, panel layout and shortcuts, exactly as that app ships. Studio adds only the Affinity-style persona bar on top, plus the minimum the shared document needs: Studio's History tab (styled as a native storytold panel, in PhotoCraft's History spot), Studio's notices and prompts, and disabled states (a persona or command that can't run now). Studio doesn't recolour, restyle or re-dock the storytold apps. Why: users of the storytold apps should feel at home in Studio, and upstream UI updates should port with no restyling. This replaces the earlier plan of Adobe-style recolouring and Lightroom Classic / Photoshop docking layouts.
 
 Window layout, shown for the Pixel persona:
 
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
-│ TOP BAR (Affinity): [Library] [Develop] [Film] [Pixel] [Vector]       │
-│                     [Layout] [Export]               trip-edit.studio  │
+│ PERSONA BAR (Studio, Affinity-style): [Library] [Develop] [Film]     │
+│   [Pixel] [Vector] [Layout] [Export]                trip-edit.studio │
 ├──────────────────────────────────────────────────────────────────────┤
-│ OPTIONS BAR (Photoshop): settings for the active tool                 │
-├────┬───────────────────────────────────────┬─────────────────────────┤
-│ T  │                                       │ Histogram + Navigator   │
-│ O  │                                       │ (Lightroom)             │
-│ O  │   CANVAS: one shared document,        ├─────────────────────────┤
-│ L  │   the same image in every persona     │ Layers (Photoshop)      │
-│ S  │                                       │ - Develop edits = base  │
-│    │                                       │ - Pixel layers on top   │
-│(PS)│                                       ├─────────────────────────┤
-│    │                                       │ Properties (Photoshop)  │
-├────┴───────────────────────────────────────┴─────────────────────────┤
-│ FILMSTRIP (Lightroom): photos in the current album or folder          │
+│                                                                      │
+│   PhotoCraft's own window, exactly as PhotoCraft ships it:           │
+│   its theme, fonts, tool bar, options bar, canvas and panels,        │
+│   with Studio's History tab in PhotoCraft's History spot             │
+│                                                                      │
+│   CANVAS: one shared document, the same image in every persona       │
+│                                                                      │
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
-Develop would swap the tools and Layers for Lightroom's slider panels.
+Develop shows LightCraft's own Develop view under the same bar; Film shows FilmCraft's.
 
-- **Top bar (Affinity):** persona buttons on the left, document name on the right. Ctrl+1 to Ctrl+7 jump between personas.
-- **Library and Develop (Lightroom Classic):** left panel for Navigator, Presets and History; right panel of slider groups; filmstrip at the bottom; Lightroom shortcuts.
-- **Pixel, Vector, Layout (Photoshop):** tool bar on the left, options bar under the top bar, dockable Layers, Properties and History panels on the right; Photoshop shortcuts (V, B, M, Ctrl+J). Shortcuts switch with the persona, so P means Pick in Library but Pen in Pixel, just like in Adobe's apps.
-- **Theme:** dark grey, small type, dense panels with collapsible headers.
+- **Persona bar (Studio):** persona buttons on the left, document name on the right. Ctrl+1 to Ctrl+7 jump between personas. The only always-visible Studio UI.
+- **Library and Develop:** LightCraft as it ships: its panels, filmstrip, theme and shortcuts.
+- **Pixel:** PhotoCraft as it ships: its tool bar, options bar, panels, theme and shortcuts. Shortcuts switch with the persona, as each app defines them.
+- **Film:** FilmCraft as it ships.
+- **Studio's own pieces** (History tab, notices, the save prompt, disabled states) follow the persona's storytold app styling, so they look native there.
 
 ## Personas and v1 scope
 
 Version 1 ships Library, Develop, Film and Pixel, which covers the Lightroom-to-Photoshop round trip. Vector and Layout come after. (Confirmed.)
 
-| Persona | Feels like | Built from | Key features | Version |
+| Persona | Looks like | Built from | Key features | Version |
 | --- | --- | --- | --- | --- |
-| Library | Lightroom Classic Library | LightCraft | Grid, filmstrip, ratings, flags, albums, search | v1 |
-| Develop | Lightroom Classic Develop | LightCraft | Light, Color, Tone Curve, masking, crop, presets | v1 |
-| Film | Lightroom Classic Develop layout | New + NP DCTL port | Halation, grain, blur, bleach, Saturation RGB, film stock builder | v1 |
-| Pixel | Photoshop | PhotoCraft | Layers, adjustment layers, brushes, selections, healing | v1 |
-| Vector | Illustrator-ish, Photoshop layout | VectorCraft | Pen and node tools, shapes, booleans | v2 |
-| Layout | InDesign-ish, Photoshop layout | DesignCraft | Pages, text frames, master pages, print export | v3 |
+| Library | LightCraft Library | LightCraft | Grid, filmstrip, ratings, flags, albums, search | v1 |
+| Develop | LightCraft Develop | LightCraft | Light, Color, Tone Curve, masking, crop, presets | v1 |
+| Film | FilmCraft | New + NP DCTL port | Halation, grain, blur, bleach, Saturation RGB, film stock builder | v1 |
+| Pixel | PhotoCraft | PhotoCraft | Layers, adjustment layers, brushes, selections, healing | v1 |
+| Vector | VectorCraft | VectorCraft | Pen and node tools, shapes, booleans | v2 |
+| Layout | DesignCraft | DesignCraft | Pages, text frames, master pages, print export | v3 |
 | Export | Affinity Export persona | All | Slices, batch export, formats | v2 |
 
 **The key v1 flow:** pick a photo in Library, develop it, click Pixel in the top bar, add layers and retouch, click Develop again and the edits are still there. No "Edit in Photoshop" export step. Pixel can also open a PNG or PSD directly.
@@ -190,7 +185,7 @@ Studio is a Rust workspace that forks the storytold repos and adds three new lay
 Layers, top to bottom (NEW = written for Studio, REUSED = from storytold):
 
 ```
-[NEW]    Studio shell: Affinity-style top bar, docking panels, dark theme
+[NEW]    Studio shell: Affinity-style persona bar; each persona is its app's own UI
             │
 [REUSED] Personas: Library (LightCraft) · Develop (LightCraft) · Film (new) ·
          Pixel (PhotoCraft) · Vector (VectorCraft) · Layout (DesignCraft)
@@ -235,10 +230,10 @@ Studio is licensed **GPL-3.0-or-later** and will be published on GitHub once it'
 
 Each milestone ends with something you can open and click. Give Claude Code one milestone at a time.
 
-1. **Shell:** a new Rust app with the top bar, empty persona areas, dark Adobe-grey theme and the panel docking system. Switching personas works.
-2. **Library + Develop:** embed LightCraft's library and develop views as two personas. Match Lightroom Classic panel positions and shortcuts (G, D, E, R, \\).
+1. **Shell:** a new Rust app with the top bar, empty persona areas, dark Adobe-grey theme and the panel docking system. Switching personas works. (Done; its Adobe theme and docking are superseded by UI parity.)
+2. **Library + Develop:** embed LightCraft's library and develop views as two personas. Match Lightroom Classic panel positions and shortcuts (G, D, E, R, \\). (Done; superseded by UI parity: LightCraft's own layout.)
 3. **Shared document:** define the one document model (layer tree + develop settings) and save format. Develop edits become a non-destructive base layer.
-4. **Pixel persona:** bring in PhotoCraft tools with Photoshop's layout: tool bar left, options bar on top, Layers and Properties on the right.
+4. **Pixel persona:** bring in PhotoCraft tools with Photoshop's layout: tool bar left, options bar on top, Layers and Properties on the right. (Done; superseded by UI parity: PhotoCraft's own layout.)
 5. **Round trip:** Library to Develop to Pixel and back on one document, with one undo history across personas. The undo history is per session, as in Photoshop: a saved document reopens with its settings and layers and an empty history (PhotoCraft's history can't be saved, L9).
 6. **MCP:** one MCP server that exposes commands from every persona.
 7. **ARM64 + Linux builds:** CI builds and runs tests on Windows ARM64, Windows x64, Linux ARM64 and Linux x64; downloadable builds for each (.exe and a Linux AppImage or .deb). Check this from milestone 1 onward, not only at the end.
@@ -265,8 +260,8 @@ Each milestone ends with something you can open and click. Give Claude Code one 
 
 - **Different engines:** LightCraft and PhotoCraft may not share a document or layer model today. Milestone 3 could mean real rewrites, not just glue.
 - **Young repos:** the storytold apps change fast. Pin versions and update weekly through the automated check in Staying in sync with storytold.
-- **UI framework:** LightCraft uses egui. Getting a Photoshop-grade docking layout in egui may need a docking crate (like egui_dock) or custom work.
-- **Clean-room rules:** copy Adobe's layout and shortcuts, never its icons, fonts or presets.
+- **UI framework:** the storytold apps use egui; each persona draws its app's own UI, so Studio needs no docking layout of its own beyond hosting them.
+- **Clean-room rules:** Studio copies no Adobe icons, fonts or presets; each persona's look and shortcuts are its storytold app's own.
 - **Scope creep:** Vector and Layout are each as big as v1. Keep them out until the round trip works.
 
 **Open questions**

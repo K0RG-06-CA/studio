@@ -2,6 +2,22 @@
 
 See [`PRD.md`](PRD.md) → *Milestones for Claude Code*.
 
+## Roadmap (after milestone 5)
+
+In this order, ahead of PRD milestone 6:
+
+1. [ ] **UI parity** (direction change, 2026-10-10; PRD.md › UI and look): each persona looks
+   identical to its storytold app (Library/Develop = LightCraft, Pixel = PhotoCraft, Film =
+   FilmCraft: own theme, fonts, colours, panel layout and shortcuts). Studio keeps only the
+   Affinity-style persona bar and the minimum the shared document needs (its History tab, styled
+   as a native storytold panel in PhotoCraft's History spot; notices; prompts; disabled states).
+   Undoes milestones 1, 2 and 4's Adobe recolouring and re-docking, so upstream UI updates port
+   with no restyling. Not planned yet.
+2. [ ] **Pixel slow-frame fix** (Open items: frames over 0.4 s); the deferred `bench.rs` peak
+   bytes during a follow waits on it.
+3. [ ] **Film**.
+4. Then PRD milestone 6 (MCP).
+
 ## Milestones
 
 - [x] **1. Shell** — top bar, empty persona areas, dark Adobe-grey theme, panel docking; switching personas works.
