@@ -18,6 +18,13 @@ In this order, ahead of PRD milestone 6:
      installer wins; neither app's menu clicks can be routed in place (LightCraft's Undo becomes
      a new Develop step; PhotoCraft's undoes two steps at once). New L13–L16 and decision D4
      (menus in the persona bar row) are in the plan's "T0 findings".
+   - [x] T1 parity harness (`tests_parity.rs`): bare-app builders hosted as Studio hosts them
+     (PhotoCraft set up with `setup_context`, its default theme), the accesskit tree diff with
+     allow-lists, the style check (visuals, text styles, fonts, both apps' tokens), and the opt-in
+     GPU diff `render_parity` (2/255 per channel, fails above 0.1%, PNGs in
+     `target/renders/parity/`). Checked on itself: unit tests of each diff, the T0 nesting tests
+     now go through it, and `render_parity` diffs each bare app under a stand-in bar against the
+     bare app (0 pixels differ on DX12). The bar band is cropped below kittest's 8 pt margin.
    - D4 approved: Studio hosts both apps' menu bars in the persona bar row (T2m, T3m). No commit
      draws either app's in-window menus before they're routed. Ctrl+S saves the document in
      every persona (T2m). L14 and L16 accepted.

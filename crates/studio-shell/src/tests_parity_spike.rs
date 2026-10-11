@@ -6,98 +6,25 @@
 //! (b) both apps replace all fonts and the last one installed wins: Studio's Library still draws
 //!     with PhotoCraft's after a visit to Pixel (T5 swaps them per persona).
 
-use egui::Ui;
+use crate::tests_parity::{assert_tree_parity, demo_lightcraft, demo_photocraft, lightcraft, photocraft};
 use egui_kittest::Harness;
-use egui_kittest::kittest::{NodeT, Queryable, by};
-use lightcraft_ui_egui::{LightcraftApp, Services};
-use photocraft_ui_egui::PhotocraftApp;
-
-/// Studio's persona bar height (points).
-const BAR: f32 = 34.0;
-const SIZE: [f32; 2] = [1400.0, 900.0];
-
-/// The host's bar: an empty panel of [`BAR`], as Studio's top bar takes its place.
-fn bar(ui: &mut Ui) {
-    egui::Panel::top("spike.bar").exact_size(BAR).resizable(false).frame(egui::Frame::NONE).show(ui, |_| {});
-}
-
-/// Every labelled accessible node: role, label and rect (whole points, moved up by `dy`), sorted.
-fn tree<S>(h: &Harness<'_, S>, dy: f32) -> Vec<String> {
-    let mut nodes: Vec<String> = h
-        .query_all(by().predicate(|n| n.label().is_some_and(|l| !l.is_empty())))
-        .map(|n| {
-            let r = n.rect().translate(egui::vec2(0.0, -dy));
-            let label = n.accesskit_node().label().unwrap_or_default();
-            format!("{:?} {label:?} [{:.0} {:.0} {:.0} {:.0}]", n.accesskit_node().role(), r.min.x, r.min.y, r.max.x, r.max.y)
-        })
-        .collect();
-    nodes.sort();
-    nodes
-}
-
-fn lightcraft() -> LightcraftApp {
-    let mut app = LightcraftApp::new(lightcraft_engine::Session::with_demo(), Services::default());
-    app.ui.settings.gpu = false;
-    app.session.selection.active = app.session.catalog.photos().next().map(|p| p.id);
-    app
-}
-
-fn lightcraft_harness(host: bool) -> Harness<'static, LightcraftApp> {
-    let size = if host { SIZE } else { [SIZE[0], SIZE[1] - BAR] };
-    Harness::builder().with_size(size).build_ui_state(
-        move |ui, app: &mut LightcraftApp| {
-            if host {
-                bar(ui);
-            }
-            let ctx = ui.ctx().clone();
-            app.logic(&ctx);
-            app.ui(ui);
-        },
-        lightcraft(),
-    )
-}
 
 #[test]
 fn t0_lightcrafts_whole_window_nests_under_a_host_bar() {
-    let (mut hosted, mut bare) = (lightcraft_harness(true), lightcraft_harness(false));
+    let (mut hosted, mut bare) = (lightcraft(Harness::builder(), demo_lightcraft(), true), lightcraft(Harness::builder(), demo_lightcraft(), false));
     hosted.run_steps(8);
     bare.run_steps(8);
-    let (hosted, bare) = (tree(&hosted, BAR), tree(&bare, 0.0));
-    assert!(bare.len() > 10, "{bare:#?}");
-    assert_eq!(hosted, bare);
-}
-
-struct Pc {
-    app: PhotocraftApp,
-    frame: eframe::Frame,
-}
-
-fn photocraft_harness(host: bool) -> Harness<'static, Pc> {
-    let size = if host { SIZE } else { [SIZE[0], SIZE[1] - BAR] };
-    let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), photocraft_ui_egui::Services::default());
-    app.session.add_document(crate::tests_photocraft::pixel_doc(), None);
-    app.sync_views();
-    Harness::builder().with_size(size).build_ui_state(
-        move |ui, pc: &mut Pc| {
-            if host {
-                bar(ui);
-            }
-            let ctx = ui.ctx().clone();
-            eframe::App::logic(&mut pc.app, &ctx, &mut pc.frame);
-            eframe::App::ui(&mut pc.app, ui, &mut pc.frame);
-        },
-        Pc { app, frame: eframe::Frame::_new_kittest() },
-    )
+    assert_tree_parity(&hosted, &bare, &[]);
+    crate::tests_parity::assert_style_parity(&hosted.ctx, &bare.ctx);
 }
 
 #[test]
 fn t0_photocrafts_whole_window_nests_under_a_host_bar() {
-    let (mut hosted, mut bare) = (photocraft_harness(true), photocraft_harness(false));
+    let (mut hosted, mut bare) = (photocraft(Harness::builder(), demo_photocraft(), true), photocraft(Harness::builder(), demo_photocraft(), false));
     hosted.run_steps(8);
     bare.run_steps(8);
-    let (hosted, bare) = (tree(&hosted, BAR), tree(&bare, 0.0));
-    assert!(bare.len() > 10, "{bare:#?}");
-    assert_eq!(hosted, bare);
+    assert_tree_parity(&hosted, &bare, &[]);
+    crate::tests_parity::assert_style_parity(&hosted.ctx, &bare.ctx);
 }
 
 /// PhotoCraft's own faces: LightCraft has no JetBrains Mono.

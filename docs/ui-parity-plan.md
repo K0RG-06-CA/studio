@@ -227,6 +227,10 @@ PROGRESS.md.
 - **T1. Parity harness** (test-only `tests_parity.rs`): bare-app builders, the accesskit tree
   diff with allow-lists, and the GPU pixel diff writing `target/renders/parity/`. The first
   real case lands in T2, so every commit is green.
+  - Done 2026-10-11. Allow-list entries are rectangles in the bare app's points, with a reason:
+    a node wholly inside one is left out of both trees, and its pixels don't count.
+  - kittest draws a `build_ui_state` app inside an 8 pt transparent margin, Studio's harness
+    and the bare app's alike, so the GPU diff crops the bar's band below it, not the top rows.
 - **T2. Library and Develop are LightCraft's own window.**
   - `persona_area` calls `LightcraftApp::ui` in the area under the bar.
   - Persona ↔ view (D2).

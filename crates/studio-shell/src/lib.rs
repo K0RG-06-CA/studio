@@ -34,6 +34,8 @@ mod tests_photocraft;
 mod tests_images;
 
 #[cfg(test)]
+mod tests_parity;
+#[cfg(test)]
 mod tests_parity_spike;
 
 /// Lightroom Classic's module keys: (key, command, persona, what LightCraft shows).
