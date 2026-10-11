@@ -30,6 +30,13 @@ pub(crate) fn bar_h() -> f32 {
 /// bar in Studio's harness as above the bare app's top bar.
 const KITTEST_MARGIN: f32 = 8.0;
 
+/// The storytold app a persona is.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum App {
+    LightCraft,
+    PhotoCraft,
+}
+
 /// A region where Studio may differ from the bare app, and why (bare app's points).
 pub(crate) struct Allow {
     pub rect: Rect,
@@ -232,9 +239,8 @@ fn fonts(ctx: &egui::Context) -> String {
 }
 
 /// What makes a ctx look and behave the way it does, part by part: its style (the parts most
-/// likely to differ named first, then the whole), the options an app sets up, its fonts and both
-/// apps' tokens.
-fn style(ctx: &egui::Context) -> [(&'static str, String); 9] {
+/// likely to differ named first, then the whole), the options an app sets up and its fonts.
+fn style(ctx: &egui::Context) -> [(&'static str, String); 7] {
     let s = ctx.global_style();
     [
         ("visuals", format!("{:?}", s.visuals)),
@@ -244,23 +250,35 @@ fn style(ctx: &egui::Context) -> [(&'static str, String); 9] {
         ("style", format!("{s:?}")),
         ("options", ctx.options(|o| format!("{:?} zoom_with_keyboard={} {:?}", o.theme_preference, o.zoom_with_keyboard, o.input_options))),
         ("fonts", fonts(ctx)),
-        ("LightCraft tokens", format!("{:?}", ctx.data(|d| d.get_temp::<lightcraft_ui_egui::theme::Tokens>(egui::Id::NULL)))),
-        ("PhotoCraft tokens", format!("{:?}", ctx.data(|d| d.get_temp::<photocraft_ui_egui::theme::Tokens>(egui::Id::new("photocraft-theme"))))),
     ]
 }
 
-/// The first part of Studio's style that differs from the bare app's.
-fn style_diff(studio: &egui::Context, upstream: &egui::Context) -> Option<String> {
-    style(studio)
-        .into_iter()
-        .zip(style(upstream))
-        .find(|((_, s), (_, u))| s != u)
-        .map(|((name, s), (_, u))| format!("Studio's {name} differ from the bare app's:\nStudio: {s}\nbare:   {u}"))
+/// The app's theme tokens, where its `theme::apply` stores them (None: not stored).
+fn tokens(ctx: &egui::Context, app: App) -> Option<String> {
+    ctx.data(|d| match app {
+        App::LightCraft => d.get_temp::<lightcraft_ui_egui::theme::Tokens>(egui::Id::NULL).map(|t| format!("{t:?}")),
+        App::PhotoCraft => d.get_temp::<photocraft_ui_egui::theme::Tokens>(egui::Id::new("photocraft-theme")).map(|t| format!("{t:?}")),
+    })
+}
+
+/// The first part of Studio's style that differs from the bare app's, then the persona app's
+/// tokens. Only that app's: Studio's ctx holds both apps' tokens. Tokens missing on either side
+/// fail, so a renamed id upstream can't make both sides match on nothing.
+fn style_diff(studio: &egui::Context, upstream: &egui::Context, app: App) -> Option<String> {
+    let differ = |name: &str, s: &str, u: &str| format!("Studio's {name} differ from the bare app's:\nStudio: {s}\nbare:   {u}");
+    if let Some(((name, s), (_, u))) = style(studio).into_iter().zip(style(upstream)).find(|((_, s), (_, u))| s != u) {
+        return Some(differ(name, &s, &u));
+    }
+    let name = format!("{app:?} tokens");
+    match (tokens(studio, app), tokens(upstream, app)) {
+        (Some(s), Some(u)) => (s != u).then(|| differ(&name, &s, &u)),
+        (s, u) => Some(format!("{name} are missing (Studio: {}, bare app: {})", s.is_some(), u.is_some())),
+    }
 }
 
 /// Studio draws with the bare app's style.
-pub(crate) fn assert_style_parity(studio: &egui::Context, upstream: &egui::Context) {
-    if let Some(d) = style_diff(studio, upstream) {
+pub(crate) fn assert_style_parity(studio: &egui::Context, upstream: &egui::Context, app: App) {
+    if let Some(d) = style_diff(studio, upstream, app) {
         panic!("{d}");
     }
 }
@@ -472,9 +490,29 @@ fn a_tree_case_fails_when_its_allow_list_hides_over_a_quarter_of_the_nodes() {
 fn the_style_check_names_what_differs() {
     // fonts exist from the first pass on
     let (a, b) = (Harness::new_ui(|_| {}), Harness::new_ui(|_| {}));
-    assert_eq!(style_diff(&a.ctx, &b.ctx), None);
+    put_lightcraft_tokens(&a.ctx);
+    put_lightcraft_tokens(&b.ctx);
+    assert_eq!(style_diff(&a.ctx, &b.ctx, App::LightCraft), None);
     b.ctx.global_style_mut(|s| s.visuals.panel_fill = egui::Color32::RED);
-    assert!(style_diff(&a.ctx, &b.ctx).is_some_and(|m| m.starts_with("Studio's visuals differ")));
+    assert!(style_diff(&a.ctx, &b.ctx, App::LightCraft).is_some_and(|m| m.starts_with("Studio's visuals differ")));
+}
+
+/// LightCraft's theme tokens, as its `theme::apply` stores them.
+fn put_lightcraft_tokens(ctx: &egui::Context) {
+    ctx.data_mut(|d| d.insert_temp(egui::Id::NULL, lightcraft_ui_egui::theme::Tokens::default()));
+}
+
+#[test]
+fn a_missing_theme_token_fails_instead_of_matching() {
+    let (a, b) = (Harness::new_ui(|_| {}), Harness::new_ui(|_| {}));
+    let missing =
+        |a: &egui::Context, b: &egui::Context| style_diff(a, b, App::LightCraft).is_some_and(|m| m.contains("LightCraft tokens are missing"));
+    assert!(missing(&a.ctx, &b.ctx), "on both sides");
+    put_lightcraft_tokens(&a.ctx);
+    assert!(missing(&a.ctx, &b.ctx), "on the bare app's side");
+    assert!(missing(&b.ctx, &a.ctx), "on Studio's side");
+    put_lightcraft_tokens(&b.ctx);
+    assert_eq!(style_diff(&a.ctx, &b.ctx, App::LightCraft), None);
 }
 
 #[test]
@@ -482,7 +520,7 @@ fn the_style_check_covers_spacing_the_whole_style_and_the_options() {
     let named = |change: &dyn Fn(&egui::Context)| {
         let (a, b) = (Harness::new_ui(|_| {}), Harness::new_ui(|_| {}));
         change(&b.ctx);
-        style_diff(&a.ctx, &b.ctx).map(|m| m.lines().next().unwrap_or_default().to_owned())
+        style_diff(&a.ctx, &b.ctx, App::LightCraft).map(|m| m.lines().next().unwrap_or_default().to_owned())
     };
     assert_eq!(named(&|c| c.global_style_mut(|s| s.spacing.item_spacing.x += 1.0)).as_deref(), Some("Studio's spacing differ from the bare app's:"));
     assert_eq!(named(&|c| c.global_style_mut(|s| s.animation_time += 1.0)).as_deref(), Some("Studio's style differ from the bare app's:"));
@@ -498,7 +536,7 @@ fn a_font_difference_is_named_without_the_fonts_bytes() {
     fonts.font_data.insert("Extra".into(), face);
     b.ctx.set_fonts(fonts);
     b.run();
-    let m = style_diff(&a.ctx, &b.ctx).unwrap();
+    let m = style_diff(&a.ctx, &b.ctx, App::LightCraft).unwrap();
     assert!(m.starts_with("Studio's fonts differ") && m.contains("Extra"), "{m:.300}");
     assert!(m.len() < 20_000, "a {} byte message", m.len());
 }

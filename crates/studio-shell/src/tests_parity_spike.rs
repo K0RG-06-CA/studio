@@ -15,7 +15,7 @@ fn t0_lightcrafts_whole_window_nests_under_a_host_bar() {
     hosted.run_steps(8);
     bare.run_steps(8);
     assert_tree_parity(&hosted, &bare, &[]);
-    crate::tests_parity::assert_style_parity(&hosted.ctx, &bare.ctx);
+    crate::tests_parity::assert_style_parity(&hosted.ctx, &bare.ctx, crate::tests_parity::App::LightCraft);
 }
 
 #[test]
@@ -24,7 +24,7 @@ fn t0_photocrafts_whole_window_nests_under_a_host_bar() {
     hosted.run_steps(8);
     bare.run_steps(8);
     assert_tree_parity(&hosted, &bare, &[]);
-    crate::tests_parity::assert_style_parity(&hosted.ctx, &bare.ctx);
+    crate::tests_parity::assert_style_parity(&hosted.ctx, &bare.ctx, crate::tests_parity::App::PhotoCraft);
 }
 
 /// PhotoCraft's own faces: LightCraft has no JetBrains Mono.
