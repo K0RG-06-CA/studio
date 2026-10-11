@@ -25,6 +25,15 @@ In this order, ahead of PRD milestone 6:
      `target/renders/parity/`). Checked on itself: unit tests of each diff, the T0 nesting tests
      now go through it, and `render_parity` diffs each bare app under a stand-in bar against the
      bare app (0 pixels differ on DX12). The bar band is cropped below kittest's 8 pt margin.
+     - Review fixes (one commit each, each test seen failing first): font check by hash, not
+       bytes; widget state in the tree; `settle` fails after 300 s; persona bar nodes left out;
+       whole `Style` and options compared.
+     - Left for T2/T3 (LOW): rects compare rounded to whole points (a value at exactly x.5 could
+       flip); PhotoCraft's `settle` has no busy signal (give raw cases one); a case whose allow
+       rects cover the whole render passes with 0 pixels counted; fractional pixels per point
+       would misalign the crop (cases use 1.0); kittest's cursor is in the render (only matters
+       when hovering the bar); tokens are read by upstream's ids copied here, so a renamed id
+       reads None on both sides; `demo_lightcraft` repeats `demo_shell`'s app setup.
    - D4 approved: Studio hosts both apps' menu bars in the persona bar row (T2m, T3m). No commit
      draws either app's in-window menus before they're routed. Ctrl+S saves the document in
      every persona (T2m). L14 and L16 accepted.
