@@ -101,6 +101,11 @@ In this order, ahead of PRD milestone 6:
        Ctrl+S with no document open (it does nothing, silently); the menu tests close menus with
        a click at a fixed spot of the bar and count Quit's frames exactly; Studio's restore of the
        document's photo is a step in LightCraft's own undo history.
+     - L17 (after the review): LightCraft's engine has no command gate, so those deletes can't
+       be refused, only taken back. A `compile_fail` doctest in `lightroom.rs` fails once it gains
+       PhotoCraft's `session.authorize`; `taking_the_documents_photo_back_leaves_no_trace` checks
+       the take-back adds no history step, leaves the document saved, and keeps the photo's id,
+       source, hash, edits and file.
    - Temporarily unavailable keys (T3 until T3m): none yet.
 2. [ ] **Pixel slow-frame fix** (Open items: frames over 0.4 s); the deferred `bench.rs` peak
    bytes during a follow waits on it.

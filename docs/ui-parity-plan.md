@@ -450,6 +450,13 @@ PROGRESS.md.
   Layer Comps share History's flag, so Pixel loses them. Test:
   with `panels.history` off, no Actions tab is drawn. (T4)
 
+- **L17 (LightCraft, found in the T2m review):** no command gate on its engine (PhotoCraft has
+  `session.authorize`), so its own ways to delete past the menu (context menu, delete
+  confirmation, Remove Folder from Library) can't be refused. Studio takes the document's photo
+  back from Recently Deleted the same frame, with no history step, nothing unsaved, and the
+  photo's id, edits and file unchanged (`taking_the_documents_photo_back_leaves_no_trace`). Test:
+  a `compile_fail` doctest naming `session.authorize` on LightCraft's session, in `lightroom.rs`.
+
 **Task list changes:**
 
 - **New D4:** where the apps' menus go (below).

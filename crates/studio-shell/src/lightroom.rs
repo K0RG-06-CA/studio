@@ -8,6 +8,26 @@
 //! Its in-window menus stay hidden (`native_menu`): Studio hosts its menu model in the persona bar
 //! row and routes every item ([`crate::lightcraft_menu`]). Its shortcuts still run in its
 //! `logic`; Studio takes only its own keys first.
+//!
+//! L17: nor has LightCraft's engine a command gate (PhotoCraft's has `session.authorize`), so
+//! Studio can't stop its own ways to delete past the menu (the context menu's Delete, its delete
+//! confirmation, Remove Folder from Library) from moving the document's photo to Recently
+//! Deleted: Studio takes it back the same frame instead (`keep_document_photo`). The first
+//! example compiles (and its `compile_fail` doctest fails) once upstream adds PhotoCraft's gate;
+//! then Studio can refuse those commands up front. The second sets a public field of the same
+//! session, so the first can't pass on a typo.
+//!
+//! ```compile_fail
+//! fn gate(session: &mut lightcraft_engine::Session) {
+//!     session.authorize = None;
+//! }
+//! ```
+//!
+//! ```
+//! fn gate(session: &mut lightcraft_engine::Session) {
+//!     session.auto_sync = false;
+//! }
+//! ```
 
 use std::sync::Arc;
 

@@ -440,6 +440,46 @@ fn the_documents_photo_never_stays_in_recently_deleted() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// L17: Studio's taking back of the document's photo leaves no trace on the document: no history
+/// step, nothing unsaved, and the photo's library id, edits and file as they were.
+#[test]
+fn taking_the_documents_photo_back_leaves_no_trace() {
+    let dir = temp_dir("l17-no-trace");
+    let photo = dir.join("beach.png");
+    let mut h = file_library(&dir, &photo);
+    h.state_mut().run("document.new").unwrap();
+    settle_base(&mut h);
+    edit(&mut h, 0.75);
+    settle_base(&mut h);
+    h.state_mut().run_with("document.saveAs", &serde_json::json!({"path": dir.join("beach.studio")})).unwrap();
+    let mine = h.state().document.as_ref().unwrap().photo().unwrap();
+    let file = || (std::fs::read(&photo).unwrap(), std::fs::metadata(&photo).unwrap().modified().unwrap());
+    let state = |h: &Harness<'_, StudioShell>| {
+        let p = lc(h).session.catalog.photo(mine).unwrap();
+        (
+            history(h),
+            h.state().document.as_ref().unwrap().unsaved(),
+            p.id,
+            p.source.clone(),
+            p.content_hash.clone(),
+            p.deleted,
+            lc(h).session.develop_of(mine),
+        )
+    };
+    let (before, bytes) = (state(&h), file());
+    assert!(!before.1, "saved");
+    let lr = h.state_mut().lightroom.as_mut().unwrap();
+    lr.app.run("photo.delete", serde_json::json!({"ids": [mine.0]})).unwrap();
+    h.run_steps(3);
+    assert!(h.state().error.is_some(), "it said why");
+    assert_eq!(state(&h), before, "(history, unsaved, id, source, hash, deleted, edits)");
+    assert!(file() == bytes, "the photo's file untouched");
+    let lr = h.state_mut().lightroom.as_mut().unwrap();
+    lr.app.session.close_library().unwrap();
+    drop(h);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// Photo › Delete (and its Delete key) never takes the document's photo; another photo's still
 /// goes.
 #[test]
