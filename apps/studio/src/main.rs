@@ -173,7 +173,7 @@ fn main() -> ExitCode {
                     .add_filter("Images", &images)
                     .pick_file()
             }));
-            shell.lightroom = Some(lightroom(open_library(library, smoke), cc.storage.and_then(|s| eframe::get_value(s, LIGHTCRAFT_KEY))));
+            shell.set_lightroom(lightroom(open_library(library, smoke), cc.storage.and_then(|s| eframe::get_value(s, LIGHTCRAFT_KEY))));
             // PhotoCraft: Pixel's editor and the open document's pixels; its GPU canvas on wgpu
             let mut photocraft = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
             if let Some(rs) = cc.wgpu_render_state.as_ref() {

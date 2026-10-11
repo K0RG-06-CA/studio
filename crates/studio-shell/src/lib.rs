@@ -152,6 +152,13 @@ impl StudioShell {
         shell
     }
 
+    /// LightCraft, set by the app once the shell is restored. It shows the restored persona's
+    /// view (Develop: the loupe), or the persona would follow its grid back to Library.
+    pub fn set_lightroom(&mut self, mut lr: lightroom::Lightroom) {
+        lr.switch(Persona::Library, self.persona);
+        self.lightroom = Some(lr);
+    }
+
     /// Run a command by id, without parameters. See [`Self::run_with`].
     pub fn run(&mut self, id: &str) -> Result<(), String> {
         self.run_with(id, &Value::Null)

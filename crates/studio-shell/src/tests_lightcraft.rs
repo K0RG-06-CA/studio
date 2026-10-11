@@ -223,6 +223,19 @@ fn library_never_comes_back_to_a_loupe_left_by_commands_run_between_frames() {
 }
 
 #[test]
+fn a_relaunch_in_develop_stays_in_develop() {
+    // the shell restored in Develop, then LightCraft set, as the app does at launch
+    let mut shell = StudioShell { persona: Persona::Develop, pixel: Some(pixel()), ..Default::default() };
+    let mut app = LightcraftApp::new(lightcraft_engine::Session::with_demo(), Services::default());
+    app.ui.settings.gpu = false;
+    app.session.selection.active = app.session.catalog.photos().next().map(|p| p.id);
+    shell.set_lightroom(Lightroom::new(app));
+    let mut h = Harness::builder().with_size([1400.0, 900.0]).build_ui_state(|ui, shell: &mut StudioShell| shell.ui(ui), shell);
+    h.run_steps(5);
+    assert_eq!((h.state().persona, lc(&h).ui.view, lc(&h).ui.right), (Persona::Develop, ViewMode::Detail, RightPanel::Edit));
+}
+
+#[test]
 fn ctrl_numbers_only_switch_personas() {
     let mut h = studio();
     h.run_steps(10);
