@@ -98,11 +98,18 @@ pub(crate) fn photocraft(builder: HarnessBuilder<Pc>, app: PhotocraftApp, under_
     )
 }
 
-/// Run frames until `busy` has been false for 12 in a row (background renders done), 30 s at most.
+/// Run frames until `busy` has been false for 12 in a row (background renders done).
 pub(crate) fn settle<S>(h: &mut Harness<'_, S>, busy: impl Fn(&S) -> bool) {
+    // as `settle_base`: a 2-core CI runner can keep a render waiting over a minute
+    settle_within(h, busy, std::time::Duration::from_secs(300));
+}
+
+fn settle_within<S>(h: &mut Harness<'_, S>, busy: impl Fn(&S) -> bool, limit: std::time::Duration) {
     let t0 = std::time::Instant::now();
     let mut quiet = 0;
-    while quiet < 12 && t0.elapsed().as_secs() < 30 {
+    while quiet < 12 {
+        // comparing a half-rendered app would fail somewhere far from the cause
+        assert!(t0.elapsed() < limit, "the app never settled in {limit:?}");
         h.run_steps(1);
         quiet = if busy(h.state()) { 0 } else { quiet + 1 };
         std::thread::sleep(std::time::Duration::from_millis(5));
@@ -321,6 +328,12 @@ fn the_tree_diff_names_a_moved_node_on_both_sides() {
 fn the_tree_diff_counts_a_repeated_node() {
     let n = || node("Label \"Exposure\"", [0.0, 0.0, 10.0, 10.0]);
     assert_eq!(tree_diff(&shown(vec![n(), n()], &[]), &shown(vec![n()], &[])), ["+1 Label \"Exposure\" [0 0 10 10]"]);
+}
+
+#[test]
+#[should_panic(expected = "never settled")]
+fn an_app_that_never_settles_fails_rather_than_being_compared_half_done() {
+    settle_within(&mut Harness::new_ui_state(|_, _: &mut ()| {}, ()), |_| true, std::time::Duration::from_millis(50));
 }
 
 #[test]
