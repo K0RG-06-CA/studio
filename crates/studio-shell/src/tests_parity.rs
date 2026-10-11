@@ -167,13 +167,32 @@ pub(crate) fn assert_tree_parity<A, B>(studio: &Harness<'_, A>, upstream: &Harne
     );
 }
 
+/// The installed fonts: the families, and each face by name, size and a hash of its bytes (not
+/// the bytes, megabytes per face).
+fn fonts(ctx: &egui::Context) -> String {
+    use std::hash::{Hash, Hasher};
+    ctx.fonts(|f| {
+        let d = f.definitions();
+        let faces: Vec<String> = d
+            .font_data
+            .iter()
+            .map(|(name, data)| {
+                let mut h = std::collections::hash_map::DefaultHasher::new();
+                data.font.hash(&mut h);
+                format!("{name}: {} bytes #{:x} face {} {:?}", data.font.len(), h.finish(), data.index, data.tweak)
+            })
+            .collect();
+        format!("{:?} {faces:?}", d.families)
+    })
+}
+
 /// What makes a ctx look the way it does: visuals, text styles, fonts and both apps' tokens.
 fn style(ctx: &egui::Context) -> [String; 5] {
     let s = ctx.global_style();
     [
         format!("{:?}", s.visuals),
         format!("{:?}", s.text_styles),
-        format!("{:?}", ctx.fonts(|f| f.definitions().clone())),
+        fonts(ctx),
         format!("{:?}", ctx.data(|d| d.get_temp::<lightcraft_ui_egui::theme::Tokens>(egui::Id::NULL))),
         format!("{:?}", ctx.data(|d| d.get_temp::<photocraft_ui_egui::theme::Tokens>(egui::Id::new("photocraft-theme")))),
     ]
@@ -349,4 +368,17 @@ fn the_style_check_names_what_differs() {
     assert_eq!(style_diff(&a.ctx, &b.ctx), None);
     b.ctx.global_style_mut(|s| s.visuals.panel_fill = egui::Color32::RED);
     assert!(style_diff(&a.ctx, &b.ctx).is_some_and(|m| m.starts_with("Studio's visuals differ")));
+}
+
+#[test]
+fn a_font_difference_is_named_without_the_fonts_bytes() {
+    let (a, mut b) = (Harness::new_ui(|_| {}), Harness::new_ui(|_| {}));
+    let mut fonts = egui::FontDefinitions::default();
+    let face = fonts.font_data.values().next().unwrap().clone();
+    fonts.font_data.insert("Extra".into(), face);
+    b.ctx.set_fonts(fonts);
+    b.run();
+    let m = style_diff(&a.ctx, &b.ctx).unwrap();
+    assert!(m.starts_with("Studio's fonts differ") && m.contains("Extra"), "{m:.300}");
+    assert!(m.len() < 20_000, "a {} byte message", m.len());
 }
