@@ -121,9 +121,13 @@ In this order, ahead of PRD milestone 6:
        failing without the cover).
      - Studio's History floats at the left edge of PhotoCraft's dock (D1) in Studio's look until
        T4.
-     - PhotoCraft's home screen (New document…, Open…) and palette can make documents of its
-       own: with no Studio document open, Studio closes them too and says how to get one, as it
-       already did with one open.
+     - L18: PhotoCraft's home screen (New document…, Open…) opens its own dialogs from its
+       private start screen, and can't be covered like the tab strip (nothing public gives where
+       its card is). With no Studio document open, Studio closes what it (or its palette) makes
+       and says how to get one; with one open, `copy_back` already did. A `compile_fail` doctest
+       in `pixel.rs` fails once the start screen is public;
+       `l18_a_document_photocraft_makes_itself_leaves_studios_alone` checks the close never
+       touches an open Studio document.
    - Temporarily unavailable keys (T3 until T3m), dropped in Pixel: F12 Revert, Ctrl+Alt+W Close
      All, Ctrl+Alt+P Close Others, Ctrl+Alt+Shift+O Open As, Ctrl+Alt+S Save a Copy
      (`keys_of_photocraft_file_items_studio_will_hide_do_nothing`).

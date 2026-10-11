@@ -318,9 +318,7 @@ PROGRESS.md.
       T4), allow-listed in the parity cases.
     - The "Image › Adjustments open" case is Levels (Ctrl+L): its dialog is allow-listed, as
       PhotoCraft centres dialogs on the whole window, which in Studio includes the persona bar.
-    - PhotoCraft's home screen shows with no document (as it ships). What its New and Open, or
-      its palette, make is closed with a notice when Studio has no document, as already when it
-      has one.
+    - PhotoCraft's home screen shows with no document (as it ships); its New and Open are L18.
     - The bare PhotoCraft in the parity cases starts from egui as eframe gives it (as LightCraft's
       since T2), and is given the document as Studio gives it (imported by `studio_doc`).
 - **T3m. Studio hosts PhotoCraft's menus** in the persona bar row, through its `native_menu`
@@ -471,6 +469,12 @@ PROGRESS.md.
   back from Recently Deleted the same frame, with no history step, nothing unsaved, and the
   photo's id, edits and file unchanged (`taking_the_documents_photo_back_leaves_no_trace`). Test:
   a `compile_fail` doctest naming `session.authorize` on LightCraft's session, in `lightroom.rs`.
+
+- **L18 (PhotoCraft, found in T3):** its home screen's New document… and Open… open its own
+  dialogs from its private start screen, and can't be covered (nothing public gives where its
+  card is). Studio closes what they make while it has no document open, with a notice; it never
+  touches an open Studio document. Test: a `compile_fail` doctest naming
+  `canvas::start_screen`, in `pixel.rs`.
 
 **Task list changes:**
 

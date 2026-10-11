@@ -11,6 +11,27 @@
 //! engine, past Studio's close (its tab strip is private). Studio covers the strip instead (see
 //! [`Pixel::tab_strip`]).
 //!
+//! L18: its home screen (no document) has New document… and Open… buttons that open its own
+//! dialogs straight from its private start screen, past any command Studio could route, and they
+//! can't be covered as the tab strip is: they sit in a card centred on its central panel, whose
+//! rect nothing public gives while the home screen shows. Studio closes what they (or its
+//! palette) make while it has no document open, and says how to get one (`settle`); with a
+//! document open, `Document::copy_back` already keeps PhotoCraft to it. The first example
+//! compiles (and its `compile_fail` doctest fails) once upstream makes the start screen public,
+//! so a host can place or replace it; the second is its public neighbour, so a typo can't pass.
+//!
+//! ```compile_fail
+//! fn home(app: &mut photocraft_ui_egui::PhotocraftApp, ui: &mut egui::Ui) {
+//!     photocraft_ui_egui::canvas::start_screen(app, ui);
+//! }
+//! ```
+//!
+//! ```
+//! fn area(app: &mut photocraft_ui_egui::PhotocraftApp, ui: &mut egui::Ui) {
+//!     photocraft_ui_egui::canvas::document_area(app, ui);
+//! }
+//! ```
+//!
 //! L1: its dock panels (Layers, History, Properties…) are private, so Studio's History can't sit
 //! in its dock; it floats beside it (D1). The first example compiles (and so its `compile_fail`
 //! doctest fails) once upstream makes the Layers panel public (T4 re-aims this at its dock

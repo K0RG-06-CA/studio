@@ -1443,8 +1443,8 @@ fn l15_photocrafts_document_tab_cant_close_the_document() {
     assert!(h.state().document.is_some());
 }
 
-/// PhotoCraft holds Studio's document and nothing else, with none open too: a document it makes
-/// itself (its home screen's New, its palette) is closed, and Studio says how to get one.
+/// L18: PhotoCraft holds Studio's document and nothing else, with none open too: a document it
+/// makes itself (its home screen's New, its palette) is closed, and Studio says how to get one.
 #[test]
 fn a_document_photocraft_makes_itself_without_studios_is_closed() {
     let mut h = studio();
@@ -1488,4 +1488,24 @@ fn keys_of_photocraft_file_items_studio_will_hide_do_nothing() {
         assert_eq!(state(&h), before, "{mods:?}+{k:?}");
         assert!(h.query_by_label("Save a Copy").is_none() && h.query_by_label("Open As").is_none(), "{mods:?}+{k:?} opened a dialog");
     }
+}
+
+/// L18: closing what PhotoCraft made itself never touches an open Studio document: with one open,
+/// a document PhotoCraft makes goes, and Studio's stays as it was in both engines (its layers, its
+/// unsaved edit, PhotoCraft's copy and undo history), with no notice.
+#[test]
+fn l18_a_document_photocraft_makes_itself_leaves_studios_alone() {
+    let dir = temp_dir("l18-studio-doc");
+    let mut h = studio();
+    pixel_edited(&mut h, &dir.join("trip.studio"));
+    let state = |h: &Harness<'_, crate::StudioShell>| {
+        let s = h.state();
+        let doc = s.document.as_ref().unwrap();
+        let pc: Vec<_> = s.pixel.as_ref().unwrap().app.session.documents().iter().map(|d| (d.doc.id, d.history.past_len())).collect();
+        (layer_names(doc), doc.unsaved(), doc.revision, pc, s.error.clone())
+    };
+    let before = state(&h);
+    h.state_mut().pixel.as_mut().unwrap().app.session.add_document(pixel_doc(), None);
+    h.run_steps(2);
+    assert_eq!(state(&h), before);
 }
