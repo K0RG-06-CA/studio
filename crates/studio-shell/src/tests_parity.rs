@@ -152,12 +152,14 @@ fn nodes<S>(h: &Harness<'_, S>) -> Vec<Node> {
         .collect()
 }
 
-/// Studio's nodes under the persona bar, moved up by it into the bare app's coordinates (the
-/// bar's own nodes, wholly above its bottom edge, are left out).
+/// Studio's nodes under the persona bar, moved up by it into the bare app's coordinates. The bar's
+/// own nodes, wholly inside its band, are left out; content scrolled up past the window's top
+/// (starting above the band) stays.
 fn under_bar(nodes: Vec<Node>) -> Vec<Node> {
+    let band = (KITTEST_MARGIN - 0.5)..=(KITTEST_MARGIN + bar_h() + 0.5);
     nodes
         .into_iter()
-        .filter(|n| n.rect.max.y > KITTEST_MARGIN + bar_h())
+        .filter(|n| !(band.contains(&n.rect.min.y) && band.contains(&n.rect.max.y)))
         .map(|n| Node { rect: n.rect.translate(egui::vec2(0.0, -bar_h())), ..n })
         .collect()
 }
@@ -417,6 +419,13 @@ fn studios_tree_leaves_out_the_persona_bar() {
     let bar = node("Button \"Pixel\"", [100.0, m + 4.0, 150.0, m + 30.0]);
     let top = node("Button \"File\"", [10.0, m + bar_h(), 40.0, m + bar_h() + 20.0]);
     assert_eq!(shown(under_bar(vec![bar, top]), &[]), [format!("Button \"File\" [10 {m} 40 {}]", m + 20.0)]);
+}
+
+#[test]
+fn content_scrolled_above_the_view_is_not_taken_for_the_persona_bar() {
+    // a grid row scrolled up past the window's top, its bottom edge level with the bar
+    let row = node("Button \"LC01354.JPG\"", [12.0, -200.0, 342.0, KITTEST_MARGIN + 10.0]);
+    assert_eq!(shown(under_bar(vec![row]), &[]).len(), 1);
 }
 
 #[test]
