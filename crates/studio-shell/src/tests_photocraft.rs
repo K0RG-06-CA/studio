@@ -1534,3 +1534,18 @@ fn pixel_picked_again_by_a_click_waits_a_frame_for_its_logic() {
     h.run_steps(1);
     assert!(photocraft(&h), "and the next frame draws it");
 }
+
+/// Review: quitting with a Pixel edit and answering Don't Save closes the window with no notice
+/// (the document goes from PhotoCraft too, so it isn't taken for one PhotoCraft made itself).
+#[test]
+fn quitting_without_saving_says_nothing_about_photocrafts_documents() {
+    let dir = temp_dir("t3-quit-discard");
+    let mut h = studio();
+    pixel_edited(&mut h, &dir.join("trip.studio"));
+    h.state_mut().prompt = Some(crate::Pending::Quit);
+    h.state_mut().run("document.prompt.discard").unwrap();
+    h.run_steps(2);
+    let s = h.state();
+    assert!(s.document.is_none() && s.pixel.as_ref().unwrap().app.session.documents().is_empty());
+    assert_eq!(s.error, None);
+}

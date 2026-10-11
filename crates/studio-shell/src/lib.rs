@@ -276,6 +276,11 @@ impl StudioShell {
                         // discarded: the next launch opens the file as it was saved, if it has one
                         if let Some(doc) = self.document.take_if(|d| d.unsaved()) {
                             self.document_path = doc.path;
+                            // from PhotoCraft too, as `document.close` does (else it holds a
+                            // document Studio has none of, which `settle` closes and reports)
+                            if let Some(px) = &mut self.pixel {
+                                studio_doc::pixel::close_all(&mut px.app.session);
+                            }
                         }
                         self.close_window = true;
                         Ok(())
