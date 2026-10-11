@@ -176,6 +176,10 @@ pub struct History {
     /// Studio's redo was cleared (a Develop edit, a reset) while PhotoCraft's still stands: it
     /// goes at the next copy-back.
     clear_pixel_redo: bool,
+    /// A Develop step was recorded after PhotoCraft's newest state: its next edit is a state of
+    /// its own, never merged into that one by its coalescing (a slider drag's key; its own undo
+    /// and redo already part them). Done at the next copy-back.
+    part: bool,
     requested: Option<Jump>,
     notice: Option<String>,
     /// The newest step is a Develop step that changed the frame, and waits for its render to land
@@ -201,6 +205,7 @@ impl Default for History {
             redo_docs: Vec::new(),
             pixel_bytes: 0,
             clear_pixel_redo: false,
+            part: false,
             requested: None,
             notice: None,
             pending: None,
@@ -345,6 +350,7 @@ impl History {
         // PhotoCraft's redo follows at the next copy-back
         self.redo_docs.clear();
         self.clear_pixel_redo = true;
+        self.part = true;
         self.develop_base = Some((now.clone(), history_after));
         self.pending = pending;
         self.prune(None);
@@ -366,6 +372,9 @@ impl History {
         self.own_caps(st);
         if std::mem::take(&mut self.clear_pixel_redo) {
             st.history.clear_redo();
+        }
+        if std::mem::take(&mut self.part) {
+            st.coalesce = None;
         }
         let unchanged = |st: &DocState| {
             let now = states(st);
@@ -1545,6 +1554,38 @@ pub(crate) mod tests {
     /// Pixel and on top; with a Develop step above them it is put back and done as a jump; and
     /// when what it left doesn't match (the current document replaced meanwhile) the history
     /// starts over.
+    /// Review (HIGH 3): PhotoCraft merges consecutive edits with one coalescing key (a slider
+    /// drag) into one state, but a Develop step between them, or a move in Studio's history,
+    /// parts them: each is its own step, undone in order.
+    #[test]
+    fn a_develop_step_or_a_history_move_parts_photocrafts_coalesced_edits() {
+        let opacity = |px: &mut PixelSession, v: f64| {
+            px.execute("layer.setProps", serde_json::json!({"opacity": v, "coalesce": "opacity"})).unwrap();
+        };
+        let opacity_of = |doc: &Document| doc.pixel.layers.last().unwrap().opacity;
+        let (mut lr, mut px, mut doc) = open();
+        let id = doc.photo().unwrap();
+        paint(&mut px, "Paint", 1, 1);
+        tick(&mut doc, &lr, &mut px);
+        opacity(&mut px, 0.5);
+        tick(&mut doc, &lr, &mut px);
+        set_exposure(&mut lr, id, 1.0);
+        tick(&mut doc, &lr, &mut px);
+        opacity(&mut px, 0.25);
+        tick(&mut doc, &lr, &mut px);
+        assert_eq!(labels(&doc), ["Original", "Paint", "Layer Properties", "Exposure", "Layer Properties"]);
+        assert!(doc.undo(&mut lr, &mut px, &mut Base::new()).unwrap());
+        assert_eq!((opacity_of(&doc), exposure(&lr, id)), (0.5, 1.0), "the second opacity alone");
+        assert!(doc.undo(&mut lr, &mut px, &mut Base::new()).unwrap());
+        assert_eq!((opacity_of(&doc), exposure(&lr, id)), (0.5, 0.0), "then the exposure");
+        // an undo in Studio's history (here of the Develop step) parts them too
+        opacity(&mut px, 0.75);
+        tick(&mut doc, &lr, &mut px);
+        assert_eq!(labels(&doc), ["Original", "Paint", "Layer Properties", "Layer Properties"]);
+        assert!(doc.undo(&mut lr, &mut px, &mut Base::new()).unwrap());
+        assert_eq!(opacity_of(&doc), 0.5, "the newest opacity alone");
+    }
+
     #[test]
     fn photocrafts_own_undo_is_accepted_only_for_pixel_steps_on_top() {
         let (mut lr, mut px, mut doc) = open();
