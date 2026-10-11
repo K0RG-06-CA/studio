@@ -253,22 +253,26 @@ mod tests {
     #[test]
     fn a_config_saved_by_milestone_5_still_loads_and_its_lightcraft_state_is_left_alone() {
         use eframe::{App as _, Storage as _};
-        // milestone 5's save: the shell with its dock layouts, LightCraft's state with its sidebar
-        // and presets forced off, under the old key
+        // milestone 5's save: the shell with its dock layouts, LightCraft's state under the old
+        // key (sidebar and presets forced off, and a panel width and open sections of its own)
         let mut storage = Memory::default();
         eframe::set_value(&mut storage, SHELL_KEY, &StudioShell { persona: studio_shell::Persona::Develop, ..Default::default() });
         let mut old = UiState::default();
-        (old.left_panel, old.presets) = (false, false);
+        (old.left_panel, old.presets, old.right_width, old.open_sections) = (false, false, 333.0, vec!["color".into()]);
         eframe::set_value(&mut storage, "studio.lightcraft", &old);
         let before = storage.get_string("studio.lightcraft");
-        // the next launch
-        let shell = StudioShell::restore(eframe::get_value(&storage, SHELL_KEY));
+        // the next launch: LightCraft starts from its own defaults
+        let mut shell = StudioShell::restore(eframe::get_value(&storage, SHELL_KEY));
         assert_eq!(shell.persona, studio_shell::Persona::Develop);
         let lr = lightroom((Session::with_demo(), None), eframe::get_value(&storage, LIGHTCRAFT_KEY));
         let ours = UiState::default();
-        assert_eq!((lr.app.ui.left_panel, lr.app.ui.presets), (ours.left_panel, ours.presets), "LightCraft's own defaults");
+        assert_eq!((lr.app.ui.right_width, &lr.app.ui.open_sections), (ours.right_width, &ours.open_sections), "LightCraft's own defaults");
+        // saving writes the new key only
+        shell.set_lightroom(lr);
         App(shell, None, PathBuf::new()).save(&mut storage);
         assert_eq!(storage.get_string("studio.lightcraft"), before, "the old key is untouched");
+        let new: Option<UiState> = eframe::get_value(&storage, LIGHTCRAFT_KEY);
+        assert_eq!(new.map(|u| u.right_width), Some(ours.right_width));
     }
 
     #[test]
