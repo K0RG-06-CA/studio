@@ -209,6 +209,20 @@ fn press(h: &mut Harness<'_, StudioShell>, key: egui::Key) {
 }
 
 #[test]
+fn library_never_comes_back_to_a_loupe_left_by_commands_run_between_frames() {
+    let mut h = studio();
+    h.run_steps(5);
+    pick_first(&mut h);
+    // as MCP would: LightCraft's loupe, then off to Pixel and back, with no frame in between
+    let lr = h.state_mut().lightroom.as_mut().unwrap();
+    lr.app.run("view.detail", serde_json::json!({})).unwrap();
+    h.state_mut().run("persona.pixel").unwrap();
+    h.state_mut().run("persona.library").unwrap();
+    h.run_steps(3);
+    assert_eq!((h.state().persona, lc(&h).ui.view), (Persona::Library, ViewMode::PhotoGrid));
+}
+
+#[test]
 fn ctrl_numbers_only_switch_personas() {
     let mut h = studio();
     h.run_steps(10);

@@ -42,7 +42,9 @@ impl Lightroom {
     /// The persona changes from `from` to `to`: Library gets its own view back, Develop the loupe
     /// with Edit (or the editing tool already open), and leaving LightCraft saves its changes.
     pub fn switch(&mut self, from: Persona, to: Persona) {
-        if from == Persona::Library {
+        // never its loupe (a command may have opened it since the last frame's follow): that is
+        // Develop, and Library would come back as Develop
+        if from == Persona::Library && self.app.ui.view != ViewMode::Detail {
             self.library_view = self.app.ui.view;
         }
         // LightCraft saves from `logic`, which only runs in its personas: commit a slider drag
