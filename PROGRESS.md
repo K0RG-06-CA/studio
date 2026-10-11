@@ -359,6 +359,7 @@ See [`PRD.md`](PRD.md) → *Milestones for Claude Code*.
       going (all or some of them) take no step; over the bytes only Develop-only steps go
       (PhotoCraft's `trim` frees the pixels). Four tests; mutation-checked (no + 1, no cap, the
       old lost-prefix rule, Pixel steps kept past the cap, Pixel steps pruned on bytes).
+    - CI green on all four runners (38111618518); smoke test on DX12 passed again (51.1 s).
 
   **Upstream limitations (M5), each with a test that fails once upstream fixes it:**
   - L8 PhotoCraft `History` can't jump to or replace a state: Studio jumps step by step, and an
