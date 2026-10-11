@@ -1,6 +1,6 @@
 # Implementation Plan: UI parity (roadmap 1, after milestone 5)
 
-Status: draft, not started. Written 2026-10-10 from PRD.md › UI and look, CLAUDE.md's UI parity
+Status: approved 2026-10-10 (D1–D3 decided below); T0 in progress. Written 2026-10-10 from PRD.md › UI and look, CLAUDE.md's UI parity
 rule, PROGRESS.md › Roadmap, Studio's shell at `9a5b797`, and a reading of LightCraft `eeb136b`
 and PhotoCraft `d836e34` (upstream paths below are under each checkout's `crates/ui-egui/src/`).
 
@@ -82,7 +82,7 @@ Nothing is recoloured or re-docked, so a storytold UI update ports with no resty
 | **Save prompt and error notice** (`egui::Modal`) | The shared document needs them. They draw with the global style, which is now the persona app's, so they look native with no styling of their own. |
 | **Studio's History panel** (`history_panel.rs`) in Pixel | One history across both engines. Its logic is unchanged; it is restyled with PhotoCraft's `Tokens` and widgets (`widgets::card`, `row_selected`, `text_faint`). Placement: D1. |
 | **"Rendering Develop…" mark** over Pixel's canvas | It tells the user why Pixel is waiting. It is now painted at PhotoCraft's own `app.last_canvas_rect` in its tokens. |
-| **Barring Pixel during a pending follow** (HIGH 2) | Its mechanism changes. `ui.disable()` doesn't reach PhotoCraft's ctx-level windows, which its own `ui` now draws. Instead Studio puts an input-blocking layer over the persona area (egui's `Modal` backdrop, transparent). The HIGH 2 test stays, plus a new one: an open PhotoCraft dialog takes no click while barred. |
+| **Barring Pixel during a pending follow** (HIGH 2) | Its mechanism changes. `ui.disable()` doesn't reach PhotoCraft's ctx-level windows, which its own `ui` now draws. Instead Studio puts an input-blocking layer over the persona area (egui's `Modal` backdrop, transparent). This is its own high-risk task, T3b. |
 | **Pixel's Studio keys** (`DOCUMENT_KEYS`, `UNDO_KEYS`, `held`), dropped files taken before PhotoCraft, `release_on_focus_loss`, `raw_input_hook`, `apply_pending`, `sync_views` | PhotoCraft's own file keys and drops would act on its session, not on the document. These are the shared document's minimum. |
 | **`Lightroom::logic`, `switch`, `may_close`, `ready`**; LightCraft's close check from other personas | Persona ↔ LightCraft view (D2), saving on leaving, and the unsaved-library guard. |
 | **One engine's logic per frame** (`engine_logic`) | A milestone 5 invariant the history depends on. |
@@ -179,14 +179,25 @@ There are three layers, and none needs a person.
 
 ## 5. Tasks (one commit each, validation green before every commit)
 
-Order: T0 → T1 → T2 → T3 → T4 → T5 → T6 → T7 → T8. Each task updates PROGRESS.md.
+Order: T0 → T1 → T2 → T3 → T3b → T4 → T5 → T6 → T7 → T8. Each task updates PROGRESS.md.
 
 - **T0. Spike: pin what upstream does inside Studio.** Tests only, no production change.
   - LightCraft's `ui` nested under a 34 pt bar: its top bar starts at the bar's bottom.
   - PhotoCraft's `eframe::App::ui` in a child `Ui`: same.
   - Fonts: the last installer wins.
-  - PhotoCraft's File menu and Edit › Undo in Studio (§ 3).
-  - Result: the L13+ list is final, and decision D1 is checked against the real rail toggle.
+  - **Menu routing.** Inventory every upstream menu item that saves, opens, closes, quits or
+    undoes:
+    - PhotoCraft: the File menu, and Edit › Undo/Redo;
+    - LightCraft: the File and Edit menus.
+
+    Each one must go through Studio's save prompt, history, key queue and never-overwrite-source
+    rule. For each item, T0 records whether it can be routed, and how (a `Services` hook, a
+    command id Studio can intercept, `native_menu`). An item that can't be routed is hidden or
+    disabled in T2/T3, and becomes a new limitation with a test (§ 3).
+  - **History toggle (D1).** Can PhotoCraft's History rail button and Window › History be routed
+    to Studio's panel, with PhotoCraft's own History never appearing, not even for one frame? If
+    not, that is a new limitation with a test.
+  - Result: the L13+ list is final, and the task list is revised before T1.
 - **T1. Parity harness** (test-only `tests_parity.rs`): bare-app builders, the accesskit tree
   diff with allow-lists, and the GPU pixel diff writing `target/renders/parity/`. The first
   real case lands in T2, so every commit is green.
@@ -195,16 +206,29 @@ Order: T0 → T1 → T2 → T3 → T4 → T5 → T6 → T7 → T8. Each task upd
   - Persona ↔ view (D2).
   - LightCraft's style is set as the global style while its persona shows.
   - Delete the `lightroom.rs` pieces, the Classic keys and their commands, and the tests in § 1.
-  - Bump the saved LightCraft UI key (D3).
+  - Read LightCraft's UI state from the new key, leaving the old one untouched. Test: an old
+    config loads without error (D3).
+  - Test: with a photo-less document, LightCraft's detail view doesn't take the bar into Develop
+    (D2).
   - Parity tests (a) and (b) green for Library and Develop.
 - **T3. Pixel is PhotoCraft's own window.**
   - Call `eframe::App::ui` in the area under the bar.
   - Use its default theme, unrecoloured.
   - Delete the `pixel.rs` pieces.
   - "Rendering Develop…" at `last_canvas_rect`.
-  - The input-blocking layer replaces `ui.disable()` and `Viewer.barred`.
   - L7 retired.
   - Parity tests green for Pixel, with History allow-listed until T4.
+  - Until T3b lands, Pixel shows nothing while a follow is pending (PhotoCraft's `ui` isn't
+    called), so it is never left open to input.
+- **T3b. Pixel input block during a pending Develop render. HIGH RISK: run on `/effort high`.**
+  - The input-blocking layer replaces `ui.disable()` and `Viewer.barred`, so Pixel stays
+    visible while it waits.
+  - Its test fails without the block. While a follow is pending, it covers:
+    - the canvas;
+    - the right dock;
+    - PhotoCraft's own ctx-level windows (an open adjustment dialog, a floating panel);
+    - its menus (title-bar menu clicks and keyboard shortcuts).
+  - The HIGH 2 test stays.
 - **T4. Studio's History in PhotoCraft's style and place (D1).**
   - Restyle with PhotoCraft's widgets and tokens.
   - PhotoCraft's own History controls (rail button, Window › History) open and close it.
@@ -215,7 +239,11 @@ Order: T0 → T1 → T2 → T3 → T4 → T5 → T6 → T7 → T8. Each task upd
   - On a persona switch, install that app's fonts and style; Film uses LightCraft's.
   - The persona bar, prompt and error notice read the persona app's `Tokens`.
   - Delete `theme.rs` and `main.rs`'s `theme::apply`.
-  - Tests: fonts after round trips, bar colours, and the prompt's fill.
+  - Tests:
+    - every persona switch, in both directions and for every pair of enabled personas, ends
+      with the right app's fonts installed (Film's are LightCraft's);
+    - bar colours;
+    - the prompt's fill.
 - **T6. Film in LightCraft's conventions.**
   - Studio's own frame, built only from LightCraft's pub pieces and `Tokens`:
     - a loupe-coloured canvas;
@@ -240,29 +268,29 @@ Order: T0 → T1 → T2 → T3 → T4 → T5 → T6 → T7 → T8. Each task upd
   - Update PROGRESS.md's Automated checks and Known untested.
   - Tick roadmap 1.
 
-## Decisions for you
+## Decisions (approved 2026-10-10)
 
-- **D1. Where Studio's History goes in Pixel.** PhotoCraft has no slot for it (L1).
-  - Recommended: a PhotoCraft-styled panel (its `card` with a History tab strip) floating at
-    the dock's left edge. It opens and closes with PhotoCraft's own History controls: when the
-    rail button or Window › History turns PhotoCraft's `panels.history` on, Studio turns it back
-    off and shows its panel instead.
-  - Alternative: a fixed column beside PhotoCraft's rail. That is closer to "in the dock", but
-    it re-docks PhotoCraft.
-  - Either way, L1's test flags when the real slot becomes possible.
-- **D2. Library and Develop map onto LightCraft's one window.**
-  - Recommended:
-    - `persona.library` shows the grid;
-    - `persona.develop` shows the loupe with Edit;
-    - when LightCraft's own keys or buttons change its view, the persona bar follows (detail →
-      Develop, every other view → Library);
-    - Studio's Lightroom Classic G/E/D/R keys and their four commands go, and LightCraft's own
-      keys apply.
-- **D3. Saved UI state.**
+- **D1. Studio's History in Pixel is a floating panel.**
+  - It is PhotoCraft-styled (its `card` with a History tab strip) and floats at the dock's left
+    edge.
+  - PhotoCraft's own History controls (the rail button, Window › History) open and close it.
+  - PhotoCraft's own History panel must never appear, not even for one frame. If its button or
+    menu can't be routed to Studio's panel, that is a new limitation with a test (found in T0).
+  - L1's test flags when a real slot in the dock becomes possible.
+- **D2. The persona bar follows LightCraft's view.**
+  - `persona.library` shows the grid, and `persona.develop` shows the loupe with Edit.
+  - When LightCraft's own keys or buttons change its view, the bar follows: detail → Develop,
+    every other view → Library.
+  - Develop stays disabled for photo-less documents. When it is disabled, the bar doesn't follow
+    into it: LightCraft's view goes back to the grid, and a test covers this.
+  - Studio's Lightroom Classic G/E/D/R keys and their four commands go, and LightCraft's own keys
+    apply.
+- **D3. A one-time reset of saved UI state.**
   - Studio's saved dock layouts are dropped.
   - LightCraft's saved UI state is read from a new key (`studio.lightcraft.2`), because Studio
-    saved it with LightCraft's sidebar and presets forced off.
-  - You lose panel widths once.
+    saved it with LightCraft's sidebar and presets forced off. The old key is left untouched.
+  - A test checks that a config saved by milestone 5 (old LightCraft key, `layouts`) still loads
+    without error.
 
 ## Risks
 
