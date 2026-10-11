@@ -6,6 +6,7 @@
 
 pub mod dock;
 mod history_panel;
+pub mod lightcraft_menu;
 pub mod lightroom;
 pub mod persona;
 pub mod pixel;
@@ -837,13 +838,21 @@ impl StudioShell {
         }
     }
 
-    /// Affinity's top bar: persona buttons on the left, the document name on the right. It never
-    /// changes with the persona.
+    /// Affinity's top bar: persona buttons on the left, the document name on the right. In Library
+    /// and Develop, LightCraft's menus come first (D4), routed by [`lightcraft_menu`].
     fn top_bar(&mut self, ui: &mut egui::Ui) {
         let t = theme::TOKENS;
         let frame = egui::Frame::NONE.fill(t.chrome).inner_margin(egui::Margin::symmetric(8, 0));
+        let taken: Vec<String> = DOCUMENT_KEYS.iter().map(|(m, k, _)| lightcraft_menu::shortcut_name(*m, *k)).collect();
+        let menus =
+            self.lightroom.as_ref().filter(|_| self.persona.lightroom()).map(|lr| lightcraft_menu::bar(&lr.app, self.document.as_ref(), &taken));
+        let mut clicked = None;
         egui::Panel::top("studio.top_bar").exact_size(t.top_bar_h).resizable(false).frame(frame).show(ui, |ui| {
             ui.horizontal_centered(|ui| {
+                if let Some(menus) = &menus {
+                    clicked = lightcraft_menu::show(ui, menus);
+                    ui.add_space(16.0);
+                }
                 ui.spacing_mut().item_spacing.x = 2.0;
                 for p in Persona::ALL {
                     let on = p == self.persona;
@@ -873,6 +882,33 @@ impl StudioShell {
                 });
             });
         });
+        if let Some((id, params)) = clicked {
+            self.lightcraft_menu_item(ui.ctx(), &id, params);
+        }
+    }
+
+    /// A LightCraft menu item clicked, as [`lightcraft_menu::route`] says (checked again here:
+    /// only what the menu allows runs).
+    fn lightcraft_menu_item(&mut self, ctx: &egui::Context, id: &str, params: Value) {
+        let Some(lr) = self.lightroom.as_ref() else { return };
+        if !lightcraft_menu::allowed(id, &lr.app, self.document.as_ref()) {
+            return;
+        }
+        match lightcraft_menu::route(id) {
+            Some(lightcraft_menu::Route::History) if self.document.is_some() => self.key_command(id),
+            Some(lightcraft_menu::Route::Quit) => {
+                let _ = self.run("app.quit");
+            }
+            _ => {
+                let Some(lr) = self.lightroom.as_mut() else { return };
+                // an export that can't start (e.g. no folder) says why, as in LightCraft's menus
+                if let Err(e) = lightcraft_ui_egui::menubar::run_item(&mut lr.app, id, params)
+                    && matches!(id, "app.export" | "app.exportPrevious")
+                {
+                    lr.app.toast(ctx, e);
+                }
+            }
+        }
     }
 
     fn shortcuts(&mut self, ui: &mut egui::Ui) {
@@ -890,15 +926,22 @@ impl StudioShell {
         }
         // The document's one history: Photoshop's undo keys in every persona while a document is
         // open (without one, LightCraft's own in its personas), never while typing (a text field's
-        // own undo). Pixel: PhotoCraft's own file shortcuts would act on its session, not on the
-        // document; Photoshop's keys for Studio's document commands instead (Open and Save As
-        // through the desktop's dialogs). Taken here, so neither engine sees them.
-        let mut keys = Vec::new();
-        if self.persona == Persona::Pixel {
-            keys.extend(DOCUMENT_KEYS);
-        }
-        if self.document.is_some() && !ui.ctx().egui_wants_keyboard_input() {
+        // own undo). One document, one save: Photoshop's keys for Studio's document commands in
+        // every persona (Open and Save As through the desktop's dialogs), not the engines' own
+        // (PhotoCraft's act on its session; LightCraft's Ctrl+S writes an XMP sidecar, its Ctrl+N
+        // and Shift+Ctrl+S are New Album and Create Version). Taken here, so neither engine sees
+        // them.
+        let mut keys = Vec::from(DOCUMENT_KEYS);
+        let typing = ui.ctx().egui_wants_keyboard_input();
+        if self.document.is_some() && !typing {
             keys.extend(UNDO_KEYS);
+        }
+        // LightCraft's Delete key, as its Photo › Delete: never on the document's photo
+        if self.persona.lightroom()
+            && !typing
+            && self.lightroom.as_ref().is_some_and(|lr| lightcraft_menu::delete_key_takes_document_photo(&lr.app, self.document.as_ref()))
+        {
+            ui.input_mut(|i| take_keys(i, &DELETE_KEYS));
         }
         let pressed = ui.input_mut(|i| take_keys(i, &keys));
         if self.persona == Persona::Pixel {
@@ -951,7 +994,11 @@ fn release_on_focus_loss(ctx: &egui::Context, raw: &mut egui::RawInput, last: Op
 
 const CMD: egui::Modifiers = egui::Modifiers::COMMAND;
 
-/// Studio's document keys in Pixel.
+/// LightCraft's Delete key (Delete or Backspace, as it reads it), taken and dropped.
+const DELETE_KEYS: [(egui::Modifiers, egui::Key, &str); 2] =
+    [(egui::Modifiers::NONE, egui::Key::Delete, "photo.delete"), (egui::Modifiers::NONE, egui::Key::Backspace, "photo.delete")];
+
+/// Studio's document keys, in every persona.
 const DOCUMENT_KEYS: [(egui::Modifiers, egui::Key, &str); 5] = [
     (CMD.plus(egui::Modifiers::SHIFT), egui::Key::S, "document.saveAs"),
     (CMD, egui::Key::S, "document.save"),

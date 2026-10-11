@@ -4,10 +4,10 @@
 //! Library).
 //!
 //! L13: LightCraft has no host hook on its menu commands (`run` has no filter), so a click on its
-//! in-window Edit › Undo would be its own undo, which Studio records as a new Develop step
-//! (`l13_lightcrafts_edit_undo_menu_item_is_recorded_as_a_new_develop_step`). Its in-window menus
-//! stay hidden (`native_menu`) until Studio hosts them in the persona bar row and routes them
-//! (T2m). Its shortcuts still run in its `logic`; Studio takes only its own keys first.
+//! in-window Edit › Undo would be its own undo, which Studio would record as a new Develop step.
+//! Its in-window menus stay hidden (`native_menu`): Studio hosts its menu model in the persona bar
+//! row and routes every item ([`crate::lightcraft_menu`]). Its shortcuts still run in its
+//! `logic`; Studio takes only its own keys first.
 
 use std::sync::Arc;
 
@@ -32,7 +32,7 @@ pub struct Lightroom {
 
 impl Lightroom {
     /// LightCraft opens in its loupe; Studio opens Library in the grid. Its in-window menus are
-    /// hidden (see L13 above).
+    /// hidden: Studio draws them (see L13 above).
     pub fn new(mut app: LightcraftApp) -> Self {
         app.ui.view = ViewMode::PhotoGrid;
         app.native_menu = true;

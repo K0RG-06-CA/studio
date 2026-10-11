@@ -2,7 +2,8 @@
 
 use egui::Rect;
 use egui_kittest::Harness;
-use egui_kittest::kittest::Queryable;
+use egui_kittest::kittest::{NodeT, Queryable, by};
+use lightcraft_ui_egui::menubar::MenuNode;
 use lightcraft_ui_egui::state::{RightPanel, ViewMode};
 use lightcraft_ui_egui::{LightcraftApp, Services};
 
@@ -167,11 +168,61 @@ pub(crate) fn history(h: &Harness<'_, StudioShell>) -> (Vec<(bool, bool)>, usize
     (d.history.entries().into_iter().map(|e| (e.develop, e.pixel)).collect(), d.history.position())
 }
 
-/// L13 (see `lightroom`): LightCraft's menu commands have no host hook, so its Edit › Undo is its
-/// own undo, which Studio records as a new Develop step. Its in-window menus stay hidden until
-/// Studio routes them (T2m), where this flips.
+// --- T2m: LightCraft's menus in the persona bar row, routed ---
+
+/// The items of the open menu, not of a submenu open beside it (LightCraft draws each after a
+/// check-mark gutter): (label, enabled). An item's label ends in its shortcut, a submenu's in ⏵.
+fn menu_items(h: &Harness<'_, StudioShell>) -> Vec<(String, bool)> {
+    let items: Vec<_> = h
+        .query_all(by().predicate(|n| n.label().is_some_and(|l| l.starts_with("      "))))
+        .map(|n| (n.rect().min.x, n.accesskit_node().label().unwrap_or_default().trim().to_owned(), !n.accesskit_node().is_disabled()))
+        .collect();
+    let left = items.first().map(|i| i.0);
+    items.into_iter().filter(|i| Some(i.0) == left).map(|(_, l, on)| (l, on)).collect()
+}
+
+/// Whether the menu item labelled `l` (with its shortcut) is `label`.
+fn item_is(l: &str, label: &str) -> bool {
+    l.trim() == label || l.trim().starts_with(&format!("{label} "))
+}
+
+/// Close any open menu with a click on an empty spot of the persona bar (Escape is LightCraft's
+/// own key: back to the grid).
+fn close_menus(h: &mut Harness<'_, StudioShell>) {
+    click_at(h, egui::pos2(1000.0, 20.0));
+}
+
+/// Open the persona bar's menu `title` (closing any other first): its items.
+fn open_menu(h: &mut Harness<'_, StudioShell>, title: &str) -> Vec<(String, bool)> {
+    close_menus(h);
+    h.get_by_label(title).click();
+    h.run_steps(3);
+    menu_items(h)
+}
+
+/// The item `label` of the menu `title`: whether it is enabled.
+fn menu_item_enabled(h: &mut Harness<'_, StudioShell>, title: &str, label: &str) -> bool {
+    let items = open_menu(h, title);
+    items.iter().find(|(l, _)| item_is(l, label)).unwrap_or_else(|| panic!("no {label} in {title}: {items:?}")).1
+}
+
+/// Click the item `label` of the menu `title`; it runs in the next frame.
+fn click_menu_item_now(h: &mut Harness<'_, StudioShell>, title: &str, label: &str) {
+    open_menu(h, title);
+    h.get(by().predicate(|n| n.label().is_some_and(|l| l.starts_with("      ") && item_is(&l, label)))).click();
+}
+
+/// Click the item `label` of the menu `title`, and run it.
+fn click_menu_item(h: &mut Harness<'_, StudioShell>, title: &str, label: &str) {
+    click_menu_item_now(h, title, label);
+    h.run_steps(2);
+}
+
+/// The T0 undo test, flipped (L13 was: LightCraft's Edit › Undo ran its own undo, which Studio
+/// recorded as a new Develop step): Studio's menu Undo moves its history back one step and adds
+/// none; Redo comes back.
 #[test]
-fn l13_lightcrafts_edit_undo_menu_item_is_recorded_as_a_new_develop_step() {
+fn lightcrafts_edit_undo_menu_item_is_studios_undo() {
     let mut h = studio();
     h.run_steps(3);
     pick_first(&mut h);
@@ -182,21 +233,197 @@ fn l13_lightcrafts_edit_undo_menu_item_is_recorded_as_a_new_develop_step() {
     lr.app.run("develop.set", serde_json::json!({"control": "light.exposure", "value": 1.0})).unwrap();
     h.run_steps(1);
     assert_eq!(history(&h), (vec![(false, false), (true, false)], 1));
-    // what a click on LightCraft's Edit › Undo runs (its in-window menu bar)
+    click_menu_item(&mut h, "Edit", "Undo");
+    assert_eq!(history(&h), (vec![(false, false), (true, false)], 0), "Studio's undo: back one step, none added");
+    assert_eq!(h.state().persona, Persona::Develop);
+    click_menu_item(&mut h, "Edit", "Redo");
+    assert_eq!(history(&h), (vec![(false, false), (true, false)], 1));
+    // without a document, they are LightCraft's own
+    h.state_mut().run_with("document.close", &serde_json::json!({"discard": true})).unwrap();
+    h.run_steps(2);
     let lr = h.state_mut().lightroom.as_mut().unwrap();
-    lightcraft_ui_egui::menubar::run_item(&mut lr.app, "edit.undo", serde_json::Value::Null).unwrap();
+    lr.app.run("develop.set", serde_json::json!({"control": "light.exposure", "value": 0.25})).unwrap();
     h.run_steps(1);
-    assert_eq!(history(&h), (vec![(false, false), (true, false), (true, false)], 2), "fixed: Studio took it as its undo");
+    click_menu_item(&mut h, "Edit", "Undo");
+    let id = lc(&h).session.active().unwrap();
+    assert_eq!(lc(&h).session.develop_of(id).unwrap().light.exposure, 1.0, "LightCraft's undo");
 }
 
+/// LightCraft's menus are in the persona bar row (its in-window ones hidden), in Library and
+/// Develop only, and the menu Studio draws is the model it routes: every item, enabled as the
+/// model says.
 #[test]
-fn lightcrafts_in_window_menus_are_hidden() {
+fn lightcrafts_menus_sit_in_the_persona_bar_and_show_studios_model() {
     let mut h = studio();
-    h.run_steps(10);
-    assert!(lc(&h).native_menu);
-    for menu in ["File", "Photo"] {
-        assert!(h.query_by_label(menu).is_none(), "{menu} menu shows");
+    h.run_steps(5);
+    pick_first(&mut h);
+    h.state_mut().run("document.new").unwrap();
+    settle_base(&mut h);
+    assert!(lc(&h).native_menu, "its in-window menus stay hidden");
+    let bar = crate::theme::TOKENS.top_bar_h;
+    for p in [Persona::Library, Persona::Develop] {
+        h.state_mut().run(&p.command()).unwrap();
+        h.run_steps(3);
+        let taken: Vec<String> = ["Cmd+Shift+S", "Cmd+S", "Cmd+N", "Cmd+W", "Cmd+O"].map(String::from).to_vec();
+        let s = h.state();
+        let model = crate::lightcraft_menu::bar(lc(&h), s.document.as_ref(), &taken);
+        for (title, nodes) in model {
+            let r = h.get_by_label(title.as_str()).rect();
+            assert!(r.max.y <= bar + 8.5, "{p:?}: {title} in the persona bar row: {r:?}");
+            let want: Vec<(String, bool)> = nodes
+                .iter()
+                .filter_map(|n| match n {
+                    MenuNode::Item { id, params, label, shortcut, enabled, .. } => {
+                        let label = lightcraft_ui_egui::menubar::display_item_label(id, params, label);
+                        let key = shortcut.as_deref().map(|s| format!(" {}", lightcraft_ui_egui::menubar::shortcut_text(s, false)));
+                        Some((format!("{label}{}", key.unwrap_or_default()), *enabled))
+                    }
+                    MenuNode::Submenu { label, .. } => Some((format!("{label} \u{23f5}"), true)),
+                    MenuNode::Separator => None,
+                })
+                .collect();
+            assert_eq!(open_menu(&mut h, &title), want, "{p:?}: {title}");
+        }
     }
+    close_menus(&mut h);
+    for p in [Persona::Pixel, Persona::Film] {
+        h.state_mut().run(&p.command()).unwrap();
+        h.run_steps(3);
+        assert!(h.query_by_label("Photo").is_none(), "{p:?} has no LightCraft menus");
+    }
+}
+
+/// Studio over a library on disk holding one real photo file, `photo` (picked), with LightCraft's
+/// folder dialog there.
+fn file_library(dir: &std::path::Path, photo: &std::path::Path) -> Harness<'static, StudioShell> {
+    std::fs::write(photo, PNG).unwrap();
+    let mut session = lightcraft_engine::Session::new().with_fs();
+    session.open_library(dir.join("lib"), false).unwrap();
+    session.execute("library.import", &serde_json::json!({"paths": [photo.to_string_lossy()]})).unwrap();
+    let services = Services { pick_folder: Some(Box::new(|| None)), ..Services::default() };
+    let mut app = LightcraftApp::new(session, services);
+    app.ui.settings.gpu = false;
+    app.session.selection.active = app.session.catalog.photos().next().map(|p| p.id);
+    let shell = StudioShell { lightroom: Some(Lightroom::new(app)), pixel: Some(pixel()), ..Default::default() };
+    let mut h = Harness::builder().with_size([1400.0, 900.0]).build_ui_state(|ui, shell: &mut StudioShell| shell.ui(ui), shell);
+    h.run_steps(3);
+    h
+}
+
+/// One document, one save: Ctrl+S in Library and Develop writes the `.studio` file, never
+/// LightCraft's Save Metadata to File (an XMP sidecar), and never touches the photo. That item
+/// stays in the Photo menu, with no shortcut.
+#[test]
+fn ctrl_s_in_library_and_develop_saves_the_document_never_the_photo() {
+    let dir = temp_dir("t2m-ctrl-s");
+    let photo = dir.join("beach.png");
+    let mut h = file_library(&dir, &photo);
+    h.state_mut().run("document.new").unwrap();
+    settle_base(&mut h);
+    let mtime = || std::fs::metadata(&photo).unwrap().modified().unwrap();
+    let before = (std::fs::read(&photo).unwrap(), mtime());
+    let xmp = || {
+        let files = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().path());
+        files.filter(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("xmp"))).collect::<Vec<_>>()
+    };
+    for p in [Persona::Library, Persona::Develop] {
+        h.state_mut().run(&p.command()).unwrap();
+        h.run_steps(2);
+        edit(&mut h, if p == Persona::Library { 0.5 } else { 1.0 });
+        h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::S);
+        h.run_steps(2);
+        let doc = h.state().document.as_ref().unwrap();
+        let path = doc.path.clone().expect("saved beside its photo");
+        assert!(!doc.unsaved() && path.extension().is_some_and(|e| e == "studio"), "{p:?}: {path:?}");
+        assert_eq!(
+            studio_doc::Document::open(&path).unwrap().develop.light.exposure,
+            lc(&h).session.develop_of(doc.photo().unwrap()).unwrap().light.exposure
+        );
+        assert_eq!(xmp(), Vec::<std::path::PathBuf>::new(), "{p:?}: no XMP written");
+        assert!((std::fs::read(&photo).unwrap(), mtime()) == before, "{p:?}: the photo's bytes and time are untouched");
+    }
+    let items = open_menu(&mut h, "Photo");
+    assert!(items.iter().any(|(l, on)| l == "Save Metadata to File" && *on), "{items:?}");
+    let model = crate::lightcraft_menu::bar(lc(&h), h.state().document.as_ref(), &["Cmd+S".to_owned()]);
+    let shortcut = |nodes: &[MenuNode]| {
+        nodes.iter().find_map(|n| match n {
+            MenuNode::Item { id, shortcut, .. } if id == "photo.saveMetadataToFile" => Some(shortcut.clone()),
+            _ => None,
+        })
+    };
+    assert_eq!(model.iter().find_map(|(_, n)| shortcut(n)), Some(None), "no shortcut on Save Metadata to File");
+    let lr = h.state_mut().lightroom.as_mut().unwrap();
+    lr.app.session.close_library().unwrap();
+    drop(h);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Open Library would change the library under the open document: off while one is open.
+#[test]
+fn open_library_is_off_while_a_document_is_open() {
+    let dir = temp_dir("t2m-open-library");
+    let mut h = file_library(&dir, &dir.join("beach.png"));
+    assert!(menu_item_enabled(&mut h, "File", "Open Library…"), "on without a document");
+    h.state_mut().run("document.new").unwrap();
+    settle_base(&mut h);
+    assert!(!menu_item_enabled(&mut h, "File", "Open Library…"), "off with one");
+    h.state_mut().run("document.close").unwrap();
+    h.run_steps(2);
+    assert!(menu_item_enabled(&mut h, "File", "Open Library…"), "on again once it closes");
+    close_menus(&mut h);
+    let lr = h.state_mut().lightroom.as_mut().unwrap();
+    lr.app.session.close_library().unwrap();
+    drop(h);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Photo › Delete (and its Delete key) never takes the document's photo; another photo's still
+/// goes.
+#[test]
+fn photo_delete_is_off_for_the_documents_photo() {
+    let mut h = studio();
+    h.run_steps(3);
+    pick_first(&mut h);
+    h.state_mut().run("document.new").unwrap();
+    settle_base(&mut h);
+    let mine = h.state().document.as_ref().unwrap().photo().unwrap();
+    let other = lc(&h).session.catalog.photos().map(|p| p.id).find(|&id| id != mine).unwrap();
+    let deleted = |h: &Harness<'_, StudioShell>, id| lc(h).session.catalog.photo(id).unwrap().deleted;
+    let select = |h: &mut Harness<'_, StudioShell>, ids: Vec<lightcraft_engine::catalog::PhotoId>| {
+        let lr = h.state_mut().lightroom.as_mut().unwrap();
+        lr.app.session.selection.active = ids.first().copied();
+        lr.app.session.selection.ids = ids;
+        h.run_steps(2);
+    };
+    // the document's photo alone, or among others
+    for ids in [vec![mine], vec![other, mine]] {
+        select(&mut h, ids.clone());
+        assert!(!menu_item_enabled(&mut h, "Photo", "Delete"), "{ids:?}: off for the document's photo");
+        close_menus(&mut h);
+        for key in [egui::Key::Delete, egui::Key::Backspace] {
+            press(&mut h, key);
+            assert!(!deleted(&h, mine) && !deleted(&h, other), "{ids:?}: {key:?} deleted nothing");
+        }
+    }
+    // another photo
+    select(&mut h, vec![other]);
+    click_menu_item(&mut h, "Photo", "Delete Photo");
+    assert!(deleted(&h, other) && !deleted(&h, mine), "another photo's Delete still works");
+}
+
+/// Quit from the File menu goes through Studio's close guard: an unsaved document asks first.
+#[test]
+fn quit_from_the_menu_shows_studios_save_prompt() {
+    let dir = temp_dir("t2m-quit");
+    let mut h = studio();
+    edited_document(&mut h, &dir.join("trip.studio"));
+    click_menu_item_now(&mut h, "File", "Quit LightCraft");
+    // the click's frame asks to close, and the next stops it
+    let w = run_window(&mut h, 4, false);
+    assert_eq!(w, Window { closes: 1, cancels: 1, closed: false });
+    assert_eq!(h.state().prompt, Some(crate::Pending::Quit));
+    assert!(prompt_shown(&h));
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 fn lc<'h>(h: &'h Harness<'_, StudioShell>) -> &'h LightcraftApp {

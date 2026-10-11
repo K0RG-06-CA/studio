@@ -280,6 +280,15 @@ PROGRESS.md.
     - Photo › Delete is disabled for the document's photo and enabled for another;
     - Quit from the menu shows Studio's save prompt;
     - the menu items in the accessibility tree match `menu_bar` minus the disabled ones.
+  - Done 2026-10-11, with these changes to the above:
+    - Fail closed: every item id in LightCraft's model is classified (`lightcraft_menu::route`);
+      one that isn't is drawn disabled and never runs, and a test walking the whole model fails.
+    - Delete Permanently and Empty Recently Deleted are off for the document's photo too, and so
+      is LightCraft's Delete key (outside its mask, spot and red-eye tools, where it deletes
+      what is being edited). Restore Library (web only) is off with a document, as Open Library.
+    - The keys are taken before LightCraft's `logic`, as the undo keys already were, not through
+      `native_shortcuts`. Items whose key Studio takes show no shortcut (Save Metadata to File,
+      Create Version, New Album).
 - **T3. Pixel is PhotoCraft's own window.**
   - Call `eframe::App::ui` in the area under the bar.
   - Use its default theme, unrecoloured.
@@ -364,7 +373,9 @@ PROGRESS.md.
     now done), and NOTICE.
 - **T8. Close the check.**
   - Run the GPU parity renders and `render_personas`, and look at every PNG and diff.
-  - Update the smoke script and run it (ask first).
+  - Update the smoke script and run it (ask first). The script also checks that the persona
+    follows LightCraft's view (a `lightcraft:view.detail` lands in Develop, `view.photoGrid` back
+    in Library).
   - Update PROGRESS.md's Automated checks and Known untested.
   - Tick roadmap 1.
 

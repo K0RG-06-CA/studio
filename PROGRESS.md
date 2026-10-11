@@ -57,9 +57,30 @@ In this order, ahead of PRD milestone 6:
        after the engines' logic, so the new persona draws one frame in the old one's style; a
        click in LightCraft that opens its loupe moves the bar one frame late;
        `window.resetWorkspace` in Library/Develop resets a dock nobody draws and returns Ok
-       (until T7); the smoke script doesn't check that the persona followed LightCraft's view;
+       (until T7); the smoke script doesn't check that the persona followed LightCraft's view
+       (on T8's list in the plan);
        the bar and Studio's modals use LightCraft's text sizes in Library/Develop (T5 styles the
        bar from the persona's tokens).
+   - [x] T2m Studio hosts LightCraft's menus in the persona bar row (`lightcraft_menu.rs`): its
+     public model (`menubar::menu_bar`), drawn as its in-window menus are, in Library and
+     Develop. Every item is classified in `route` (fail closed: an unclassified item is drawn
+     disabled and never runs, and `every_lightcraft_menu_item_is_routed` walks the whole model
+     and fails on it). Edit › Undo/Redo are Studio's history while a document is open
+     (`lightcrafts_edit_undo_menu_item_is_studios_undo`, the T0 test flipped); Quit goes through
+     Studio's close guard; Open Library (and the web-only Restore Library) are off while a
+     document is open; Photo › Delete, Delete Permanently and Empty Recently Deleted are off for
+     the document's photo, and so is LightCraft's Delete key outside its mask, spot and red-eye
+     tools. Ctrl+S, Shift+Ctrl+S, Ctrl+N, Ctrl+O and Ctrl+W run `document.*` in every persona
+     (Ctrl+S saves the `.studio` file, never an XMP, never touching the photo; tested in
+     Library and Develop); the menu shows no shortcut on items whose key Studio takes (Save
+     Metadata to File, Create Version, New Album). Each test seen failing with its fix
+     reverted.
+     - Deviation from the plan: Studio takes these keys before LightCraft's `logic` (as it
+       already did for the undo keys) rather than through `native_shortcuts`; same effect, one
+       mechanism.
+     - Accepted parity difference (Studio owns the document keys): in Library and Develop,
+       LightCraft's Create Version loses Ctrl+Shift+S and New Album loses Ctrl+N (both stay in
+       its menus, with no shortcut), as Save Metadata to File loses Ctrl+S.
    - Temporarily unavailable keys (T3 until T3m): none yet.
 2. [ ] **Pixel slow-frame fix** (Open items: frames over 0.4 s); the deferred `bench.rs` peak
    bytes during a follow waits on it.

@@ -11,7 +11,9 @@ Used: linked as a Git dependency (lightcraft-ui-egui, lightcraft-engine and the
 crates they use, pinned in Cargo.toml): its library and develop panels and engine
 run Studio's Library and Develop personas. Also: dark-theme colour and size tokens
 (crates/ui-egui/src/theme.rs), adapted in crates/studio-shell/src/theme.rs;
-workspace lint and never-crash conventions.
+its in-window menu drawing (crates/ui-egui/src/menubar.rs), adapted in
+crates/studio-shell/src/lightcraft_menu.rs; workspace lint and never-crash
+conventions.
 
 MIT License
 
