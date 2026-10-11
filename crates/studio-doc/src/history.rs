@@ -23,9 +23,11 @@
 //! own steps. Studio owns PhotoCraft's `max_states`/`max_bytes` (its prefs would re-apply 50 / 8 GB)
 //! and trims after every write; redo states count and are never pruned (an edit clears them); the
 //! newest undo state is always kept (upstream `trim`), so retained bytes ≤ cap + one state. Studio
-//! prunes Develop-only steps from the oldest end itself; a step that owns a Pixel state can only
-//! go when PhotoCraft drops that state, which it does only inside `record` (`max_states`) or `trim`
-//! (bytes), never on demand (L12), so the step cap can lag by one Pixel state.
+//! prunes the oldest steps as a prefix: past [`HISTORY_STEPS`] whatever they own, over the bytes
+//! only Develop-only ones (PhotoCraft's `trim` frees pixel bytes, and its lost prefix takes the
+//! steps). A pruned Pixel step's states are no longer tracked (no undo reaches them) but stay in
+//! PhotoCraft until its next `record` drops them (`max_states` = tracked + 1): it can't drop a
+//! state on demand (L12), so they wait for the next Pixel edit, bounded by what was already kept.
 //!
 //! PhotoCraft's limitations (`d836e34`); each `compile_fail` example compiles, and so its doctest
 //! fails, once upstream adds what it names. The example after each is the same shape with an API
@@ -360,8 +362,11 @@ impl History {
     // ---------------------------------------------------------------- Pixel
 
     /// Take over PhotoCraft's caps for the document (its prefs re-apply 50 / 8 GB otherwise).
+    /// States no step owns any more (a prefix pruned past the step cap) go at its next `record`
+    /// (L12: never on demand), which keeps the states still tracked and the one it adds.
     fn own_caps(&self, st: &mut DocState) {
-        st.history.max_states = usize::MAX / 2;
+        let tracked: usize = self.steps.iter().map(|s| s.pixel.len()).sum();
+        st.history.max_states = if st.history.past_len() > tracked { tracked + 1 } else { usize::MAX / 2 };
         st.history.max_bytes = self.bytes_cap.saturating_sub(self.studio_bytes()).max(1);
     }
 
@@ -428,7 +433,10 @@ impl History {
                 None => return false,
             },
         };
-        if lost > 0 {
+        // States Studio stopped tracking (a prefix pruned past the step cap) going is no step's
+        // loss, however many of them go: every step is newer.
+        let owned_lost = old[..lost].iter().any(|q| self.steps.iter().any(|s| s.pixel.iter().any(|p| same(p, q))));
+        if owned_lost {
             // every step older than the oldest surviving state goes, Develop steps included: a
             // contiguous prefix of the whole history, never a hole. A surviving state no step owns
             // yet is new (every old one went): all steps are older, but the one waiting for it
@@ -567,20 +575,22 @@ impl History {
         true
     }
 
-    /// Keep the budget: Develop-only steps go from the oldest end at once; a step owning a Pixel
-    /// state goes when PhotoCraft drops the state (its next `record`, cap lowered here).
+    /// Keep the budget, from the oldest end, as a contiguous prefix. Past the step cap the oldest
+    /// steps go whatever they own: Studio stops tracking their PhotoCraft states (no undo reaches
+    /// them) and PhotoCraft drops them at its next `record` (`own_caps`). Over the byte budget only
+    /// Develop-only steps go: a pruned Pixel state frees nothing until PhotoCraft drops it, and
+    /// PhotoCraft's own `trim` keeps its bytes (the lost prefix then takes the steps).
     fn prune(&mut self, st: Option<&mut DocState>) {
-        let over = |h: &History| h.steps.len() > HISTORY_STEPS || h.studio_bytes().saturating_add(h.pixel_bytes) > h.bytes_cap;
-        // a step waiting for its follow (always the newest) owns no state yet, but isn't Develop-only
+        let over_bytes = |h: &History| h.studio_bytes().saturating_add(h.pixel_bytes) > h.bytes_cap;
+        // a step waiting for its follow (always the newest) owns no state yet: it stays
         let waiting = usize::from(self.pending.is_some());
-        while over(self) && self.steps.len() > waiting && self.steps.first().is_some_and(|s| s.pixel.is_empty()) {
+        while self.steps.len() > waiting
+            && (self.steps.len() > HISTORY_STEPS || (over_bytes(self) && self.steps.first().is_some_and(|s| s.pixel.is_empty())))
+        {
             self.steps.remove(0);
         }
         if let Some(st) = st {
             self.own_caps(st);
-            if self.steps.len() > HISTORY_STEPS {
-                st.history.max_states = st.history.past_len().saturating_sub(1).max(1);
-            }
         }
     }
 }
@@ -1318,6 +1328,73 @@ pub(crate) mod tests {
         assert!(shared, "neighbouring steps share one History list");
         assert!(doc.undo(&mut lr, &mut px, &mut Base::new()).unwrap());
         assert_eq!(exposure(&lr, id), value(4998));
+    }
+
+    /// Review (MEDIUM): `pixel` Pixel edits ("Paint 0"…), then 5,000 exposure edits: the
+    /// Pixel steps are pruned with the oldest Develop steps (past the step cap).
+    fn pruned(pixel: usize) -> (Session, PixelSession, Document) {
+        let (mut lr, mut px, mut doc) = open();
+        let id = doc.photo().unwrap();
+        for i in 0..pixel {
+            paint(&mut px, &format!("Paint {i}"), i as i32, i as i32);
+            tick(&mut doc, &lr, &mut px);
+        }
+        for i in 0..5000 {
+            set_exposure(&mut lr, id, (i % 97) as f64 * 0.01 + 0.01);
+            doc.note_develop(&lr);
+        }
+        tick(&mut doc, &lr, &mut px);
+        (lr, px, doc)
+    }
+
+    #[test]
+    fn one_pixel_edit_then_five_thousand_develop_edits_stay_within_the_step_cap() {
+        let (_, px, mut doc) = pruned(1);
+        assert_eq!(doc.history.position(), HISTORY_STEPS, "the step cap holds");
+        assert!(!labels(&doc).contains(&"Paint 0".to_owned()), "the Pixel step went with the oldest");
+        assert!(doc.history.studio_bytes() < 64 << 20);
+        // PhotoCraft still holds the state Studio stopped tracking, until its next record
+        let st = px.active().unwrap();
+        assert_eq!((st.history.past_len(), st.history.max_states), (1, 1));
+        assert_eq!(doc.take_notice(), None);
+    }
+
+    #[test]
+    fn undo_stops_at_the_oldest_kept_step_and_never_reaches_the_untracked_states() {
+        let (mut lr, mut px, mut doc) = pruned(1);
+        doc.goto(&mut lr, &mut px, &mut Base::new(), 0).unwrap();
+        assert!(!doc.undo(&mut lr, &mut px, &mut Base::new()).unwrap(), "nothing older");
+        assert_eq!(layers(&doc), ["Develop", "Paint 0"], "the untracked Pixel edit stays");
+        assert_eq!(px.active().unwrap().history.past_len(), 1, "and PhotoCraft wasn't undone");
+        assert_eq!(doc.take_notice(), None);
+    }
+
+    #[test]
+    fn the_next_pixel_edit_drops_the_untracked_states_and_keeps_its_own() {
+        let (mut lr, mut px, mut doc) = pruned(2);
+        assert_eq!(px.active().unwrap().history.past_len(), 2, "two untracked states");
+        paint(&mut px, "Later", 9, 9);
+        tick(&mut doc, &lr, &mut px);
+        assert_eq!(px.active().unwrap().history.past_len(), 1, "only the new edit's state is left");
+        assert_eq!(labels(&doc).last().map(String::as_str), Some("Later"));
+        assert_eq!(doc.history.position(), HISTORY_STEPS);
+        assert_eq!(doc.take_notice(), None, "a prune, not a reset");
+        assert!(doc.undo(&mut lr, &mut px, &mut Base::new()).unwrap());
+        assert_eq!(layers(&doc), ["Develop", "Paint 0", "Paint 1"], "the new edit undone, the old ones kept");
+    }
+
+    #[test]
+    fn photocraft_dropping_only_some_untracked_states_keeps_the_history() {
+        let (lr, mut px, mut doc) = pruned(2);
+        // PhotoCraft's prefs re-apply a cap just before an edit: its `record` drops the oldest
+        // untracked state only, and the other is still the oldest it holds
+        px.active_mut().unwrap().history.max_states = 2;
+        paint(&mut px, "Later", 9, 9);
+        tick(&mut doc, &lr, &mut px);
+        assert_eq!(doc.take_notice(), None);
+        assert_eq!(doc.history.position(), HISTORY_STEPS, "every step kept");
+        assert_eq!(labels(&doc).last().map(String::as_str), Some("Later"));
+        assert_eq!(labels(&doc).iter().filter(|l| *l == "Exposure").count(), HISTORY_STEPS - 1);
     }
 
     #[test]

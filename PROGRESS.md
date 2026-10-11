@@ -350,8 +350,15 @@ See [`PRD.md`](PRD.md) → *Milestones for Claude Code*.
     - HIGH: a crop redone over a later render kept the stale uncropped render as current and
       shifted the layers out of the crop's frame; a save before the next render wrote them
       misplaced. A render a shift away is kept only when it is of the settings wanted.
-    - MEDIUM (open): one Pixel step at the oldest end blocks all pruning (L12's "lag by one"
-      is unbounded); design under discussion.
+    - MEDIUM: one Pixel step at the oldest end blocked all pruning (L12's "lag by one" was
+      unbounded: 1 Pixel edit + 5,000 exposure edits kept 5,001 steps). Design (the user's,
+      with three changes agreed): past `HISTORY_STEPS` the oldest steps go as a prefix whatever
+      they own; Studio stops tracking their PhotoCraft states (undo stops at its oldest step)
+      and PhotoCraft drops them at its next `record` (`max_states` = tracked + 1, set at every
+      copy-back, so a frame without a Pixel change no longer loses it); states no step owns
+      going (all or some of them) take no step; over the bytes only Develop-only steps go
+      (PhotoCraft's `trim` frees the pixels). Four tests; mutation-checked (no + 1, no cap, the
+      old lost-prefix rule, Pixel steps kept past the cap, Pixel steps pruned on bytes).
 
   **Upstream limitations (M5), each with a test that fails once upstream fixes it:**
   - L8 PhotoCraft `History` can't jump to or replace a state: Studio jumps step by step, and an
@@ -365,9 +372,9 @@ See [`PRD.md`](PRD.md) → *Milestones for Claude Code*.
   - L11 LightCraft's lens warp maps rendered → source only: layers can't follow a change of the
     lens corrections (`compile_fail` doctest naming `optics::Warp::from_source`).
   - L12 PhotoCraft `History` can't drop its oldest state on demand (only inside `record` via
-    `max_states` or `trim` via bytes): a Pixel step at the oldest end of Studio's history goes at
-    PhotoCraft's next `record` (Studio lowers `max_states` for it), so the step cap can lag by one
-    (`compile_fail` doctest naming `pop_oldest`).
+    `max_states` or `trim` via bytes): a Pixel step pruned past the step cap leaves its states in
+    PhotoCraft, untracked, until its next `record` (`max_states` = tracked + 1) (`compile_fail`
+    doctest naming `pop_oldest`).
 
   **Left for later (not M5):** layers following an Upright change (a homography; Studio's own
   simplification, not upstream) or a lens-correction change (L11); the undo history surviving
