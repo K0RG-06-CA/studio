@@ -109,7 +109,7 @@ pub(crate) fn settle<S>(h: &mut Harness<'_, S>, busy: impl Fn(&S) -> bool) {
     }
 }
 
-/// A labelled accessible node: `Role "label"` and its bounds.
+/// A labelled accessible node: `Role "label"`, its state, and its bounds.
 struct Node {
     text: String,
     rect: Rect,
@@ -120,7 +120,16 @@ fn nodes<S>(h: &Harness<'_, S>, dy: f32) -> Vec<Node> {
     h.query_all(by().predicate(|n| n.label().is_some_and(|l| !l.is_empty())))
         .map(|n| {
             let a = n.accesskit_node();
-            Node { text: format!("{:?} {:?}", a.role(), a.label().unwrap_or_default()), rect: n.rect().translate(egui::vec2(0.0, -dy)) }
+            // its state too: a checked box, a disabled button, a slider's value look different
+            let state = format!(
+                "{}{}{}{}{}",
+                a.toggled().map(|t| format!(" {t:?}")).unwrap_or_default(),
+                a.is_selected().map(|s| format!(" selected={s}")).unwrap_or_default(),
+                if a.is_disabled() { " disabled" } else { "" },
+                a.value().map(|v| format!(" value={v:?}")).unwrap_or_default(),
+                a.numeric_value().map(|v| format!(" value={v}")).unwrap_or_default(),
+            );
+            Node { text: format!("{:?} {:?}{state}", a.role(), a.label().unwrap_or_default()), rect: n.rect().translate(egui::vec2(0.0, -dy)) }
         })
         .collect()
 }
@@ -312,6 +321,27 @@ fn the_tree_diff_names_a_moved_node_on_both_sides() {
 fn the_tree_diff_counts_a_repeated_node() {
     let n = || node("Label \"Exposure\"", [0.0, 0.0, 10.0, 10.0]);
     assert_eq!(tree_diff(&shown(vec![n(), n()], &[]), &shown(vec![n()], &[])), ["+1 Label \"Exposure\" [0 0 10 10]"]);
+}
+
+#[test]
+fn the_tree_diff_sees_a_widgets_state() {
+    let ui = |on: bool, enabled: bool, v: f32| {
+        Harness::new_ui_state(
+            move |ui, s: &mut (bool, f32)| {
+                ui.add_enabled_ui(enabled, |ui| {
+                    ui.checkbox(&mut s.0, "Grid");
+                    ui.add(egui::Slider::new(&mut s.1, 0.0..=1.0).text("Exposure"));
+                });
+            },
+            (on, v),
+        )
+    };
+    let tree = |h: Harness<'_, (bool, f32)>| shown(nodes(&h, 0.0), &[]);
+    let base = tree(ui(true, true, 0.5));
+    assert!(tree_diff(&base, &tree(ui(true, true, 0.5))).is_empty());
+    assert!(!tree_diff(&base, &tree(ui(false, true, 0.5))).is_empty(), "toggled");
+    assert!(!tree_diff(&base, &tree(ui(true, false, 0.5))).is_empty(), "disabled");
+    assert!(!tree_diff(&base, &tree(ui(true, true, 0.7))).is_empty(), "value");
 }
 
 #[test]
