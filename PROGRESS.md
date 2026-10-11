@@ -88,6 +88,19 @@ In this order, ahead of PRD milestone 6:
        (context-menu Delete, its delete confirmation, Remove Folder from Library) are taken back
        the same frame with a notice, so Delete Permanently and Empty Recently Deleted can't reach
        it.
+     - Left (LOW): Rename Photos, Convert to DNG and Find Missing relink the photo's file under
+       the same `PhotoId`, so the document keeps rendering it, but the `.studio` header's source
+       path (and, after Convert to DNG, its content hash) go stale: a reopen then finds or
+       re-imports the original; the library-problem window's Retry and Temporary open a library
+       by path, past the held folder dialog (only once the document's library has already
+       failed); the Delete key on the document's photo does nothing, silently (the menu item is
+       greyed, but no notice); Settings' greyed Open Library… says LightCraft's "not available
+       here"; the File menu's "Quit LightCraft" quits Studio; the menu model is rebuilt every
+       frame in Library and Develop (`menu_bar` plus a copy), even with no menu open; the Delete
+       key in the Masking, Remove and Red Eye tools (left to LightCraft) has no test, nor has
+       Ctrl+S with no document open (it does nothing, silently); the menu tests close menus with
+       a click at a fixed spot of the bar and count Quit's frames exactly; Studio's restore of the
+       document's photo is a step in LightCraft's own undo history.
    - Temporarily unavailable keys (T3 until T3m): none yet.
 2. [ ] **Pixel slow-frame fix** (Open items: frames over 0.4 s); the deferred `bench.rs` peak
    bytes during a follow waits on it.
