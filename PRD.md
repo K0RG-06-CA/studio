@@ -16,7 +16,7 @@ It is built in Rust on top of the open-source storytold Crafting Apps ([LightCra
 
 - One document that every mode edits, with no export or reimport between modes.
 - An Affinity-style top bar to switch modes in one click, keeping the current selection and zoom.
-- Each persona looks identical to its storytold app: LightCraft in Library and Develop, PhotoCraft in Pixel, FilmCraft in Film (own theme, fonts, colours, panel layout and shortcuts).
+- Each persona looks identical to its storytold app: LightCraft in Library and Develop, PhotoCraft in Pixel (own theme, fonts, colours, panel layout and shortcuts). Film, Studio's own persona, is built from storytold's widgets, theme and panel conventions, so it looks like it belongs next to LightCraft.
 - Runs natively on ARM64 and x64, on Windows and Linux (macOS as a bonus). ARM64 is a hard requirement: every feature, including RW2 decoding and the film effects, must work on ARM64.
 - Every action is a command, so Claude can drive the app over MCP, like LightCraft already does.
 
@@ -28,7 +28,7 @@ It is built in Rust on top of the open-source storytold Crafting Apps ([LightCra
 
 ## UI and look
 
-**UI parity (direction change, 2026-10-10).** Each persona looks identical to the storytold app it embeds: Library and Develop are LightCraft, Pixel is PhotoCraft, Film is FilmCraft, each with its own theme, fonts, colours, panel layout and shortcuts, exactly as that app ships. Studio adds only the Affinity-style persona bar on top, plus the minimum the shared document needs: Studio's History tab (styled as a native storytold panel, in PhotoCraft's History spot), Studio's notices and prompts, and disabled states (a persona or command that can't run now). Studio doesn't recolour, restyle or re-dock the storytold apps. Why: users of the storytold apps should feel at home in Studio, and upstream UI updates should port with no restyling. This replaces the earlier plan of Adobe-style recolouring and Lightroom Classic / Photoshop docking layouts.
+**UI parity (direction change, 2026-10-10).** Each persona looks identical to the storytold app it embeds: Library and Develop are LightCraft and Pixel is PhotoCraft, each with its own theme, fonts, colours, panel layout and shortcuts, exactly as that app ships. Film has no storytold app to match: it is Studio's own persona, built from storytold's widgets, theme and panel conventions, so it looks like it belongs next to LightCraft. Studio adds only the Affinity-style persona bar on top, plus the minimum the shared document needs: Studio's History tab (styled as a native storytold panel, in PhotoCraft's History spot), Studio's notices and prompts, and disabled states (a persona or command that can't run now). Studio doesn't recolour, restyle or re-dock the storytold apps. Why: users of the storytold apps should feel at home in Studio, and upstream UI updates should port with no restyling. This replaces the earlier plan of Adobe-style recolouring and Lightroom Classic / Photoshop docking layouts.
 
 Window layout, shown for the Pixel persona:
 
@@ -47,12 +47,12 @@ Window layout, shown for the Pixel persona:
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
-Develop shows LightCraft's own Develop view under the same bar; Film shows FilmCraft's.
+Develop shows LightCraft's own Develop view under the same bar; Film shows Studio's own film panels in LightCraft's style.
 
 - **Persona bar (Studio):** persona buttons on the left, document name on the right. Ctrl+1 to Ctrl+7 jump between personas. The only always-visible Studio UI.
 - **Library and Develop:** LightCraft as it ships: its panels, filmstrip, theme and shortcuts.
 - **Pixel:** PhotoCraft as it ships: its tool bar, options bar, panels, theme and shortcuts. Shortcuts switch with the persona, as each app defines them.
-- **Film:** FilmCraft as it ships.
+- **Film:** Studio's own persona (there is no storytold film app), built from storytold's widgets, theme and panel conventions so it sits naturally next to LightCraft's Develop.
 - **Studio's own pieces** (History tab, notices, the save prompt, disabled states) follow the persona's storytold app styling, so they look native there.
 
 ## Personas and v1 scope
@@ -63,7 +63,7 @@ Version 1 ships Library, Develop, Film and Pixel, which covers the Lightroom-to-
 | --- | --- | --- | --- | --- |
 | Library | LightCraft Library | LightCraft | Grid, filmstrip, ratings, flags, albums, search | v1 |
 | Develop | LightCraft Develop | LightCraft | Light, Color, Tone Curve, masking, crop, presets | v1 |
-| Film | FilmCraft | New + NP DCTL port | Halation, grain, blur, bleach, Saturation RGB, film stock builder | v1 |
+| Film | LightCraft's style (Studio's own persona) | New + NP DCTL port | Halation, grain, blur, bleach, Saturation RGB, film stock builder | v1 |
 | Pixel | PhotoCraft | PhotoCraft | Layers, adjustment layers, brushes, selections, healing | v1 |
 | Vector | VectorCraft | VectorCraft | Pen and node tools, shapes, booleans | v2 |
 | Layout | DesignCraft | DesignCraft | Pages, text frames, master pages, print export | v3 |
