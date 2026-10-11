@@ -179,13 +179,28 @@ fn tree_diff(studio: &[String], upstream: &[String]) -> Vec<String> {
     count.into_iter().filter(|(_, c)| *c != 0).map(|(l, c)| format!("{c:+} {l}")).collect()
 }
 
+/// An allow-list may hide at most a quarter of a case's nodes or pixels, and the case must compare
+/// something. The largest planned allowance, D1's floating History panel with L13's menu slot, is
+/// about a tenth of the window: a quarter leaves it room, while no allow-list can hide the canvas
+/// (about half the window) or a whole column of panels and still pass.
+fn allow_cap(hidden: usize, total: usize, what: &str) -> Result<(), String> {
+    if total == 0 || hidden * 4 > total {
+        return Err(format!("the allow-list hides {hidden} of {total} {what}, over a quarter"));
+    }
+    Ok(())
+}
+
 fn reasons(allow: &[Allow]) -> Vec<String> {
     allow.iter().map(|a| format!("{:?}: {}", a.rect, a.reason)).collect()
 }
 
 /// Studio's accessibility tree (under the persona bar) equals the bare app's, outside `allow`.
 pub(crate) fn assert_tree_parity<A, B>(studio: &Harness<'_, A>, upstream: &Harness<'_, B>, allow: &[Allow]) {
+    let all = nodes(upstream).len();
     let up = shown(nodes(upstream), allow);
+    if let Err(e) = allow_cap(all - up.len(), all, "nodes") {
+        panic!("{e}\nallowed: {:#?}", reasons(allow));
+    }
     // a harness that drew nothing would pass
     assert!(up.len() > 10, "the bare app shows almost nothing: {up:#?}");
     let diff = tree_diff(&shown(under_bar(nodes(studio)), allow), &up);
@@ -281,9 +296,14 @@ fn pixel_diff(studio: &[u8], upstream: &[u8], width: usize, bar: std::ops::Range
     (differ, counted, image)
 }
 
-/// More than 0.1% of the counted pixels differ.
-fn too_different(differ: usize, counted: usize) -> bool {
-    differ * 1000 > counted
+/// The verdict on a render of `total` pixels, `counted` of them outside the allow-list: more
+/// than 0.1% of the counted pixels differing fails.
+fn render_verdict(differ: usize, counted: usize, total: usize) -> Result<(), String> {
+    allow_cap(total - counted.min(total), total, "pixels")?;
+    if differ * 1000 > counted {
+        return Err(format!("{differ} of {counted} pixels differ"));
+    }
+    Ok(())
 }
 
 /// Renders Studio and the bare app (same renderer, size and pixels per point), writes
@@ -304,7 +324,9 @@ pub(crate) fn assert_render_parity<A, B>(case: &str, studio: &mut Harness<'_, A>
     let (differ, counted, diff) = pixel_diff(&s, &u, u.width() as usize, bar, &px);
     u.copy_from_slice(&diff);
     u.save(dir.join(format!("{case}-diff.png"))).unwrap();
-    assert!(!too_different(differ, counted), "{case}: {differ} of {counted} pixels differ (see {case}-diff.png)\nallowed: {:#?}", reasons(allow));
+    if let Err(e) = render_verdict(differ, counted, u.len() / 4) {
+        panic!("{case}: {e} (see {case}-diff.png)\nallowed: {:#?}", reasons(allow));
+    }
 }
 
 /// The harness against itself on the GPU: each bare app under a stand-in bar against the bare
@@ -421,9 +443,29 @@ fn the_pixel_diff_crops_the_persona_bar_and_skips_allowed_pixels() {
 
 #[test]
 fn renders_fail_above_a_thousandth_of_the_pixels() {
-    assert!(!too_different(1, 1000));
-    assert!(too_different(2, 1000));
-    assert!(!too_different(0, 0));
+    assert!(render_verdict(1, 1000, 1000).is_ok());
+    assert!(render_verdict(2, 1000, 1000).is_err());
+}
+
+#[test]
+fn a_render_fails_when_its_allow_list_hides_over_a_quarter_of_it() {
+    assert!(render_verdict(0, 750, 1000).is_ok());
+    assert!(render_verdict(0, 749, 1000).is_err());
+    assert!(render_verdict(0, 0, 1000).is_err(), "nothing compared");
+}
+
+#[test]
+#[should_panic(expected = "the allow-list hides")]
+fn a_tree_case_fails_when_its_allow_list_hides_over_a_quarter_of_the_nodes() {
+    let (mut hosted, mut bare) = (lightcraft(Harness::builder(), demo_lightcraft(), true), lightcraft(Harness::builder(), demo_lightcraft(), false));
+    hosted.run_steps(8);
+    bare.run_steps(8);
+    // the right panel and the right end of the top bar: the trees match, but too much is hidden
+    let right = Allow { rect: Rect::from_min_max(egui::pos2(1000.0, 0.0), egui::pos2(SIZE[0], SIZE[1])), reason: "test" };
+    let all = nodes(&bare).len();
+    let left = shown(nodes(&bare), std::slice::from_ref(&right)).len();
+    assert!((all - left) * 4 > all && left > 10, "the test's rect hides {} of {all}", all - left);
+    assert_tree_parity(&hosted, &bare, &[right]);
 }
 
 #[test]
