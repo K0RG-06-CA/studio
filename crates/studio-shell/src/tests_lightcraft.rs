@@ -407,6 +407,39 @@ fn settings_open_library_is_off_while_a_document_is_open() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// LightCraft's own ways to delete past Studio's menu (its context-menu Delete and Remove Folder
+/// from Library run their commands directly) never leave the document's photo in Recently
+/// Deleted: it is back at once, and Studio says why. Without a document they work as before.
+#[test]
+fn the_documents_photo_never_stays_in_recently_deleted() {
+    let dir = temp_dir("t2m-keep-photo");
+    let mut h = file_library(&dir, &dir.join("beach.png"));
+    h.state_mut().run("document.new").unwrap();
+    settle_base(&mut h);
+    let mine = h.state().document.as_ref().unwrap().photo().unwrap();
+    let deleted = |h: &Harness<'_, StudioShell>| lc(h).session.catalog.photo(mine).unwrap().deleted;
+    let folder = dir.to_string_lossy().into_owned();
+    for (id, params) in [("photo.delete", serde_json::json!({"ids": [mine.0]})), ("library.removeFolder", serde_json::json!({"path": folder}))] {
+        let lr = h.state_mut().lightroom.as_mut().unwrap();
+        lr.app.run(id, params.clone()).unwrap();
+        h.run_steps(1);
+        assert!(!deleted(&h), "{id}: the document's photo is back: {:?}", h.state().error);
+        assert!(h.state().error.as_ref().is_some_and(|(t, _)| t.contains("document\u{2019}s photo")), "{id}: {:?}", h.state().error);
+        h.state_mut().run("document.dismissError").unwrap();
+    }
+    // no document: LightCraft's delete as it ships
+    h.state_mut().run("document.close").unwrap();
+    let lr = h.state_mut().lightroom.as_mut().unwrap();
+    lr.app.session.selection.active = Some(mine);
+    lr.app.run("photo.delete", serde_json::json!({"ids": [mine.0]})).unwrap();
+    h.run_steps(1);
+    assert!(deleted(&h) && h.state().error.is_none());
+    let lr = h.state_mut().lightroom.as_mut().unwrap();
+    lr.app.session.close_library().unwrap();
+    drop(h);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// Photo › Delete (and its Delete key) never takes the document's photo; another photo's still
 /// goes.
 #[test]

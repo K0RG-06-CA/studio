@@ -83,7 +83,11 @@ In this order, ahead of PRD milestone 6:
        its menus, with no shortcut), as Save Metadata to File loses Ctrl+S.
      - Review fixes (one commit each, each test seen failing with its fix reverted):
        LightCraft's Settings › Open Library… (and its library-problem window's Choose…) is off
-       while a document is open: its folder dialog is held back while either shows.
+       while a document is open: its folder dialog is held back while either shows. The
+       document's photo never stays in Recently Deleted: LightCraft's own ways past the menu
+       (context-menu Delete, its delete confirmation, Remove Folder from Library) are taken back
+       the same frame with a notice, so Delete Permanently and Empty Recently Deleted can't reach
+       it.
    - Temporarily unavailable keys (T3 until T3m): none yet.
 2. [ ] **Pixel slow-frame fix** (Open items: frames over 0.4 s); the deferred `bench.rs` peak
    bytes during a follow waits on it.

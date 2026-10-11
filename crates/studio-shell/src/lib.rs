@@ -550,11 +550,30 @@ impl StudioShell {
     /// after every command. A jump PhotoCraft began itself is finished here (see
     /// [`Document::reconcile`]).
     fn settle(&mut self) {
+        self.keep_document_photo();
         let (Some(doc), Some(lr), Some(px)) = (&mut self.document, &mut self.lightroom, &mut self.pixel) else { return };
         doc.note_develop(&lr.app.session);
         if let Err(e) = doc.reconcile(&mut lr.app.session, &mut px.app.session) {
             self.error = Some(("History".to_owned(), e));
         }
+    }
+
+    /// The document's photo stays in the library while the document is open: whatever moved it to
+    /// Recently Deleted past Studio's menu (LightCraft's context-menu Delete, its delete
+    /// confirmation, Remove Folder from Library) is taken back at once and said why, so Delete
+    /// Permanently and Empty Recently Deleted never reach it.
+    fn keep_document_photo(&mut self) {
+        let (Some(photo), Some(lr)) = (self.document.as_ref().and_then(Document::photo), self.lightroom.as_mut()) else { return };
+        if !lr.app.session.catalog.photo(photo).is_some_and(|p| p.deleted) {
+            return;
+        }
+        // committed directly: LightCraft's Restore wants the photo selected, and a delete clears that
+        let op = lightcraft_engine::catalog::Op::SetDeleted { id: photo, deleted: false };
+        let why = match lr.app.session.commit("Restore", op) {
+            Ok(()) => "It stays in the library while its document is open: close the document first.".to_owned(),
+            Err(e) => e.to_string(),
+        };
+        self.error = Some(("Couldn\u{2019}t delete the document\u{2019}s photo".to_owned(), why));
     }
 
     /// A Develop geometry change waits for its render: PhotoCraft is barred until it lands.
