@@ -102,18 +102,18 @@ fn spike_b_photocraft_and_lightcraft_fonts_live_in_one_context() {
     );
     // LightCraft first, then PhotoCraft (which replaces every font), then LightCraft again
     h.run_steps(6);
-    assert!(painted_text(h.output()).contains("My Photos"));
+    assert!(painted_text(h.output()).contains("Search Photos"));
     h.state_mut().photocraft = true;
     h.run_steps(6);
     assert!(painted_text(h.output()).contains("Layers"));
     h.state_mut().photocraft = false;
     h.run_steps(4);
-    assert!(painted_text(h.output()).contains("My Photos"));
+    assert!(painted_text(h.output()).contains("Search Photos"));
     // and Develop's panels, which use LightCraft's semibold family
     h.state_mut().shell.run("persona.develop").unwrap();
     h.run_steps(4);
     let text = painted_text(h.output());
-    assert!(text.contains("Presets"), "{text}");
+    assert!(text.contains("Edit") && text.contains("Exposure"), "{text}");
 }
 
 /// L2, menu side: PhotoCraft greys Arrange, Delete and Merge Down by its Background heuristic

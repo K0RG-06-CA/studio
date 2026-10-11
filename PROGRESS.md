@@ -37,6 +37,17 @@ In this order, ahead of PRD milestone 6:
    - D4 approved: Studio hosts both apps' menu bars in the persona bar row (T2m, T3m). No commit
      draws either app's in-window menus before they're routed. Ctrl+S saves the document in
      every persona (T2m). L14 and L16 accepted.
+   - [x] T2 Library and Develop are LightCraft's own window (`LightcraftApp::ui` under the bar, in
+     its own style; Studio's theme goes back when another persona shows). The persona follows
+     LightCraft's view (D2); photo-less documents keep the bar out of Develop. Classic G/E/D/R
+     keys and their commands, the per-panel drawing and its tests are gone. LightCraft's state
+     is read from `studio.lightcraft.2` (D3; the old key untouched, tested). In-window menus
+     hidden (`native_menu`); L13 note and test in `lightroom.rs`/`tests_lightcraft`. Parity
+     (a) and (b) green for Library grid/compare and Develop Edit/crop, with no allow-list: the
+     reference is LightCraft with its menus hidden (D4's native-menu layout), since hiding them
+     also widens its search field. Keys while the menus are hidden: every LightCraft shortcut
+     still runs in its `logic`; Studio takes only Ctrl+1…7 and, with a document, the undo keys
+     (as before), so none is unavailable. Ctrl+S stays LightCraft's Save Metadata until T2m.
    - Temporarily unavailable keys (T3 until T3m): none yet.
 2. [ ] **Pixel slow-frame fix** (Open items: frames over 0.4 s); the deferred `bench.rs` peak
    bytes during a follow waits on it.
@@ -307,7 +318,7 @@ In this order, ahead of PRD milestone 6:
     in Pixel); what the import approximated or dropped shows at once in the error modal,
     "Opened “x” with warnings", before any edit; every failed open is shown. A document
     without a photo opens in Pixel; Develop and Film are greyed for it (hover and the
-    `persona.*` error say why; `view.develop`/`tool.crop` refused). `document.saveAs` without
+    `persona.*` error say why). `document.saveAs` without
     a path asks through the save dialog (Shift+Ctrl+S in Pixel); a save only ever writes a
     `.studio` file, so an opened PNG/PSD is never written over (test: Ctrl+S asks, the PNG's
     bytes are unchanged, a save pointed at the PNG is refused). Opening anything with unsaved
@@ -466,14 +477,14 @@ Former hand checks and the tests that replaced them:
 - Top bar: personas clickable, v2/v3 greyed with "arrives in" tooltips, "Untitled" → `clicking_a_persona_*`, `disabled_personas_*`, `greyed_out_personas_and_tools_say_when_they_arrive`, `top_bar_shows_the_document_name`.
 - Ctrl+1..4 switch, Ctrl+5..7 don't → `ctrl_1_to_4_switch_personas_and_ctrl_5_to_7_do_nothing`, `ctrl_numbers_only_switch_personas`.
 - Each persona's layout; Film Effects with Halation first → `each_persona_shows_its_adobe_layout`, `film_sections_*`, renders (checked).
-- Docking: regroup, split, float (canvas never floats), resize, collapse → `dragging_a_panel_tab_regroups_*`, `dropping_a_tab_on_a_groups_edge_splits_it`, `a_panel_dropped_away_from_the_split_buttons_floats_but_the_canvas_never_does`, `dragging_a_column_separator_resizes_it`, `dock_columns_resize_by_their_separators_around_lightcraft_panels`, `the_collapse_button_folds_a_panel_group`.
+- Docking: regroup, split, float (canvas never floats), resize, collapse → `dragging_a_panel_tab_regroups_*`, `dropping_a_tab_on_a_groups_edge_splits_it`, `a_panel_dropped_away_from_the_split_buttons_floats_but_the_canvas_never_does`, `dragging_a_column_separator_resizes_it`, `the_collapse_button_folds_a_panel_group`.
 - Layouts kept across switches and relaunches → `each_persona_keeps_its_own_layout_*`, `shell_state_survives_save_and_restore`, `persona_panels_and_lightcraft_settings_come_back_after_a_relaunch`, smoke test (relaunch).
-- Look (dark grey, small text, tool-strip tooltips) → renders (checked), `studio_theme_survives_*`, `greyed_out_personas_and_tools_*`.
+- Look (dark grey, small text, tool-strip tooltips) → renders (checked), `greyed_out_personas_and_tools_*`; Library and Develop in LightCraft's own style → `library_and_develop_are_lightcrafts_own_window` (style check).
 - Right-click → Reset Workspace → `right_click_reset_workspace_puts_the_panels_back`.
-- Library in the grid with Classic's panels; click selects → `library_shows_lightcraft_in_lightroom_classic_places`.
+- Library and Develop are LightCraft's own window (grid, compare, loupe with Edit, crop) → `library_and_develop_are_lightcrafts_own_window`, `render_parity` (checked); a click selects → `develop_edits_the_photo_picked_in_library`.
 - Import by dropping files → `files_dropped_on_library_are_imported`.
 - Picked photo in Develop, loupe/filmstrip/Edit/Presets → `develop_edits_the_photo_picked_in_library`, renders (checked).
-- G/E/D/R, `\`, nothing while typing → `g_e_d_r_switch_modules_like_lightroom_classic`, `lightroom_keys_type_into_text_fields`, `lightroom_keys_do_nothing_in_pixel`.
+- LightCraft's own keys; the persona follows its view (D2) → `the_persona_follows_lightcrafts_own_view_keys`, `with_a_document_without_a_photo_lightcrafts_loupe_doesnt_take_the_bar_into_develop`; undo keys with a document → `undo_and_redo_keys_with_a_document_go_to_studios_history_in_library_and_develop`.
 - Edit, switch to Pixel, relaunch: edit kept → `leaving_develop_saves_its_edits`.
 - Panel widths, Edit sections, settings after relaunch → `persona_panels_and_lightcraft_settings_come_back_after_a_relaunch`.
 - Preset hover preview; History steps → `hovering_a_preset_previews_it_only_while_hovered`, `history_lists_develop_steps`.
@@ -680,8 +691,9 @@ From the code review of milestone 3 (HIGH/MEDIUM were fixed, one commit each, wi
 - Milestone 1 does not depend on storytold crates yet; egui/eframe pinned to 0.36 to match LightCraft and PhotoCraft.
 - egui 0.36 `Panel::show(ui)` always draws inside the given `Ui`, so LightCraft's and PhotoCraft's own panels should nest inside a persona area in milestones 2 and 4 without upstream patches.
 - egui_dock paints tab titles without accessibility info; `dock::Viewer::on_tab_button` adds it.
-- **Milestone 2 (LightCraft `eeb136b`):** LightCraft copies Lightroom *desktop*, not Classic, so Studio
-  draws its panels one by one into the dock in Classic's places (`crates/studio-shell/src/lightroom.rs`).
+- **Milestone 2 (LightCraft `eeb136b`), superseded by UI parity T2** (Library and Develop are now
+  LightCraft's own window): LightCraft copies Lightroom *desktop*, not Classic, so Studio
+  drew its panels one by one into the dock in Classic's places.
   Differences from Classic, from what LightCraft offers: no Navigator, Quick Develop, Snapshots or
   separate Histogram panel (the histogram heads Edit); History is a tab next to Edit (LightCraft's
   right panel can be drawn once per frame, see `tests_lightcraft::spike_b_*`); no filmstrip under

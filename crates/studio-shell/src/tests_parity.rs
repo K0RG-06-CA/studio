@@ -63,12 +63,22 @@ pub(crate) fn demo_lightcraft() -> LightcraftApp {
 
 /// The bare LightCraft window (`under_bar`: drawn under a stand-in persona bar, at Studio's size).
 pub(crate) fn lightcraft(builder: HarnessBuilder<LightcraftApp>, app: LightcraftApp, under_bar: bool) -> Harness<'static, LightcraftApp> {
+    let mut fresh = false;
     builder.with_size(size(under_bar)).build_ui_state(
         move |ui, app: &mut LightcraftApp| {
+            let ctx = ui.ctx().clone();
+            if !std::mem::replace(&mut fresh, true) {
+                // egui as its desktop app gets it from eframe, not kittest's test style (no
+                // animations, no cursor blink, the dark theme pinned)
+                ctx.set_theme(egui::ThemePreference::System);
+                ctx.options_mut(|o| {
+                    o.dark_style = std::sync::Arc::new(egui::Theme::Dark.default_style());
+                    o.light_style = std::sync::Arc::new(egui::Theme::Light.default_style());
+                });
+            }
             if under_bar {
                 bar(ui);
             }
-            let ctx = ui.ctx().clone();
             app.logic(&ctx);
             app.ui(ui);
         },
@@ -365,6 +375,75 @@ fn render_parity() {
     settle(&mut hosted, |_| false);
     settle(&mut bare, |_| false);
     assert_render_parity("self-photocraft", &mut hosted, &mut bare, &[]);
+    for case in LIGHTCRAFT_CASES {
+        let (mut studio, mut bare) = lightcraft_case(case, Harness::builder().wgpu(), Harness::builder().wgpu());
+        assert_render_parity(case, &mut studio, &mut bare, &[]);
+    }
+}
+
+// --- T2: Library and Develop are LightCraft's own window ---
+
+/// Library (grid, compare) and Develop (the loupe with Edit, crop open).
+const LIGHTCRAFT_CASES: [&str; 4] = ["library-grid", "library-compare", "develop-edit", "develop-crop"];
+
+/// Studio in `case`, and the bare LightCraft in the same state: the same demo library and picked
+/// photo, its menus hidden as in Studio (D4: LightCraft as it looks with a native menu bar), the
+/// same texture limit. Both settled.
+fn lightcraft_case(
+    case: &str,
+    studio: HarnessBuilder<crate::StudioShell>,
+    bare: HarnessBuilder<LightcraftApp>,
+) -> (Harness<'static, crate::StudioShell>, Harness<'static, LightcraftApp>) {
+    let mut s = crate::tests_lightcraft::studio_with(studio.with_size(SIZE));
+    crate::tests_lightcraft::pick_first(&mut s);
+    let mut app = demo_lightcraft();
+    app.native_menu = true;
+    app.ui.view = lightcraft_ui_egui::state::ViewMode::PhotoGrid;
+    let mut b = lightcraft(bare, app, false);
+    crate::tests_lightcraft::real_gpu_textures(&mut b);
+    s.run_steps(3);
+    b.run_steps(3);
+    let run = |app: &mut LightcraftApp, id: &str| app.run(id, serde_json::json!({})).map(|_| ()).map_err(|e| e.to_string());
+    if case.starts_with("develop") {
+        // the bar's Develop: the loupe with Edit
+        s.state_mut().run("persona.develop").unwrap();
+        b.state_mut().ui.view = lightcraft_ui_egui::state::ViewMode::Detail;
+        b.state_mut().ui.right = lightcraft_ui_egui::state::RightPanel::Edit;
+    }
+    let command = match case {
+        "library-compare" => Some("view.compare"),
+        "develop-crop" => Some("panel.crop"),
+        _ => None,
+    };
+    if let Some(id) = command {
+        let lr = s.state_mut().lightroom.as_mut().unwrap();
+        assert_eq!(run(&mut lr.app, id), run(b.state_mut(), id), "{case}: {id}");
+    }
+    // the case is what it says (a command that did nothing on both sides would compare the grid)
+    use lightcraft_ui_egui::state::{RightPanel, ViewMode};
+    let want = match case {
+        "library-grid" => (ViewMode::PhotoGrid, None),
+        "library-compare" => (ViewMode::Compare, None),
+        "develop-edit" => (ViewMode::Detail, Some(RightPanel::Edit)),
+        _ => (ViewMode::Detail, Some(RightPanel::Crop)),
+    };
+    for ui in [&s.state().lightroom.as_ref().unwrap().app.ui, &b.state().ui] {
+        assert_eq!((ui.view, want.1.map(|_| ui.right)), want, "{case}");
+    }
+    settle(&mut s, |s: &crate::StudioShell| s.lightroom.as_ref().is_some_and(|lr| lr.app.renderer.in_flight() > 0));
+    settle(&mut b, |app: &LightcraftApp| app.renderer.in_flight() > 0);
+    (s, b)
+}
+
+#[test]
+fn library_and_develop_are_lightcrafts_own_window() {
+    for case in LIGHTCRAFT_CASES {
+        let (s, b) = lightcraft_case(case, Harness::builder(), Harness::builder());
+        let persona = if case.starts_with("develop") { crate::Persona::Develop } else { crate::Persona::Library };
+        assert_eq!(s.state().persona, persona, "{case}");
+        assert_tree_parity(&s, &b, &[]);
+        assert_style_parity(&s.ctx, &b.ctx, App::LightCraft);
+    }
 }
 
 fn node(text: &str, rect: [f32; 4]) -> Node {

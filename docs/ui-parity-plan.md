@@ -245,6 +245,17 @@ PROGRESS.md.
   - L13 note and its behaviour test (the T0 undo test, moved).
   - Parity tests (a) and (b) green for Library and Develop. The empty menu slot in LightCraft's
     top bar is allow-listed (L13).
+  - Done 2026-10-11, with these changes to the above:
+    - No allow-list. Without its in-window menus LightCraft also widens its centred search field,
+      so the reference is LightCraft with `native_menu` on as well (its native-menu layout, which
+      D4 accepted). Every node, the search field included, is compared.
+    - The bare app starts from egui as eframe gives it (not kittest's test style), and Studio
+      gives LightCraft the same: the first time it shows, egui's default styles under the system
+      theme, since LightCraft adjusts the style it finds and Studio's theme would show through.
+      Studio's own style and theme go back when another persona shows.
+    - The first Library case found a harness bug: grid rows scrolled above the view were taken
+      for persona bar nodes (fixed before T2, `fdca245`).
+    - The T0 undo test is `tests_lightcraft::l13_lightcrafts_edit_undo_menu_item_is_recorded_as_a_new_develop_step`.
 - **T2m. Studio hosts LightCraft's menus** in the persona bar row, left of the persona buttons.
   - Built from `menubar::menu_bar` and run through `run_item`, drawn with LightCraft's tokens
     and fonts.
@@ -376,7 +387,7 @@ PROGRESS.md.
 3. **LightCraft's menus can't be routed in place.**
    - `run` has no hook or filter.
    - Its Edit › Undo click is recorded by Studio as a new Develop step, not as Studio's undo
-     (`t0_lightcrafts_edit_undo_menu_item_is_recorded_as_a_new_develop_step`).
+     (`l13_lightcrafts_edit_undo_menu_item_is_recorded_as_a_new_develop_step`, moved in T2).
    - What a host can do: `native_menu = true` hides the in-window menus; the model
      (`menubar::menu_bar`) and `run_item` are public; `native_shortcuts` lets the host claim
      keys.

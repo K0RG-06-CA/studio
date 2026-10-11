@@ -38,14 +38,6 @@ mod tests_parity;
 #[cfg(test)]
 mod tests_parity_spike;
 
-/// Lightroom Classic's module keys: (key, command, persona, what LightCraft shows).
-const LIGHTROOM_KEYS: [(egui::Key, &str, Persona, lightroom::Go); 4] = [
-    (egui::Key::G, "view.grid", Persona::Library, lightroom::Go::Grid),
-    (egui::Key::E, "view.loupe", Persona::Library, lightroom::Go::Loupe),
-    (egui::Key::D, "view.develop", Persona::Develop, lightroom::Go::Edit),
-    (egui::Key::R, "tool.crop", Persona::Develop, lightroom::Go::Crop),
-];
-
 /// The shell's state and entry points. Serialisable: the app saves it between launches.
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct StudioShell {
@@ -170,8 +162,6 @@ impl StudioShell {
     /// - `persona.<id>`: switch persona (v2/v3 personas are disabled and return an error).
     /// - `window.resetWorkspace`: put the current persona's panels back where they started.
     /// - `app.quit` (Ctrl+Q): close the window; an unsaved document asks first.
-    /// - Lightroom Classic's module keys: `view.grid` (G) and `view.loupe` (E) in Library,
-    ///   `view.develop` (D), `tool.crop` (R) in Develop.
     /// - The document: `document.new` (from the photo picked in Library), `document.open {path?}`
     ///   (a `.studio` file, or an image file PhotoCraft opens: PNG, JPEG, TIFF, PSD…, which
     ///   becomes a document without a photo, in Pixel; no path: the open dialog),
@@ -206,20 +196,6 @@ impl StudioShell {
         }
         if let Some(cmd) = id.strip_prefix("pixel.") {
             return self.run_pixel(cmd, params);
-        }
-        if let Some(&(_, _, persona, view)) = LIGHTROOM_KEYS.iter().find(|k| k.1 == id) {
-            self.run(&persona.command())?;
-            if let Some(lr) = &mut self.lightroom {
-                lr.go(view);
-            }
-            if persona == Persona::Develop {
-                // the tab LightCraft's Edit and Crop panels show in
-                let dock = &mut self.layouts[Persona::Develop as usize];
-                if let Some(path) = dock.find_tab(&Tab::Panel("Edit".to_owned())) {
-                    let _ = dock.set_active_tab(path);
-                }
-            }
-            return Ok(());
         }
         if id == "app.quit" {
             self.close_window = true;
@@ -641,6 +617,8 @@ impl StudioShell {
             let _ = self.run(&Persona::Library.command());
         }
         self.engine_logic(ui.ctx());
+        // LightCraft's keys may have changed its view: the bar shows the persona it asks for
+        self.follow_lightcraft();
         self.top_bar(ui);
         // a Develop geometry change on its way into the layers: Pixel takes no input meanwhile
         // (its canvas, panels and windows would edit the layers the render is about to turn)
@@ -649,9 +627,8 @@ impl StudioShell {
             ui.disable();
         }
         self.persona_area(ui);
-        if let Some(lr) = self.lightroom.as_mut().filter(|_| self.persona.lightroom()) {
-            lr.overlays(ui.ctx());
-        }
+        // and its clicks
+        self.follow_lightcraft();
         if let Some(px) = self.pixel.as_mut().filter(|_| self.persona == Persona::Pixel && !barred) {
             px.overlays(ui.ctx());
         }
@@ -686,6 +663,23 @@ impl StudioShell {
                 }
             }
             _ => {}
+        }
+        // LightCraft's style is the global one only while its personas show
+        if let Some(lr) = self.lightroom.as_mut().filter(|_| !self.persona.lightroom()) {
+            lr.give_back_style(ctx);
+        }
+    }
+
+    /// The persona follows LightCraft's view, which its own keys and clicks change (D2): its loupe
+    /// is Develop, every other view Library. Develop off (a document without a photo): its loupe
+    /// goes back to the grid.
+    fn follow_lightcraft(&mut self) {
+        if !self.persona.lightroom() {
+            return;
+        }
+        let develop = self.persona_off(Persona::Develop).is_none();
+        if let Some(p) = self.lightroom.as_mut().and_then(|lr| lr.follow(self.persona, develop)) {
+            self.persona = p;
         }
     }
 
@@ -777,11 +771,16 @@ impl StudioShell {
         }
     }
 
-    /// Everything under the top bar. Fixed chrome (options bar, tool strip, filmstrip) is plain
-    /// panels, as in Adobe's apps; the canvas and panel groups are the persona's dock.
+    /// Everything under the top bar. Library and Develop: LightCraft's whole window. Elsewhere,
+    /// fixed chrome (options bar, tool strip, filmstrip) is plain panels, as in Adobe's apps; the
+    /// canvas and panel groups are the persona's dock.
     fn persona_area(&mut self, ui: &mut egui::Ui) {
         let t = theme::TOKENS;
         let p = self.persona;
+        if let Some(lr) = self.lightroom.as_mut().filter(|_| p.lightroom()) {
+            lr.ui(ui);
+            return;
+        }
         let chrome = egui::Frame::NONE.fill(t.chrome);
         // Pixel: PhotoCraft's own options bar and tool bar (Photoshop's), once its fonts are in.
         // Its views follow its documents first: its `logic` (which syncs them) didn't run on the
@@ -795,15 +794,11 @@ impl StudioShell {
         } else if p.photoshop_layout() {
             egui::Panel::top("studio.options_bar").exact_size(t.options_bar_h).resizable(false).frame(chrome).show(ui, |_| {});
         }
-        let lightroom = self.lightroom.as_mut().filter(|_| p.lightroom());
-        // LightCraft draws its own filmstrip under the loupe
-        if lightroom.is_none() {
-            egui::Panel::bottom("studio.filmstrip")
-                .exact_size(t.filmstrip_h)
-                .resizable(false)
-                .frame(egui::Frame::NONE.fill(t.canvas))
-                .show(ui, |ui| ui.centered_and_justified(|ui| ui.label(theme::placeholder("Filmstrip"))));
-        }
+        egui::Panel::bottom("studio.filmstrip")
+            .exact_size(t.filmstrip_h)
+            .resizable(false)
+            .frame(egui::Frame::NONE.fill(t.canvas))
+            .show(ui, |ui| ui.centered_and_justified(|ui| ui.label(theme::placeholder("Filmstrip"))));
         if let Some(px) = self.pixel.as_mut().filter(|_| photocraft) {
             px.tool_bar(ui);
         } else if p.photoshop_layout() {
@@ -814,7 +809,7 @@ impl StudioShell {
         let document = self.document.as_ref().map(|d| d.name.clone());
         let history = self.document.as_ref().filter(|_| p == Persona::Pixel).map(|d| (d.history.entries(), d.history.position()));
         let barred = p == Persona::Pixel && self.document.as_ref().is_some_and(|d| d.history.pending_follow());
-        let mut viewer = dock::Viewer { persona: p, lightroom, pixel, rendering, document, reset_requested: false, history, goto: None, barred };
+        let mut viewer = dock::Viewer { persona: p, pixel, rendering, document, reset_requested: false, history, goto: None, barred };
         egui::CentralPanel::default().frame(egui::Frame::NONE.fill(t.divider)).show(ui, |ui| {
             DockArea::new(&mut self.layouts[p as usize])
                 .id(egui::Id::new(("studio.dock", p.id())))
@@ -906,17 +901,6 @@ impl StudioShell {
         } else {
             for id in pressed {
                 self.key_command(id);
-            }
-        }
-        // Lightroom's single keys belong to the Lightroom personas (in Pixel, G and E are Photoshop
-        // tools), never while typing, and only bare: Shift+E and the like stay LightCraft's.
-        let lightroom = matches!(self.persona, Persona::Library | Persona::Develop | Persona::Film);
-        if !lightroom || ui.ctx().egui_wants_keyboard_input() {
-            return;
-        }
-        for (key, id, _, _) in LIGHTROOM_KEYS {
-            if ui.input_mut(|i| i.modifiers.is_none() && i.consume_key(egui::Modifiers::NONE, key)) {
-                let _ = self.run(id);
             }
         }
     }

@@ -31,7 +31,6 @@ const SCRIPT: &[&str] = &[
     "edit.undo",
     "document.close discard",
     "persona.develop",
-    "window.resetWorkspace",
     "document.new",
     "persona.film",
     "window.resetWorkspace",
@@ -63,11 +62,10 @@ const SCRIPT: &[&str] = &[
     "edit.undo",
     "document.save",
     "persona.library",
-    "window.resetWorkspace",
-    "view.loupe",
-    "view.grid",
-    "tool.crop",
-    "view.develop",
+    "lightcraft:view.detail",
+    "lightcraft:view.photoGrid",
+    "persona.develop",
+    "lightcraft:panel.crop",
 ];
 const STEP: f64 = 0.4;
 /// The document file the script saves and opens.
@@ -191,6 +189,11 @@ impl Script {
                 fail("app.quit with an unsaved document didn't ask first");
             }
             let r = match id.strip_prefix("lightcraft:") {
+                // its own view and panel commands (the persona follows its view)
+                Some(lc) if lc.starts_with("view.") || lc.starts_with("panel.") => match &mut shell.lightroom {
+                    Some(lr) => lr.app.run(lc, serde_json::json!({})).map(|_| ()).map_err(|e| e.to_string()),
+                    None => Err("LightCraft isn't running".into()),
+                },
                 // the document's exposure moved on, so the edit is a change whatever the file holds
                 Some(lc) => match (&mut shell.lightroom, &shell.document) {
                     (Some(lr), Some(doc)) => {

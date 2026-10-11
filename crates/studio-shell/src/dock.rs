@@ -7,7 +7,6 @@ use egui_dock::{DockState, Node, NodeIndex, NodePath, Surface, TabStyle, TabView
 use serde::{Deserialize, Serialize};
 
 use crate::Persona;
-use crate::lightroom::Lightroom;
 use crate::pixel::Pixel;
 use crate::theme::{self, TOKENS};
 
@@ -133,8 +132,6 @@ pub fn tabs_known(p: Persona, dock: &DockState<Tab>) -> bool {
 /// Draws the tabs of one persona's dock.
 pub struct Viewer<'a> {
     pub persona: Persona,
-    /// LightCraft, when this persona runs on it; tabs it doesn't fill stay placeholders.
-    pub lightroom: Option<&'a mut Lightroom>,
     /// PhotoCraft, in Pixel: its canvas and its right dock.
     pub pixel: Option<&'a mut Pixel>,
     /// The document's base layer is behind its develop settings (the canvas says so).
@@ -165,9 +162,8 @@ impl TabViewer for Viewer<'_> {
 
     fn title(&mut self, tab: &mut Tab) -> WidgetText {
         match tab {
-            Tab::Canvas => match (&self.lightroom, &self.document) {
-                (Some(lr), _) => lr.canvas_title(self.persona).into(),
-                (None, Some(name)) if self.persona == Persona::Pixel => name.as_str().into(),
+            Tab::Canvas => match &self.document {
+                Some(name) if self.persona == Persona::Pixel => name.as_str().into(),
                 _ => self.canvas_title().into(),
             },
             Tab::Panel(name) => name.as_str().into(),
@@ -193,11 +189,6 @@ impl TabViewer for Viewer<'_> {
                 }
                 Tab::Panel(_) => {}
             }
-        }
-        if let Some(lr) = self.lightroom.as_deref_mut()
-            && lr.tab(ui, self.persona, tab)
-        {
-            return;
         }
         match tab {
             Tab::Canvas => {
@@ -248,8 +239,8 @@ impl TabViewer for Viewer<'_> {
 
     fn tab_style_override(&self, tab: &Tab, global: &TabStyle) -> Option<TabStyle> {
         let canvas = *tab == Tab::Canvas;
-        // LightCraft's panels bring their own padding
-        (canvas || self.lightroom.is_some() || self.pixel.is_some()).then(|| {
+        // PhotoCraft's panels bring their own padding
+        (canvas || self.pixel.is_some()).then(|| {
             let mut s = global.clone();
             if canvas {
                 s.tab_body.bg_fill = TOKENS.canvas;

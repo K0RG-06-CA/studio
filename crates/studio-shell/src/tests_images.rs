@@ -63,7 +63,7 @@ fn an_image_opens_straight_into_pixel_without_a_photo_and_develop_and_film_are_o
     assert_eq!((doc.name.as_str(), s.base.started(), s.base_up_to_date()), ("flat", 0, true), "nothing renders");
     assert_eq!(s.error, None, "no warnings");
     // Develop and Film are off: their commands and keys say why, their buttons are greyed
-    for id in ["persona.develop", "persona.film", "view.develop", "tool.crop"] {
+    for id in ["persona.develop", "persona.film"] {
         assert!(h.state_mut().run(id).unwrap_err().contains("library photo"), "{id}");
     }
     assert_eq!(h.state().persona, Persona::Pixel);

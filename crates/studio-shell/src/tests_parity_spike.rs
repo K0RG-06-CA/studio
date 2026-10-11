@@ -6,6 +6,7 @@
 //! (b) both apps replace all fonts and the last one installed wins: Studio's Library still draws
 //!     with PhotoCraft's after a visit to Pixel (T5 swaps them per persona).
 
+use crate::tests_lightcraft::history;
 use crate::tests_parity::{assert_tree_parity, demo_lightcraft, demo_photocraft, lightcraft, photocraft};
 use egui_kittest::Harness;
 
@@ -44,31 +45,6 @@ fn t0_after_a_visit_to_pixel_library_draws_with_photocrafts_fonts() {
     h.run_steps(4);
     // LightCraft installs its fonts once (again only when the language changes)
     assert!(photocraft_fonts(&h), "fixed: LightCraft put its fonts back");
-}
-
-/// Studio's history: (made in Develop, made in Pixel) per row, and the row it is at.
-fn history(h: &Harness<'_, crate::StudioShell>) -> (Vec<(bool, bool)>, usize) {
-    let d = h.state().document.as_ref().unwrap();
-    (d.history.entries().into_iter().map(|e| (e.develop, e.pixel)).collect(), d.history.position())
-}
-
-#[test]
-fn t0_lightcrafts_edit_undo_menu_item_is_recorded_as_a_new_develop_step() {
-    let mut h = crate::tests_lightcraft::studio();
-    h.run_steps(3);
-    crate::tests_lightcraft::pick_first(&mut h);
-    h.state_mut().run("persona.develop").unwrap();
-    h.state_mut().run("document.new").unwrap();
-    crate::tests_lightcraft::settle_base(&mut h);
-    let lr = h.state_mut().lightroom.as_mut().unwrap();
-    lr.app.run("develop.set", serde_json::json!({"control": "light.exposure", "value": 1.0})).unwrap();
-    h.run_steps(1);
-    assert_eq!(history(&h), (vec![(false, false), (true, false)], 1));
-    // what a click on LightCraft's Edit › Undo runs (its in-window menu bar)
-    let lr = h.state_mut().lightroom.as_mut().unwrap();
-    lightcraft_ui_egui::menubar::run_item(&mut lr.app, "edit.undo", serde_json::Value::Null).unwrap();
-    h.run_steps(1);
-    assert_eq!(history(&h), (vec![(false, false), (true, false), (true, false)], 2), "fixed: Studio took it as its undo");
 }
 
 #[test]
