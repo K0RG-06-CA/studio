@@ -48,6 +48,18 @@ In this order, ahead of PRD milestone 6:
      also widens its search field. Keys while the menus are hidden: every LightCraft shortcut
      still runs in its `logic`; Studio takes only Ctrl+1…7 and, with a document, the undo keys
      (as before), so none is unavailable. Ctrl+S stays LightCraft's Save Metadata until T2m.
+     - Review fixes (one commit each, each test seen failing first): Library never keeps a
+       loupe opened between frames as its view; a relaunch in Develop stays in Develop; the D3
+       test now fails with the old key; a test that LightCraft's style shows only in its
+       personas (seen failing with the hand-back removed).
+     - Left (LOW): Studio's style comes back after Pixel's `logic` on its first frame, right
+       today only because PhotoCraft sets its theme a frame later; a persona-bar click switches
+       after the engines' logic, so the new persona draws one frame in the old one's style; a
+       click in LightCraft that opens its loupe moves the bar one frame late;
+       `window.resetWorkspace` in Library/Develop resets a dock nobody draws and returns Ok
+       (until T7); the smoke script doesn't check that the persona followed LightCraft's view;
+       the bar and Studio's modals use LightCraft's text sizes in Library/Develop (T5 styles the
+       bar from the persona's tokens).
    - Temporarily unavailable keys (T3 until T3m): none yet.
 2. [ ] **Pixel slow-frame fix** (Open items: frames over 0.4 s); the deferred `bench.rs` peak
    bytes during a follow waits on it.
