@@ -724,6 +724,9 @@ From the code review of milestone 3 (HIGH/MEDIUM were fixed, one commit each, wi
 - Milestone 1 does not depend on storytold crates yet; egui/eframe pinned to 0.36 to match LightCraft and PhotoCraft.
 - egui 0.36 `Panel::show(ui)` always draws inside the given `Ui`, so LightCraft's and PhotoCraft's own panels should nest inside a persona area in milestones 2 and 4 without upstream patches.
 - egui_dock paints tab titles without accessibility info; `dock::Viewer::on_tab_button` adds it.
+- 2026-10-11: three lines of `tests_lightcraft.rs` held mojibake (`×` and `→` read as ANSI and
+  written back, since `72f7746`); fixed, a repo scan found no others, and CLAUDE.md now forbids
+  PowerShell 5.1 file reads and writes without UTF-8.
 - **Milestone 2 (LightCraft `eeb136b`), superseded by UI parity T2** (Library and Develop are now
   LightCraft's own window): LightCraft copies Lightroom *desktop*, not Classic, so Studio
   drew its panels one by one into the dock in Classic's places.

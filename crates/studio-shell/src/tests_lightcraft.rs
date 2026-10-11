@@ -648,7 +648,7 @@ fn hovering_a_preset_previews_it_only_while_hovered() {
     assert!(lc(&h).hover_preview.is_none(), "and stops once the pointer leaves it");
 }
 
-/// A 1ÃƒÆ’Ã¢â‚¬â€1 PNG.
+/// A 1×1 PNG.
 const PNG: [u8; 67] = [
     0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
     0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4, 0x89, 0x00, 0x00, 0x00, 0x0A, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x63, 0x00, 0x01, 0x00, 0x00,
@@ -802,7 +802,7 @@ fn editing_in_develop_re_renders_the_documents_base_layer() {
     assert!(!h.state().base_up_to_date(), "a render is due");
     settle_base(&mut h);
     let after = base_brightness(&h);
-    assert!(after > before + 0.05, "{before} ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ {after}");
+    assert!(after > before + 0.05, "{before} → {after}");
     // in Pixel too: the base keeps following (sync runs in every persona)
     h.state_mut().run("persona.pixel").unwrap();
     let lr = h.state_mut().lightroom.as_mut().unwrap();
@@ -811,7 +811,7 @@ fn editing_in_develop_re_renders_the_documents_base_layer() {
     s.light.exposure = -2.0;
     lr.app.session.set_develop(id, s, "Exposure").unwrap();
     settle_base(&mut h);
-    assert!(base_brightness(&h) < before, "{before} ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ {}", base_brightness(&h));
+    assert!(base_brightness(&h) < before, "{before} → {}", base_brightness(&h));
 }
 
 #[test]

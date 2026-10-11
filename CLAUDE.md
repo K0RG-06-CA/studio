@@ -26,6 +26,7 @@ Studio is an Affinity-style all-in-one photo app built in Rust on the storytold 
 ## Toolchain (Windows dev machine)
 - Use the MSVC toolchain (`aarch64-pc-windows-msvc`) with VS Build Tools 2022 (ARM64 C++ tools), not MSYS2/clang or `*-gnullvm`.
 - **Always run cargo from PowerShell, never Git Bash:** Git Bash's `/usr/bin/link` shadows MSVC's `link.exe` and every link step fails.
+- **Never read or write source files through PowerShell 5.1 without `-Encoding UTF8`:** its default is the ANSI code page, so a read-then-write garbles every non-ASCII character (`›`, `…`, `×`) into mojibake. `Set-Content -Encoding UTF8` also adds a BOM, so prefer `[IO.File]::ReadAllText`/`WriteAllText` (UTF-8, no BOM) or the Edit tool.
 
 ## Rules (mirrored from storytold)
 - **Add around storytold's code, don't edit inside it.** LightCraft, PhotoCraft etc. come in as Git dependencies pinned to a commit. Unavoidable patches go in `PATCHES.md` with a reason.
