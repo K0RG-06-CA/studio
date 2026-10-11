@@ -26,6 +26,10 @@ pub(crate) fn bar_h() -> f32 {
     crate::theme::TOKENS.top_bar_h
 }
 
+/// The transparent margin kittest puts around a `build_ui_state` app (points), above the persona
+/// bar in Studio's harness as above the bare app's top bar.
+const KITTEST_MARGIN: f32 = 8.0;
+
 /// A region where Studio may differ from the bare app, and why (bare app's points).
 pub(crate) struct Allow {
     pub rect: Rect,
@@ -122,8 +126,8 @@ struct Node {
     rect: Rect,
 }
 
-/// Every labelled accessible node, moved up by `dy`.
-fn nodes<S>(h: &Harness<'_, S>, dy: f32) -> Vec<Node> {
+/// Every labelled accessible node.
+fn nodes<S>(h: &Harness<'_, S>) -> Vec<Node> {
     h.query_all(by().predicate(|n| n.label().is_some_and(|l| !l.is_empty())))
         .map(|n| {
             let a = n.accesskit_node();
@@ -136,8 +140,18 @@ fn nodes<S>(h: &Harness<'_, S>, dy: f32) -> Vec<Node> {
                 a.value().map(|v| format!(" value={v:?}")).unwrap_or_default(),
                 a.numeric_value().map(|v| format!(" value={v}")).unwrap_or_default(),
             );
-            Node { text: format!("{:?} {:?}{state}", a.role(), a.label().unwrap_or_default()), rect: n.rect().translate(egui::vec2(0.0, -dy)) }
+            Node { text: format!("{:?} {:?}{state}", a.role(), a.label().unwrap_or_default()), rect: n.rect() }
         })
+        .collect()
+}
+
+/// Studio's nodes under the persona bar, moved up by it into the bare app's coordinates (the
+/// bar's own nodes, wholly above its bottom edge, are left out).
+fn under_bar(nodes: Vec<Node>) -> Vec<Node> {
+    nodes
+        .into_iter()
+        .filter(|n| n.rect.max.y > KITTEST_MARGIN + bar_h())
+        .map(|n| Node { rect: n.rect.translate(egui::vec2(0.0, -bar_h())), ..n })
         .collect()
 }
 
@@ -171,10 +185,10 @@ fn reasons(allow: &[Allow]) -> Vec<String> {
 
 /// Studio's accessibility tree (under the persona bar) equals the bare app's, outside `allow`.
 pub(crate) fn assert_tree_parity<A, B>(studio: &Harness<'_, A>, upstream: &Harness<'_, B>, allow: &[Allow]) {
-    let up = shown(nodes(upstream, 0.0), allow);
+    let up = shown(nodes(upstream), allow);
     // a harness that drew nothing would pass
     assert!(up.len() > 10, "the bare app shows almost nothing: {up:#?}");
-    let diff = tree_diff(&shown(nodes(studio, bar_h()), allow), &up);
+    let diff = tree_diff(&shown(under_bar(nodes(studio)), allow), &up);
     assert!(
         diff.is_empty(),
         "Studio differs from the bare app (+ Studio only, - bare app only):\n{}\nallowed: {:#?}",
@@ -232,10 +246,6 @@ pub(crate) fn assert_style_parity(studio: &egui::Context, upstream: &egui::Conte
         panic!("{d}");
     }
 }
-
-/// The transparent margin kittest puts around a `build_ui_state` app (points), above the persona
-/// bar in Studio's harness as above the bare app's top bar.
-const KITTEST_MARGIN: f32 = 8.0;
 
 /// A pixel differs above this on any channel (of 255).
 const TOLERANCE: u8 = 2;
@@ -349,12 +359,21 @@ fn the_tree_diff_sees_a_widgets_state() {
             (on, v),
         )
     };
-    let tree = |h: Harness<'_, (bool, f32)>| shown(nodes(&h, 0.0), &[]);
+    let tree = |h: Harness<'_, (bool, f32)>| shown(nodes(&h), &[]);
     let base = tree(ui(true, true, 0.5));
     assert!(tree_diff(&base, &tree(ui(true, true, 0.5))).is_empty());
     assert!(!tree_diff(&base, &tree(ui(false, true, 0.5))).is_empty(), "toggled");
     assert!(!tree_diff(&base, &tree(ui(true, false, 0.5))).is_empty(), "disabled");
     assert!(!tree_diff(&base, &tree(ui(true, true, 0.7))).is_empty(), "value");
+}
+
+#[test]
+fn studios_tree_leaves_out_the_persona_bar() {
+    // kittest's margin, then the bar, then the persona
+    let m = KITTEST_MARGIN;
+    let bar = node("Button \"Pixel\"", [100.0, m + 4.0, 150.0, m + 30.0]);
+    let top = node("Button \"File\"", [10.0, m + bar_h(), 40.0, m + bar_h() + 20.0]);
+    assert_eq!(shown(under_bar(vec![bar, top]), &[]), [format!("Button \"File\" [10 {m} 40 {}]", m + 20.0)]);
 }
 
 #[test]
