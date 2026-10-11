@@ -121,8 +121,10 @@ impl Pixel {
         self.ran = true;
     }
 
-    /// Studio's style back, as another persona shows.
+    /// Studio's style back, as another persona shows (every frame it does): a `logic` that ran
+    /// before Pixel was left by a click no longer counts for its `ui`.
     pub fn give_back_style(&mut self, ctx: &egui::Context) {
+        self.ran = false;
         if let Some((style, theme)) = self.studio.take() {
             ctx.set_theme(theme);
             ctx.set_global_style(style);

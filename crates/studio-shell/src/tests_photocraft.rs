@@ -1509,3 +1509,28 @@ fn l18_a_document_photocraft_makes_itself_leaves_studios_alone() {
     h.run_steps(2);
     assert_eq!(state(&h), before);
 }
+
+/// Review: PhotoCraft's window is drawn only in a frame its `logic` ran. Left by a click in the
+/// persona bar (its `ui` not reached that frame), then picked again by a click from another
+/// persona: that frame draws nothing of it (its `logic` didn't run, and the style is Studio's).
+#[test]
+fn pixel_picked_again_by_a_click_waits_a_frame_for_its_logic() {
+    let mut h = studio();
+    h.run_steps(3);
+    h.state_mut().run("persona.pixel").unwrap();
+    h.run_steps(3);
+    let photocraft = |h: &Harness<'_, crate::StudioShell>| painted_text(h.output()).contains("Smoothing:");
+    assert!(photocraft(&h), "its options bar shows");
+    h.get_by_label("Library").click();
+    h.run_steps(1);
+    assert_eq!(h.state().persona, crate::Persona::Library);
+    h.run_steps(2);
+    let frames = h.state().pixel.as_ref().unwrap().frames();
+    h.get_by_label("Pixel").click();
+    h.run_steps(1);
+    assert_eq!(h.state().persona, crate::Persona::Pixel);
+    assert_eq!(h.state().pixel.as_ref().unwrap().frames(), frames, "its logic didn't run in the click's frame");
+    assert!(!photocraft(&h), "so nothing of it is drawn");
+    h.run_steps(1);
+    assert!(photocraft(&h), "and the next frame draws it");
+}
