@@ -128,6 +128,20 @@ In this order, ahead of PRD milestone 6:
        in `pixel.rs` fails once the start screen is public;
        `l18_a_document_photocraft_makes_itself_leaves_studios_alone` checks the close never
        touches an open Studio document.
+     - Review fixes (one commit each, each test seen failing first): PhotoCraft's window waits
+       for its `logic` when Pixel is picked again by a click (a flag left from before was drawing
+       it one frame without its logic, in Studio's style); quitting with Don't Save takes the
+       document from PhotoCraft too (else a spurious "Studio opens documents" notice).
+     - Left (LOW): PhotoCraft's theme preference isn't put back with its style (its tokens keep
+       it looking right), and its first show sets egui's default dark/light styles that Studio's
+       hand-back doesn't restore (as LightCraft's since T2); the tab-strip cover and the History
+       follow `last_canvas_rect`, which is stale for a frame after a resize or panel toggle (and
+       while a background open's card shows), so the × is uncovered for that frame; the cover
+       also blocks a background open's own tab × (cancel); the History floats in PhotoCraft's
+       full-screen and arranged views too, and a click on it raises it over PhotoCraft's modal
+       dialogs; only the first of several dropped files opens (as before T3); PhotoCraft's Print
+       and Export keys stay live (they can't write: Studio gives it no writer services), to
+       re-check if those are ever wired.
    - Temporarily unavailable keys (T3 until T3m), dropped in Pixel: F12 Revert, Ctrl+Alt+W Close
      All, Ctrl+Alt+P Close Others, Ctrl+Alt+Shift+O Open As, Ctrl+Alt+S Save a Copy
      (`keys_of_photocraft_file_items_studio_will_hide_do_nothing`).
