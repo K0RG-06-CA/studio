@@ -1074,7 +1074,9 @@ impl StudioShell {
         // and Shift+Ctrl+S are New Album and Create Version). Taken here, so neither engine sees
         // them.
         let mut keys = Vec::from(DOCUMENT_KEYS);
-        let typing = ui.ctx().egui_wants_keyboard_input();
+        // a text field keeps its own undo; a focused button or slider (Tab) doesn't: the engines'
+        // own undo would run past the history
+        let typing = ui.ctx().text_edit_focused();
         if self.document.is_some() && !typing {
             keys.extend(UNDO_KEYS);
         }

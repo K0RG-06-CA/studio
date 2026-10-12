@@ -143,6 +143,30 @@ fn a_rebound_undo_key_is_studios_undo() {
     assert_eq!((layers(&h), history(&h).1), (2, 1), "only the Develop step undone");
 }
 
+/// Review: Ctrl+Z is Studio's undo with a button focused (by Tab) too; only a text field keeps it
+/// (PhotoCraft's own undo, which a focused button lets through, would take two steps at once).
+#[test]
+fn ctrl_z_with_a_button_focused_is_studios_undo() {
+    let mut h = studio();
+    h.run_steps(3);
+    pick_first(&mut h);
+    h.state_mut().run("document.new").unwrap();
+    settle_base(&mut h);
+    crate::tests_photocraft::add_layer(&mut h, "Paint");
+    h.run_steps(1);
+    let lr = h.state_mut().lightroom.as_mut().unwrap();
+    lr.app.run("develop.set", serde_json::json!({"control": "light.exposure", "value": 1.0})).unwrap();
+    h.run_steps(1);
+    h.state_mut().run("persona.pixel").unwrap();
+    h.run_steps(3);
+    h.get_by_label("Film").focus();
+    h.run_steps(1);
+    assert!(h.ctx.egui_wants_keyboard_input() && !h.ctx.text_edit_focused(), "a button has the keyboard");
+    press(&mut h, egui::Modifiers::COMMAND, egui::Key::Z);
+    h.run_steps(2);
+    assert_eq!((layers(&h), history(&h).1), (2, 1), "only the Develop step undone");
+}
+
 /// A PhotoCraft menu item that edits the document runs as PhotoCraft runs it: one Pixel step.
 #[test]
 fn a_photocraft_menu_edit_is_one_pixel_step() {
