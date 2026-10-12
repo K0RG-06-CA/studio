@@ -208,11 +208,14 @@ In this order, ahead of PRD milestone 6:
        go to a new document, which Studio's one document closes at once); so is its result into
        a channel or selection of the open one
        (`items_that_make_a_second_document_are_off`, seen failing first).
+     - LOW fixed (user, 2026-10-12): Revert's prompt asks Revert or Cancel only (`Pending::Revert`);
+       it offered Save, which saved the changes and reopened them, reverting nothing. Its
+       `document.prompt.save` is refused (`photocrafts_revert_reopens_the_saved_file_through_the_prompt`,
+       seen failing with Save back and with the refusal gone).
      - Left (LOW): within one frame, Studio's own keys run before PhotoCraft's routed ones, not
        in the order pressed; the routed keys ignore PhotoCraft's focus rules, so a plain key
        rebound to an off, hidden or document item is taken while typing in a text field;
-       Revert's prompt offers Save, which saves and reopens (nothing reverted, the history
-       gone); items PhotoCraft adds at runtime (plug-in filters, saved workspaces) are
+       items PhotoCraft adds at runtime (plug-in filters, saved workspaces) are
        unclassified, so off, and the routing test walks the default state only (Plug-ins'
        install is Pass); Studio's Reset Workspace and PhotoCraft's don't reopen a History closed
        by Window › History; the palette test proves the close, not

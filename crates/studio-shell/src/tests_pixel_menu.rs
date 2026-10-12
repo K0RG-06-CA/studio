@@ -234,15 +234,23 @@ fn photocrafts_file_items_are_studios_document_commands() {
 }
 
 /// Revert opens the document's own file again, through Studio's prompt: off with nothing to go
-/// back to (no changes since the save), and with changes, Don't Save takes them back.
+/// back to (no changes since the save), and with changes, the prompt asks Revert or Cancel only
+/// (LOW, fixed: it offered Save, which saved the changes and reopened them, reverting nothing),
+/// and Revert takes them back.
 #[test]
 fn photocrafts_revert_reopens_the_saved_file_through_the_prompt() {
     let dir = temp_dir("t3m-revert");
     let mut h = studio();
     pixel_edited(&mut h, &dir.join("trip.studio"));
     click_row(&mut h, "File", "Revert");
-    assert_eq!(h.state().prompt, Some(Pending::Open(dir.join("trip.studio"))));
-    h.state_mut().run("document.prompt.discard").unwrap();
+    assert_eq!(h.state().prompt, Some(Pending::Revert(dir.join("trip.studio"))));
+    let buttons: Vec<String> = h.query_all(by().role(egui::accesskit::Role::Button)).filter_map(|n| n.accesskit_node().label()).collect();
+    assert!(buttons.iter().any(|b| b == "Revert") && buttons.iter().any(|b| b == "Cancel"), "{buttons:?}");
+    assert!(!buttons.iter().any(|b| b == "Save" || b == "Don't Save"), "{buttons:?}");
+    // nor does its command save first
+    assert!(h.state_mut().run("document.prompt.save").is_err());
+    assert_eq!(studio_doc::Document::open(&dir.join("trip.studio")).unwrap().pixel.layers.len(), 1, "nothing saved");
+    h.get_by_label("Revert").click();
     h.run_steps(2);
     assert_eq!(layers(&h), 1, "back to the saved layers");
     assert!(!h.state().document.as_ref().unwrap().unsaved());
@@ -364,7 +372,7 @@ fn keys_of_photocrafts_items_go_where_the_items_route() {
     assert_eq!(opened.get(), 1, "Ctrl+Alt+Shift+O is Studio's open");
     press(&mut h, egui::Modifiers::NONE, egui::Key::F12);
     h.run_steps(2);
-    assert_eq!(h.state().prompt, Some(Pending::Open(dir.join("trip.studio"))), "F12 reverts through the prompt");
+    assert_eq!(h.state().prompt, Some(Pending::Revert(dir.join("trip.studio"))), "F12 reverts through the prompt");
 }
 
 /// L19: PhotoCraft's command palette runs commands past Studio's routing: opened by its title

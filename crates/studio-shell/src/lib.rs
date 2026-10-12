@@ -136,6 +136,9 @@ pub enum Pending {
     New,
     Open(PathBuf),
     Close,
+    /// Going back to the document's own file (`document.revert`): the prompt asks Revert or
+    /// Cancel, as saving first would leave nothing to revert.
+    Revert(PathBuf),
 }
 
 impl Default for StudioShell {
@@ -204,8 +207,9 @@ impl StudioShell {
     ///   says), `document.saveAs {path?}` (no path: the save dialog); only ever to a `.studio`
     ///   file, so an opened image is never written over,
     ///   `document.saveACopy {path?}` (a `.studio` copy, by the save dialog without a path; the
-    ///   document keeps its file and its unsaved changes), `document.revert` (open its own file
-    ///   again: back to how it was saved, through the prompt),
+    ///   document keeps its file and its unsaved changes), `document.revert {discard?}` (open its
+    ///   own file again: back to how it was saved; without `discard`, the prompt asks Revert or
+    ///   Cancel, and `document.prompt.save` is refused),
     ///   `document.close {discard?}`. Unsaved changes stop `new`, `open` and `close` unless
     ///   `discard` is true: they return an error and show the "save changes?" prompt, which
     ///   `document.prompt.save` (save, then go ahead), `document.prompt.discard` (go ahead) and
@@ -311,6 +315,9 @@ impl StudioShell {
             }
             "prompt.save" | "prompt.discard" => {
                 let pending = self.prompt.clone().ok_or("nothing is waiting on the prompt")?;
+                if cmd == "prompt.save" && matches!(pending, Pending::Revert(_)) {
+                    return Err("a revert drops the changes: there is nothing to save first".into());
+                }
                 if cmd == "prompt.save" {
                     // a save that fails keeps the prompt (and the document)
                     self.run("document.save")?;
@@ -332,7 +339,9 @@ impl StudioShell {
                         Ok(())
                     }
                     Pending::New => self.run_with("document.new", &discard),
-                    Pending::Open(path) => self.run_with("document.open", &serde_json::json!({"path": path, "discard": true})),
+                    Pending::Open(path) | Pending::Revert(path) => {
+                        self.run_with("document.open", &serde_json::json!({"path": path, "discard": true}))
+                    }
                     Pending::Close => self.run_with("document.close", &discard),
                 }
             }
@@ -366,7 +375,11 @@ impl StudioShell {
                 if !unsaved {
                     return Err("nothing to revert: no changes since it was saved".into());
                 }
-                self.run_with("document.open", &serde_json::json!({"path": path, "discard": discard}))
+                if !discard {
+                    self.prompt = Some(Pending::Revert(path));
+                    return Err("reverting drops the unsaved changes: answer the prompt, or revert with discard".into());
+                }
+                self.run_with("document.open", &serde_json::json!({"path": path, "discard": true}))
             }
             "save" | "saveAs" | "saveACopy" => {
                 let r = if cmd == "saveACopy" { self.save_copy(path("path")) } else { self.save(cmd == "saveAs", path("path")) };
@@ -840,15 +853,23 @@ impl StudioShell {
             self.prompt = None;
         }
         let Some(name) = self.prompt.as_ref().and(self.document.as_ref()).map(|d| d.name.as_str()) else { return };
-        let text = format!("Save changes to \u{201c}{name}\u{201d} before closing?");
+        // a revert drops the changes: saving them first would leave nothing to revert
+        let (text, buttons): (_, &[(&str, &str)]) = match self.prompt {
+            Some(Pending::Revert(_)) => (
+                format!("Revert \u{201c}{name}\u{201d} to its saved version? Its changes since are lost."),
+                &[("Revert", "document.prompt.discard"), ("Cancel", "document.prompt.cancel")],
+            ),
+            _ => (
+                format!("Save changes to \u{201c}{name}\u{201d} before closing?"),
+                &[("Save", "document.prompt.save"), ("Don't Save", "document.prompt.discard"), ("Cancel", "document.prompt.cancel")],
+            ),
+        };
         let mut answer = None;
         let r = egui::Modal::new(egui::Id::new("studio.document_prompt")).show(ctx, |ui| {
             ui.label(text);
             ui.add_space(8.0);
             ui.horizontal(|ui| {
-                for (label, cmd) in
-                    [("Save", "document.prompt.save"), ("Don't Save", "document.prompt.discard"), ("Cancel", "document.prompt.cancel")]
-                {
+                for &(label, cmd) in buttons {
                     if ui.button(label).clicked() {
                         answer = Some(cmd);
                     }
