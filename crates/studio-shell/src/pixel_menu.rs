@@ -29,8 +29,9 @@ use studio_doc::Document;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Route {
     /// As PhotoCraft runs it (`menus::invoke`): it edits the open document (a Pixel step in
-    /// Studio's history), or changes PhotoCraft's view, panels, tools or preferences. Exports,
-    /// prints and automations can't write: Studio gives PhotoCraft no file services.
+    /// Studio's history), or changes PhotoCraft's view, panels, tools or preferences. Its exports
+    /// write new files named after the document or its layers where the user says (those of its
+    /// own save dialog can't: Studio gives it no file services), never the document's file.
     Pass,
     /// Studio's `document.*` command: its prompt, its never-overwrite-the-source rule.
     Document(&'static str),
@@ -42,7 +43,9 @@ pub enum Route {
     /// Studio's `app.quit`: its close guard, which asks about unsaved changes.
     Quit,
     /// Drawn disabled and never run: it would make a second PhotoCraft document, which Studio's one
-    /// document closes at once, or (Edit › Search…) open the palette (L19).
+    /// document closes at once, write over the files it processes (the batch processors, given
+    /// their input folder as output: the library's originals), or (Edit › Search…) open the
+    /// palette (L19).
     Off,
     /// Left out of the menus: no meaning with Studio's one document (New, Open Recent, Close All,
     /// Close Others) or one Studio's history can't follow (Purge).
@@ -85,6 +88,10 @@ pub fn route(id: &str) -> Option<Route> {
         | "file.automate.mergeToHdrPro"
         | "file.automate.contactSheetII"
         | "file.scripts.loadFilesIntoStack"
+        // batch processors: given their input folder as output, they write over the originals
+        | "file.automate.batch"
+        | "file.scripts.imageProcessor"
+        | "file.automate.lensCorrection"
         | "edit.search" => Off,
         _ if PASS.contains(id) => Pass,
         _ => return None,
@@ -471,6 +478,19 @@ mod tests {
         // and what isn't classified never runs
         assert!(!allowed("file.somethingNew", None));
         assert!(items(&app(), None, true, &[]).iter().filter(|it| it.label != "---").all(|it| route(&it.id).is_some()));
+    }
+
+    /// Review (HIGH): PhotoCraft's batch processors write their results into the folder they're
+    /// given, named after their inputs: given the input folder (Batch's and Lens Correction's
+    /// format is "same"), they rewrite the library's originals in place, the document's photo
+    /// among them, past Studio's never-overwrite rule. They are off, and shown disabled.
+    #[test]
+    fn batch_processors_that_can_write_over_their_inputs_are_off() {
+        let shown = items(&app(), None, true, &[]);
+        for id in ["file.automate.batch", "file.scripts.imageProcessor", "file.automate.lensCorrection"] {
+            assert_eq!(route(id), Some(Route::Off), "{id}");
+            assert_eq!(shown.iter().find(|it| it.id == id).map(|it| it.enabled), Some(false), "{id}");
+        }
     }
 
     /// PhotoCraft's keys go where their items route: Studio's command, or dropped.

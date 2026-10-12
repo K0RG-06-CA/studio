@@ -81,11 +81,9 @@ edit.transform.splitWarpCrosswise
 edit.transform.splitWarpHorizontally
 edit.transform.splitWarpVertically
 edit.transform.warp
-file.automate.batch
 file.automate.conditionalModeChange
 file.automate.createDroplet
 file.automate.fitImage
-file.automate.lensCorrection
 file.export.artboardsToFiles
 file.export.artboardsToPdf
 file.export.colorLookupTables
@@ -113,7 +111,6 @@ file.scripts.browse
 file.scripts.deleteAllEmptyLayers
 file.scripts.flattenAllLayerEffects
 file.scripts.flattenAllMasks
-file.scripts.imageProcessor
 file.scripts.scriptEventsManager
 file.scripts.statistics
 filter.adaptiveWideAngle
