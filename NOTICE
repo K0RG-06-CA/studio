@@ -49,7 +49,8 @@ Used: linked as a Git dependency (photocraft-doc, photocraft-raster, photocraft-
 photocraft-geom, photocraft-format, photocraft-engine, photocraft-ui-egui, photocraft-io
 and the crates they use, pinned in Cargo.toml): its layer tree and .pcraft bundle are the
 pixel half of Studio's document, its importers open PNG/JPEG/TIFF/PSD files into Pixel, and its editor (engine, tools, panels, dialogs, icons and fonts it ships)
-runs the Pixel persona as PhotoCraft's own window, in its own theme. Also: Photoshop-style
+runs the Pixel persona as PhotoCraft's own window, in its own theme. Also: its in-window
+menu drawing (crates/ui-egui/src/menus.rs), adapted in crates/studio-shell/src/pixel_menu.rs; Photoshop-style
 right-dock group layout (as a reference for default panel groups); workspace lint and
 never-crash conventions.
 

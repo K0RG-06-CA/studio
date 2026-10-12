@@ -2,10 +2,10 @@
 //! its own style (its default theme), as it ships. Its session holds the open document's pixels
 //! (see `studio_doc::pixel`).
 //!
-//! Its in-window menus are hidden until Studio hosts and routes them (T3m): its menu bar goes to
-//! a native-menu backend that draws nothing and sends no clicks, as on a Mac its menus would be
-//! the host's. Its shortcuts still run in its `logic`; Studio takes its own keys first, and drops
-//! the keys of the File items it will hide (see `lib.rs`).
+//! Its in-window menus are hidden: its menu bar goes to a native-menu backend that draws nothing
+//! and sends no clicks, as on a Mac its menus would be the host's. Studio draws and routes them in
+//! the persona bar row instead (`pixel_menu`). Its shortcuts still run in its `logic`; Studio
+//! takes its own keys first, and those of the menu items it routes, keeps off or hides.
 //!
 //! L15: its document tab's × and the tab's Close menu close its document straight through its
 //! engine, past Studio's close (its tab strip is private). Studio covers the strip instead (see
@@ -133,11 +133,13 @@ impl Pixel {
 
     /// PhotoCraft's whole window (title bar, options bar, tool bar, dock, document area, its
     /// dialogs and windows), in `ui`, if its `logic` ran this frame (not on the frame Pixel was
-    /// picked in the persona bar: the next one draws it).
+    /// picked in the persona bar: the next one draws it). Its command palette is closed after it
+    /// (L19, see `pixel_menu`): opened by its title bar's icon, it shows for that frame only.
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         if std::mem::take(&mut self.ran) {
             eframe::App::ui(&mut self.app, ui, &mut self.frame);
         }
+        self.app.ui.palette_open = false;
     }
 
     /// Where its document tab strip is (above its canvas, while it shows documents), for Studio

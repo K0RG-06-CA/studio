@@ -342,6 +342,16 @@ PROGRESS.md.
       rule;
     - every hidden item is absent from the model Studio draws;
     - Window › History opens Studio's panel, and PhotoCraft's History is never drawn.
+  - Done 2026-10-12, with these changes to the above (details in PROGRESS.md):
+    - Drawn from `menus::menu_items` (the Windows layout) and run by `menus::invoke`; the
+      native-menu backend's model is the Mac layout, so the backend stays the empty one.
+    - Open As, Save a Copy and Revert are routed, not hidden (their keys come back): Open As →
+      `document.open`, Save a Copy → the new `document.saveACopy`, Revert → the new
+      `document.revert` (the document's file opened again, through the prompt).
+    - Off (drawn disabled): items that would make a second PhotoCraft document (Image ›
+      Duplicate, Edit Contents, four automations, Load Files into Stack) and Edit › Search….
+    - L19 (new): PhotoCraft's command palette runs commands past the routing; Studio closes it
+      after every frame.
 - **T3b. Pixel input block during a pending Develop render. HIGH RISK: run on `/effort high`.**
   - The input-blocking layer replaces `ui.disable()` and `Viewer.barred`, so Pixel stays
     visible while it waits.
@@ -357,6 +367,13 @@ PROGRESS.md.
   - L1 doctest re-aimed.
   - The History tests (`pixels_history_tab_*`) move to the new place.
   - Tests: the toggle, the restyle tokens, and a goto click.
+  - The History panel takes no clicks while a PhotoCraft modal dialog is open (today a click
+    raises it over the dialog; T3's LOW). Test: with Levels open, a click on a History row
+    changes nothing.
+  - The tab-strip cover (L15) is never a frame late: after a window resize or a panel toggle,
+    the document tab's × can't be clicked on the first frame either (today it follows
+    `last_canvas_rect`, a frame stale; T3's LOW). Test: resize, then click the × on that same
+    frame; the document stays open.
 - **T5. One style per persona.**
   - On a persona switch, install that app's fonts and style; Film uses LightCraft's.
   - The persona bar, prompt and error notice read the persona app's `Tokens`.
@@ -477,6 +494,11 @@ PROGRESS.md.
   card is). Studio closes what they make while it has no document open, with a notice; it never
   touches an open Studio document. Test: a `compile_fail` doctest naming
   `canvas::start_screen`, in `pixel.rs`.
+
+- **L19 (PhotoCraft, found in T3m):** its command palette (Edit › Search…, its key, its title
+  bar's search icon) runs any command by id through its engine, past Studio's menu routing, and
+  has no host hook. Edit › Search… is off, its key dropped, and Studio closes the palette after
+  every frame. An L5-style note in `pixel_menu.rs`; test: `photocrafts_palette_never_stays_open`.
 
 **Task list changes:**
 

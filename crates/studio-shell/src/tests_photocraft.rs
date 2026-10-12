@@ -232,10 +232,12 @@ fn pixel_is_photocrafts_own_window() {
     assert!(h.state().document.is_none());
     let text = painted_text(h.output());
     assert!(text.contains("Create a new document or open an existing file.") && !text.contains("Filmstrip"), "{text}");
-    // its menus are hidden (until Studio hosts them, T3m), and LightCraft's aren't shown here
-    for menu in ["File", "Image", "Photo"] {
-        assert!(h.query_by_label(menu).is_none(), "{menu} shows");
+    // its menus show once, in Studio's persona bar (its title bar's are hidden: T3m), and
+    // LightCraft's aren't shown here
+    for menu in ["File", "Image"] {
+        assert_eq!(h.query_all_by_label(menu).count(), 1, "{menu}");
     }
+    assert!(h.query_by_label("Photo").is_none());
     h.state_mut().run("persona.library").unwrap();
     h.run_steps(2);
     pick_first(&mut h);
@@ -1459,35 +1461,6 @@ fn a_document_photocraft_makes_itself_without_studios_is_closed() {
     assert!(h.state().pixel.as_ref().unwrap().app.session.documents().is_empty());
     assert!(h.state().document.is_none());
     assert!(h.state().error.as_ref().is_some_and(|(_, why)| why.contains("Ctrl+O")), "{:?}", h.state().error);
-}
-
-/// Until Studio hosts PhotoCraft's menus (T3m), the keys of the File items it will hide are
-/// dropped in Pixel: each leaves PhotoCraft's session (its documents, the document's state) and
-/// Studio's document as they were.
-#[test]
-fn keys_of_photocraft_file_items_studio_will_hide_do_nothing() {
-    let dir = temp_dir("t3-hidden-keys");
-    let mut h = studio();
-    pixel_edited(&mut h, &dir.join("trip.studio"));
-    let (cmd, alt, shift) = (egui::Modifiers::COMMAND, egui::Modifiers::ALT, egui::Modifiers::SHIFT);
-    let state = |h: &Harness<'_, crate::StudioShell>| {
-        let pc = &h.state().pixel.as_ref().unwrap().app.session;
-        let docs: Vec<_> = pc.documents().iter().map(|d| (d.doc.id, d.revision, d.history.past_len())).collect();
-        (docs, layer_names(h.state().document.as_ref().unwrap()), h.state().error.clone(), h.state().prompt.clone())
-    };
-    let before = state(&h);
-    for (mods, k) in [
-        (egui::Modifiers::NONE, egui::Key::F12),
-        (cmd | alt, egui::Key::W),
-        (cmd | alt, egui::Key::P),
-        (cmd | alt | shift, egui::Key::O),
-        (cmd | alt, egui::Key::S),
-    ] {
-        press(&mut h, mods, k);
-        h.run_steps(2);
-        assert_eq!(state(&h), before, "{mods:?}+{k:?}");
-        assert!(h.query_by_label("Save a Copy").is_none() && h.query_by_label("Open As").is_none(), "{mods:?}+{k:?} opened a dialog");
-    }
 }
 
 /// L18: closing what PhotoCraft made itself never touches an open Studio document: with one open,

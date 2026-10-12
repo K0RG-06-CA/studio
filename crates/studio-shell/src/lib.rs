@@ -10,6 +10,7 @@ pub mod lightcraft_menu;
 pub mod lightroom;
 pub mod persona;
 pub mod pixel;
+pub mod pixel_menu;
 pub mod theme;
 
 use std::path::PathBuf;
@@ -38,6 +39,8 @@ mod tests_images;
 mod tests_parity;
 #[cfg(test)]
 mod tests_parity_spike;
+#[cfg(test)]
+mod tests_pixel_menu;
 
 /// The shell's state and entry points. Serialisable: the app saves it between launches.
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -93,6 +96,9 @@ pub struct StudioShell {
     /// Where the pointer was last seen over the window (egui forgets it once the pointer leaves).
     #[serde(skip)]
     pub pointer: Option<egui::Pos2>,
+    /// Studio's History panel in Pixel is closed (PhotoCraft's Window › History: `window.history`).
+    #[serde(skip)]
+    pub history_hidden: bool,
 }
 
 /// What a save returns when its dialog was cancelled: not a failure, nothing to show.
@@ -142,6 +148,7 @@ impl Default for StudioShell {
             error: None,
             held: Vec::new(),
             pointer: None,
+            history_hidden: false,
         }
     }
 }
@@ -177,6 +184,8 @@ impl StudioShell {
     ///
     /// - `persona.<id>`: switch persona (v2/v3 personas are disabled and return an error).
     /// - `window.resetWorkspace`: put the current persona's panels back where they started.
+    /// - `window.history`: show or hide Studio's History panel in Pixel (PhotoCraft's Window ›
+    ///   History).
     /// - `app.quit` (Ctrl+Q): close the window; an unsaved document asks first.
     /// - The document: `document.new` (from the photo picked in Library), `document.open {path?}`
     ///   (a `.studio` file, or an image file PhotoCraft opens: PNG, JPEG, TIFF, PSD…, which
@@ -184,6 +193,9 @@ impl StudioShell {
     ///   `document.save` (to its path, else beside its source file, else where the save dialog
     ///   says), `document.saveAs {path?}` (no path: the save dialog); only ever to a `.studio`
     ///   file, so an opened image is never written over,
+    ///   `document.saveACopy {path?}` (a `.studio` copy, by the save dialog without a path; the
+    ///   document keeps its file and its unsaved changes), `document.revert` (open its own file
+    ///   again: back to how it was saved, through the prompt),
     ///   `document.close {discard?}`. Unsaved changes stop `new`, `open` and `close` unless
     ///   `discard` is true: they return an error and show the "save changes?" prompt, which
     ///   `document.prompt.save` (save, then go ahead), `document.prompt.discard` (go ahead) and
@@ -215,6 +227,10 @@ impl StudioShell {
         }
         if id == "app.quit" {
             self.close_window = true;
+            return Ok(());
+        }
+        if id == "window.history" {
+            self.history_hidden = !self.history_hidden;
             return Ok(());
         }
         if id == "window.resetWorkspace" {
@@ -313,8 +329,17 @@ impl StudioShell {
                 }
                 r
             }
-            "save" | "saveAs" => {
-                let r = self.save(cmd == "saveAs", path("path"));
+            "revert" => {
+                let doc = self.document.as_ref().ok_or("no document is open")?;
+                let path = doc.path.clone().ok_or("this document has no file to go back to: it was never saved")?;
+                // as PhotoCraft's Revert is off: nothing to go back to (a reopen would only lose the history)
+                if !unsaved {
+                    return Err("nothing to revert: no changes since it was saved".into());
+                }
+                self.run_with("document.open", &serde_json::json!({"path": path, "discard": discard}))
+            }
+            "save" | "saveAs" | "saveACopy" => {
+                let r = if cmd == "saveACopy" { self.save_copy(path("path")) } else { self.save(cmd == "saveAs", path("path")) };
                 // every way a save of an open document fails is shown; a cancelled dialog isn't one
                 if let (Err(why), Some(doc)) = (&r, &self.document)
                     && why != SAVE_CANCELLED
@@ -409,17 +434,26 @@ impl StudioShell {
             (None, None) if save_as => return Err("document.saveAs needs a `path`".into()),
             (None, None) => return Err("this document has no file yet: use document.saveAs".into()),
         };
-        // only ever a .studio file: a document opened from an image is never written over it (a
-        // name typed without an extension, which some save dialogs pass on as typed, gets it)
-        let ext = studio_doc::file::EXTENSION;
-        let path = match path.extension() {
-            None => path.with_extension(ext),
-            Some(e) if e.eq_ignore_ascii_case(ext) => path,
-            Some(_) => return Err(format!("Studio saves .{ext} documents, not {}", path.display())),
-        };
+        let path = studio_file(path)?;
         self.document.as_mut().ok_or("no document is open")?.save(&path)?;
         self.document_path = Some(path);
         Ok(())
+    }
+
+    /// `document.saveACopy {path}` (`to`): the document as it is now, written to a `.studio` file
+    /// (by the save dialog without a path), leaving it on its own file with its changes unsaved.
+    fn save_copy(&mut self, to: Option<PathBuf>) -> Result<(), String> {
+        let doc = self.document.as_mut().ok_or("no document is open")?;
+        if let Some(lr) = &self.lightroom {
+            self.base.mirror(&lr.app.session, doc);
+        }
+        let file = format!("{} copy.{}", doc.name, studio_doc::file::EXTENSION);
+        let path = match (to, self.pick_save_path.as_mut()) {
+            (Some(p), _) => p,
+            (None, Some(pick)) => pick(&file).ok_or(SAVE_CANCELLED)?,
+            (None, None) => return Err("document.saveACopy needs a `path`".into()),
+        };
+        doc.save_copy(&studio_file(path)?)
     }
 
     /// `document.open`: a `.studio` file (its photo found in the library), or an image file
@@ -858,7 +892,8 @@ impl StudioShell {
     /// - its document tab strip covered (L15: its × and Close would close the document past
     ///   Studio's close; Ctrl+W and Studio's commands close it);
     /// - "Rendering Develop…" over its canvas while the base layer is behind Develop;
-    /// - Studio's History, floating at the left edge of its dock (D1; until T4 restyles it).
+    /// - Studio's History, floating at the left edge of its dock (D1; until T4 restyles it),
+    ///   unless its Window › History closed it.
     fn pixel_area(&mut self, ui: &mut egui::Ui) {
         let Some(px) = self.pixel.as_mut() else { return };
         // its views follow its documents first: a document Studio opened since its `logic`
@@ -874,6 +909,9 @@ impl StudioShell {
         if !self.base.up_to_date(doc) {
             let at = canvas.left_top() + egui::vec2(8.0, 8.0);
             ui.painter().text(at, egui::Align2::LEFT_TOP, "Rendering Develop\u{2026}", egui::FontId::proportional(12.0), t.text_dim);
+        }
+        if self.history_hidden {
+            return;
         }
         let (rows, at) = (doc.history.entries(), doc.history.position());
         let pos = egui::pos2(canvas.max.x - HISTORY_W - 8.0, canvas.min.y + 8.0);
@@ -897,19 +935,31 @@ impl StudioShell {
         }
     }
 
-    /// Affinity's top bar: persona buttons on the left, the document name on the right. In Library
-    /// and Develop, LightCraft's menus come first (D4), routed by [`lightcraft_menu`].
+    /// Affinity's top bar: persona buttons on the left, the document name on the right. The
+    /// persona's app menus come first (D4): LightCraft's in Library and Develop, routed by
+    /// [`lightcraft_menu`], and PhotoCraft's in Pixel, routed by [`pixel_menu`] (off while a
+    /// Develop geometry change is on its way into its layers).
     fn top_bar(&mut self, ui: &mut egui::Ui) {
         let t = theme::TOKENS;
         let frame = egui::Frame::NONE.fill(t.chrome).inner_margin(egui::Margin::symmetric(8, 0));
         let taken: Vec<String> = DOCUMENT_KEYS.iter().map(|(m, k, _)| lightcraft_menu::shortcut_name(*m, *k)).collect();
         let menus =
             self.lightroom.as_ref().filter(|_| self.persona.lightroom()).map(|lr| lightcraft_menu::bar(&lr.app, self.document.as_ref(), &taken));
-        let mut clicked = None;
+        let pixel = self.pixel.as_ref().filter(|_| self.persona == Persona::Pixel);
+        // PhotoCraft's items whose key is a persona's show no shortcut (Actual Pixels' Ctrl+1)
+        let personas = Persona::ALL.map(|p| p.shortcut());
+        let (mut clicked, mut pixel_clicked, mut switch) = (None, None, None);
         egui::Panel::top("studio.top_bar").exact_size(t.top_bar_h).resizable(false).frame(frame).show(ui, |ui| {
             ui.horizontal_centered(|ui| {
                 if let Some(menus) = &menus {
                     clicked = lightcraft_menu::show(ui, menus);
+                    ui.add_space(16.0);
+                }
+                if let Some(px) = pixel {
+                    let (doc, shown) = (self.document.as_ref(), !self.history_hidden);
+                    ui.add_enabled_ui(!self.develop_rendering(), |ui| {
+                        pixel_clicked = pixel_menu::show(ui, || pixel_menu::items(&px.app, doc, shown, &personas));
+                    });
                     ui.add_space(16.0);
                 }
                 ui.spacing_mut().item_spacing.x = 2.0;
@@ -926,7 +976,7 @@ impl StudioShell {
                         .on_hover_text(format!("{} ({})", p.label(), shortcut_text(ui, p)))
                         .on_disabled_hover_text(off.unwrap_or_else(|| format!("{} arrives in v{}", p.label(), p.version())));
                     if r.clicked() {
-                        let _ = self.run(&p.command());
+                        switch = Some(p);
                     }
                 }
                 let title = self.document_title();
@@ -941,8 +991,43 @@ impl StudioShell {
                 });
             });
         });
+        if let Some(p) = switch {
+            let _ = self.run(&p.command());
+        }
         if let Some((id, params)) = clicked {
             self.lightcraft_menu_item(ui.ctx(), &id, params);
+        }
+        if let Some(id) = pixel_clicked {
+            self.pixel_menu_item(ui.ctx(), &id);
+        }
+    }
+
+    /// A PhotoCraft menu item clicked, as [`pixel_menu::route`] says (checked again here: only
+    /// what the menu allows runs, and nothing while a Develop geometry change is on its way into
+    /// the layers).
+    fn pixel_menu_item(&mut self, ctx: &egui::Context, id: &str) {
+        if self.develop_rendering() || !pixel_menu::allowed(id, self.document.as_ref()) {
+            return;
+        }
+        match pixel_menu::route(id) {
+            Some(pixel_menu::Route::Document(cmd)) => self.key_command(cmd),
+            Some(pixel_menu::Route::History) => self.key_command(id),
+            Some(pixel_menu::Route::HistoryPanel) => {
+                let _ = self.run("window.history");
+            }
+            Some(pixel_menu::Route::Quit) => {
+                let _ = self.run("app.quit");
+            }
+            Some(pixel_menu::Route::Pass) => {
+                let Some(px) = self.pixel.as_mut() else { return };
+                // what fails says why in its status bar, as in its own menus
+                if let Err(e) = photocraft_ui_egui::menus::invoke(&mut px.app, ctx, id, serde_json::json!({})) {
+                    px.app.ui.status = e;
+                }
+                // its own History shows its states only (D1): a workspace that turns it on doesn't
+                px.app.ui.panels.history = false;
+            }
+            Some(pixel_menu::Route::Off | pixel_menu::Route::Hidden) | None => {}
         }
     }
 
@@ -1002,12 +1087,16 @@ impl StudioShell {
         {
             ui.input_mut(|i| take_keys(i, &DELETE_KEYS));
         }
-        // PhotoCraft's keys for the File items Studio will hide (T3m) act on its own session, not
-        // on the document: dropped until then
-        if self.persona == Persona::Pixel {
-            ui.input_mut(|i| take_keys(i, &HIDDEN_FILE_KEYS));
+        let mut pressed = ui.input_mut(|i| take_keys(i, &keys));
+        // then PhotoCraft's keys, as its menu items route: a routed item's runs Studio's command
+        // (Revert, Open As, Save a Copy…), one Studio keeps off or hides is dropped (they would act
+        // on PhotoCraft's own session, not on the document)
+        if let Some(px) = self.pixel.as_ref().filter(|_| self.persona == Persona::Pixel)
+            && ui.input(|i| i.events.iter().any(|e| matches!(e, egui::Event::Key { pressed: true, .. })))
+        {
+            let routed = pixel_menu::keys(&px.app);
+            pressed.extend(ui.input_mut(|i| pixel_menu::take_keys(i, &routed)));
         }
-        let pressed = ui.input_mut(|i| take_keys(i, &keys));
         if self.persona == Persona::Pixel {
             // PhotoCraft commits a stroke at release, later in the frame: they run in the order
             // pressed at the end of the frame, once no button is down (see `ui`)
@@ -1062,17 +1151,6 @@ const CMD: egui::Modifiers = egui::Modifiers::COMMAND;
 const DELETE_KEYS: [(egui::Modifiers, egui::Key, &str); 2] =
     [(egui::Modifiers::NONE, egui::Key::Delete, "photo.delete"), (egui::Modifiers::NONE, egui::Key::Backspace, "photo.delete")];
 
-/// PhotoCraft's keys for the File items Studio will hide when it hosts its menus (T3m), taken and
-/// dropped in Pixel until then: Revert, Close All, Close Others, Open As, Save a Copy. (New is
-/// Studio's Ctrl+N; Open Recent and Purge have no key.)
-const HIDDEN_FILE_KEYS: [(egui::Modifiers, egui::Key, &str); 5] = [
-    (egui::Modifiers::NONE, egui::Key::F12, "file.revert"),
-    (CMD.plus(egui::Modifiers::ALT), egui::Key::W, "file.closeAll"),
-    (CMD.plus(egui::Modifiers::ALT), egui::Key::P, "file.closeOthers"),
-    (CMD.plus(egui::Modifiers::ALT).plus(egui::Modifiers::SHIFT), egui::Key::O, "file.openAs"),
-    (CMD.plus(egui::Modifiers::ALT), egui::Key::S, "file.saveACopy"),
-];
-
 /// Studio's document keys, in every persona.
 const DOCUMENT_KEYS: [(egui::Modifiers, egui::Key, &str); 5] = [
     (CMD.plus(egui::Modifiers::SHIFT), egui::Key::S, "document.saveAs"),
@@ -1088,6 +1166,18 @@ const UNDO_KEYS: [(egui::Modifiers, egui::Key, &str); 3] = [
     (CMD.plus(egui::Modifiers::SHIFT), egui::Key::Z, "edit.redo"),
     (CMD.plus(egui::Modifiers::ALT), egui::Key::Z, "edit.toggleLastState"),
 ];
+
+/// Where a document is saved: only ever a `.studio` file, so a document opened from an image is
+/// never written over it (a name typed without an extension, which some save dialogs pass on as
+/// typed, gets it).
+fn studio_file(path: PathBuf) -> Result<PathBuf, String> {
+    let ext = studio_doc::file::EXTENSION;
+    match path.extension() {
+        None => Ok(path.with_extension(ext)),
+        Some(e) if e.eq_ignore_ascii_case(ext) => Ok(path),
+        Some(_) => Err(format!("Studio saves .{ext} documents, not {}", path.display())),
+    }
+}
 
 /// Take the presses of `keys`, each with exactly its modifiers (egui's `consume_shortcut`
 /// ignores extra Shift and Alt, so Ctrl+N would take PhotoCraft's Shift+Ctrl+N New Layer): their

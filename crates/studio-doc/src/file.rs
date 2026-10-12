@@ -76,11 +76,17 @@ impl Document {
 
     /// Write the file (atomically) and remember where.
     pub fn save(&mut self, path: &Path) -> Result<(), String> {
-        let bytes = self.to_bytes()?;
-        photocraft_format::atomic_write(path, &bytes).map_err(|e| format!("{}: {e}", path.display()))?;
+        self.save_copy(path)?;
         self.path = Some(path.to_path_buf());
         self.saved_revision = self.revision;
         Ok(())
+    }
+
+    /// Write the file (atomically) and leave the document as it was: its own file, and its
+    /// unsaved changes still unsaved (Photoshop's Save a Copy).
+    pub fn save_copy(&self, path: &Path) -> Result<(), String> {
+        let bytes = self.to_bytes()?;
+        photocraft_format::atomic_write(path, &bytes).map_err(|e| format!("{}: {e}", path.display()))
     }
 
     /// Where the document is saved by default: beside its source file, as `<file>.studio` (like

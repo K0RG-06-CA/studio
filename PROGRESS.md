@@ -142,12 +142,49 @@ In this order, ahead of PRD milestone 6:
        dialogs; only the first of several dropped files opens (as before T3); PhotoCraft's Print
        and Export keys stay live (they can't write: Studio gives it no writer services), to
        re-check if those are ever wired.
-   - Temporarily unavailable keys (T3 until T3m), dropped in Pixel: F12 Revert, Ctrl+Alt+W Close
-     All, Ctrl+Alt+P Close Others, Ctrl+Alt+Shift+O Open As, Ctrl+Alt+S Save a Copy
-     (`keys_of_photocraft_file_items_studio_will_hide_do_nothing`).
-   - For T3m: relabel PhotoCraft's Help links as upstream's, as LightCraft's are (Join the ArtCraft
-     Discord…, PhotoCraft Website, ArtCraft Website, PhotoCraft on GitHub, Report an Issue…);
-     Studio doesn't route PhotoCraft's menus yet.
+   - [x] T3m Studio hosts PhotoCraft's menus in the persona bar row in Pixel (`pixel_menu.rs`):
+     its in-window model (`menus::menu_items`, the layout its Windows build draws), drawn as its
+     in-window bar draws it (adapted from `menus::menu_bar`, Help's search field included). Every
+     item and key binding is classified in `route` (fail closed: an unclassified one is drawn
+     disabled, never runs, its key is dropped, and `every_photocraft_menu_item_is_routed` walks
+     the whole model and every binding and fails on it; the items that run as PhotoCraft runs
+     them are listed in `pixel_menu_pass.txt`). Open and Open As → `document.open`, Save →
+     `document.save`, Save As → `document.saveAs`, Save a Copy → the new `document.saveACopy`
+     (a `.studio` copy; the document keeps its file and its changes unsaved), Revert → the new
+     `document.revert` (its own file opened again, through Studio's prompt; off with no file or
+     no changes), Close → `document.close`, Exit → Studio's close guard, Undo/Redo/Toggle Last
+     State → Studio's history (`photocrafts_edit_undo_menu_item_takes_only_the_newest_step`, the
+     T0 test flipped), Window › History → Studio's History panel (`window.history`, checked while
+     it shows; PhotoCraft's own stays off, also after a workspace that has it). Hidden: New, New
+     from Clipboard, Open Recent, Close All, Close Others, Purge. Off (would make a second
+     document, which Studio's one document closes at once): Image › Duplicate, Smart Objects ›
+     Edit Contents, Crop and Straighten Photos, Photomerge, Merge to HDR Pro, Contact Sheet II,
+     Load Files into Stack. Help's links say they go to upstream ("PhotoCraft upstream website",
+     …), in English in every language, as LightCraft's. The menus are off while a Develop
+     geometry change renders (as PhotoCraft's `logic`).
+     - Keys: PhotoCraft's keys go where their items route (`pixel_menu::keys`, from its live
+       bindings, so a key the user rebinds in its Keyboard Shortcuts follows): F12 reverts,
+       Ctrl+Alt+Shift+O opens and Ctrl+Alt+S saves a copy through Studio again; Ctrl+Alt+W and
+       Ctrl+Alt+P (Close All, Close Others) and Ctrl+K (the palette) stay dropped. T3's list of
+       temporarily unavailable keys is cleared. ("Ctrl+Shift+O" in the request is PhotoCraft's
+       Ctrl+Alt+Shift+O Open As: it binds nothing to Ctrl+Shift+O.)
+     - L19: PhotoCraft's command palette (Edit › Search…, Ctrl+K, its title bar's search icon)
+       runs any command by id through its engine, past the routing (its File items, its own undo:
+       the T0 bug). No host hook, so Edit › Search… is off, Ctrl+K dropped, and Studio closes the
+       palette after every frame (`photocrafts_palette_never_stays_open`): its icon shows it for
+       one frame, too soon for a command.
+     - Accepted parity differences: the menus sit in the persona bar row, not in PhotoCraft's
+       title bar (D4); Actual Pixels shows no Ctrl+1 (Studio's Library key), and Ctrl+2…7
+       (PhotoCraft's channel targets) stay Studio's persona keys, as since milestone 4; Revert is
+       Studio's prompt and reopen, not an undoable step as in PhotoCraft.
+     - Deviation from the plan: the menus are drawn from `menus::menu_items` and run by
+       `menus::invoke`, not through the native-menu backend's `sync`/`drain` (its model is the
+       Mac layout, with an app menu and Services); the backend stays the empty one, hiding the
+       in-window menus.
+     - Tests (`tests_pixel_menu.rs`): Save a Copy, Close, Exit, Open, Save and Save As go through
+       Studio's commands, dialogs and prompt; Revert; hidden items absent and off items disabled;
+       Window › History; the keys; a menu edit is one Pixel step; the menus are off while Develop
+       renders; the palette.
 2. [ ] **Pixel slow-frame fix** (Open items: frames over 0.4 s); the deferred `bench.rs` peak
    bytes during a follow waits on it.
 3. [ ] **Film**.
