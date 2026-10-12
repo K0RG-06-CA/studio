@@ -1691,6 +1691,38 @@ fn t3b_a_drag_held_when_the_rotation_begins_commits_nothing() {
     land(&mut h);
     assert_eq!(pixel_state(&h).0, before + 1, "the rotation is the one new state");
 }
+/// Review: a stroke held when a rotation begins, as it really goes (no render held back by the
+/// test): the render finishes under the held button and waits, the release lands it, and the
+/// stroke paints nothing then either; the rotation is the one new state.
+#[test]
+fn t3b_a_stroke_held_when_the_rotation_begins_paints_nothing_when_its_release_lands_it() {
+    let mut h = studio();
+    in_pixel(&mut h);
+    let before = pixel_state(&h);
+    let c = canvas(&h).center();
+    h.event(egui::Event::PointerMoved(c));
+    h.event(egui::Event::PointerButton { pos: c, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE });
+    h.run_steps(1);
+    for i in 1..4 {
+        h.event(egui::Event::PointerMoved(c + egui::vec2(8.0 * i as f32, 0.0)));
+        h.run_steps(1);
+    }
+    rotate_left(&mut h);
+    h.run_steps(1);
+    let t0 = std::time::Instant::now();
+    while h.state().base.rendering() {
+        assert!(t0.elapsed().as_secs() < 300, "the render never finished");
+        h.run_steps(1);
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert!(h.state().develop_rendering(), "finished, waiting for the button");
+    release(&mut h, c + egui::vec2(40.0, 0.0));
+    h.run_steps(5);
+    assert!(!h.state().develop_rendering());
+    let (states, layers) = pixel_state(&h);
+    assert_eq!(states, before.0 + 1, "the rotation is the one new state");
+    assert_eq!(layers[1].2, Some((100, 299, 101, 300)), "only the old pixel, turned");
+}
 /// T3b: its right dock takes no click: a click on a layer's row in its Layers panel doesn't pick
 /// it; once the render lands, it does.
 #[test]
