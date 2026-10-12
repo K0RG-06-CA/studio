@@ -49,9 +49,67 @@ Used: linked as a Git dependency (photocraft-doc, photocraft-raster, photocraft-
 photocraft-geom, photocraft-format, photocraft-engine, photocraft-ui-egui, photocraft-io
 and the crates they use, pinned in Cargo.toml): its layer tree and .pcraft bundle are the
 pixel half of Studio's document, its importers open PNG/JPEG/TIFF/PSD files into Pixel, and its editor (engine, tools, panels, dialogs, icons and fonts it ships)
-runs the Pixel persona, recoloured with Studio's theme. Also: Photoshop-style right-dock
-group layout (as a reference for default panel groups); workspace lint and never-crash
-conventions.
+runs the Pixel persona as PhotoCraft's own window, in its own theme. Also: Photoshop-style
+right-dock group layout (as a reference for default panel groups); workspace lint and
+never-crash conventions.
+
+--------------------------------------------------------------------------------
+Bundled by PhotoCraft (compiled into Studio from PhotoCraft's assets/):
+
+JetBrains Mono typeface — https://github.com/JetBrains/JetBrainsMono
+License: SIL Open Font License 1.1 (see assets/fonts/OFL-JetBrainsMono.txt in PhotoCraft)
+Copyright 2020 The JetBrains Mono Project Authors
+
+Lucide icons — https://lucide.dev
+License: ISC (see assets/icons/LICENSE-lucide.txt in PhotoCraft)
+Copyright (c) 2026 Lucide Icons and Contributors
+Icons derived from Feather (https://feathericons.com): MIT License,
+Copyright (c) 2013-present Cole Bemis
+
+Magnetic Lasso icon (assets/icons/lasso-magnetic.svg in PhotoCraft)
+Adapted from "Magnetic Lasso Tool" by Lil' Seal (failureiscool) from Noun Project,
+https://thenounproject.com/icon/magnetic-lasso-tool-177513/
+Licensed under Creative Commons Attribution 3.0 Unported (CC BY 3.0),
+https://creativecommons.org/licenses/by/3.0/
+Changes by PhotoCraft contributors: redrawn as a 24 x 24 SVG on PhotoCraft's toolbar grid,
+with round-capped strokes in place of the original line weights. Full licence text in
+assets/icons/LICENSE-noun-magnetic-lasso.txt in PhotoCraft.
+
+SCOWL English word list (assets/dict/en_US-scowl-50.txt.gz in PhotoCraft) —
+http://wordlist.aspell.net/ (see assets/dict/LICENSE-SCOWL.txt in PhotoCraft)
+
+  Copyright 2000-2018 by Kevin Atkinson
+
+  Permission to use, copy, modify, distribute and sell these word
+  lists, the associated scripts, the output created from the scripts,
+  and its documentation for any purpose is hereby granted without fee,
+  provided that the above copyright notice appears in all copies and
+  that both that copyright notice and this permission notice appear in
+  supporting documentation. Kevin Atkinson makes no representations
+  about the suitability of this array for any purpose. It is provided
+  "as is" without express or implied warranty.
+
+--------------------------------------------------------------------------------
+Rust crates with licence terms beyond MIT/Apache-2.0:
+
+jpeg-encoder (used by LightCraft's and PhotoCraft's codecs) —
+https://github.com/vstroebel/jpeg-encoder
+License: (MIT OR Apache-2.0) AND IJG. This software is based in part on the work of the
+Independent JPEG Group: its forward DCT is ported from mozjpeg / the IJG JPEG library.
+
+epaint_default_fonts (egui's built-in fonts) — https://github.com/emilk/egui
+License: (MIT OR Apache-2.0) AND OFL-1.1 AND Ubuntu-font-1.0
+  Hack: Copyright (c) 2018 Source Foundry Authors (MIT); Bitstream Vera Sans Mono
+    Copyright (c) 2003 Bitstream, Inc. (Bitstream Vera License)
+  Noto Emoji: SIL Open Font License 1.1
+  Ubuntu Light: Ubuntu Font Licence 1.0, Copyright 2010, 2011 Canonical Ltd.
+  emoji-icon-font: MIT License, Copyright (c) 2014 John Slegers
+
+libfuzzer-sys (a dependency of rav1e, used by LightCraft's AVIF encoder) —
+https://github.com/rust-fuzz/libfuzzer
+License: (MIT OR Apache-2.0) AND NCSA (it bundles LLVM's libFuzzer, University of
+Illinois/NCSA Open Source License, Copyright (c) LLVM project contributors). rav1e only
+pulls it in for fuzzing builds (cfg(fuzzing)); it is not compiled into Studio.
 
 --------------------------------------------------------------------------------
 Rust crates (egui, eframe, egui_dock, serde and their dependencies) are used as

@@ -558,6 +558,8 @@ In this order, ahead of PRD milestone 6:
     - [ ] 5. Mode B (physical kernel) behind the Advanced toggle, with its own tests
     - [ ] 6. Calibration (optional): fit presets to your own bracketed scans
   - [ ] Film stock builder
+- [ ] **Going public** (audit 2026-10-11: gitleaks clean over all history, no photos or EXIF ever committed)
+  - [x] NOTICE credits everything PhotoCraft compiles in (JetBrains Mono, Lucide/Feather, the CC BY 3.0 Magnetic Lasso icon, SCOWL) and the crates with extra terms (jpeg-encoder IJG, epaint_default_fonts, libfuzzer-sys)
 
 ## Automated checks
 
