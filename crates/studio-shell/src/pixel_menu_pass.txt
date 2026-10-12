@@ -1,6 +1,7 @@
 # PhotoCraft menu items and key bindings Studio runs as PhotoCraft runs them (pixel_menu::Route::Pass):
 # they edit the open document (a Pixel step in Studio's history), or change PhotoCraft's view, panels,
-# tools or preferences. Every id here was reviewed: none opens, saves, closes or makes a document.
+# tools or preferences. Every id here was reviewed: none opens, saves or closes a document (Image › Calculations
+# can put its result in a new document, which Studio's one document closes: a known LOW).
 channel.target.composite
 channel.target.slot3
 channel.target.slot4
@@ -112,7 +113,6 @@ file.scripts.deleteAllEmptyLayers
 file.scripts.flattenAllLayerEffects
 file.scripts.flattenAllMasks
 file.scripts.scriptEventsManager
-file.scripts.statistics
 filter.adaptiveWideAngle
 filter.blur.average
 filter.blur.blur
