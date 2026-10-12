@@ -1888,20 +1888,20 @@ fn t3b_keys_while_develop_renders() {
 }
 
 /// T3b: the wait has its ceiling while Pixel shows too: a render that doesn't land within it
-/// undoes the rotation and says so, and the block lifts (a stroke paints).
+/// (zero here: still in flight at the next frame) undoes the rotation and says so, and the block
+/// lifts (a stroke paints). One finished and held for a gesture isn't in flight (`hold_renders`
+/// would hold it past any ceiling).
 #[test]
 fn t3b_a_render_past_the_ceiling_rolls_back_and_lifts_the_block() {
     let mut h = studio();
     in_pixel(&mut h);
-    h.state_mut().base.ceiling = Some(std::time::Duration::from_millis(300));
-    block(&mut h);
-    std::thread::sleep(std::time::Duration::from_millis(400));
+    h.state_mut().base.ceiling = Some(std::time::Duration::ZERO);
+    rotate_left(&mut h);
     h.run_steps(2);
     assert!(!h.state().develop_rendering(), "rolled back");
     assert_eq!(h.state().document.as_ref().unwrap().develop.orientation, Default::default(), "the rotation undone");
     assert!(painted_text(h.output()).contains("took longer"), "and said why: {:?}", h.state().error);
     h.state_mut().run("document.dismissError").unwrap();
-    h.state_mut().hold_renders = false;
     h.run_steps(2);
     let before = pixel_state(&h);
     let end = stroke_down(&mut h);
