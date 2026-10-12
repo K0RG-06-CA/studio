@@ -260,6 +260,19 @@ In this order, ahead of PRD milestone 6:
        under them, as a save or an undo lands it
        (`t3b_a_free_transform_open_when_the_rotation_begins_doesnt_hold_its_render`). Test added:
        a held stroke as it really goes, its release landing the render.
+     - Left (LOW): the block covers the persona area, not the persona bar's row, so a PhotoCraft
+       window dragged over the bar (or a tall dialog reaching it) is still hovered there (no
+       click, key or drag reaches it: it has no pointer and no events, and a drag is the
+       block's); Studio's own error notice and prompt are under the block too while it waits
+       (Escape still closes them; a prompt waits for the render first anyway); a Layers row
+       drag in flight when the block begins and released under it leaves PhotoCraft's row-drag
+       marker set, so the next click-release on a row moves that layer (as since milestone 5,
+       when PhotoCraft wasn't drawn at all then); PhotoCraft's own keys pressed while it waits
+       are dropped, not queued (as in milestone 5); scroll and pinch deltas aren't withheld
+       (PhotoCraft reads them by the pointer, which it hasn't got, and they only move the
+       view); its control transport's synthetic input would be swallowed while it waits (not
+       used in Studio); the open-menu test proves the routing check, not that the block covers
+       the menu's dropdown.
 2. [ ] **Pixel slow-frame fix** (Open items: frames over 0.4 s); the deferred `bench.rs` peak
    bytes during a follow waits on it.
 3. [ ] **Film**.
