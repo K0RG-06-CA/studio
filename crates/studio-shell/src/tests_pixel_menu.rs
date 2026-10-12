@@ -248,9 +248,10 @@ fn photocrafts_revert_reopens_the_saved_file_through_the_prompt() {
     assert!(!h.state().document.as_ref().unwrap().unsaved());
     assert_eq!(row(&mut h, "File", "Revert"), Some(false), "nothing to revert");
     // nor does its key or command reopen it (that would only lose the history)
-    let generation = h.state().document.as_ref().unwrap() as *const _;
+    // (a name only this document in memory has: a reopen would read the file's)
+    h.state_mut().document.as_mut().unwrap().name = "not reopened".into();
     assert!(h.state_mut().run("document.revert").is_err());
-    assert!(std::ptr::eq(generation, h.state().document.as_ref().unwrap()), "the same document");
+    assert_eq!(h.state().document.as_ref().unwrap().name, "not reopened");
 }
 
 /// What has no meaning with Studio's one document isn't in its menus (New, Open Recent, Close
