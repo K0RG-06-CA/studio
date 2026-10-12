@@ -1933,3 +1933,40 @@ fn t3b_a_free_transform_open_when_the_rotation_begins_doesnt_hold_its_render() {
     }
     assert_ne!(h.state().document.as_ref().unwrap().develop.orientation, Default::default(), "the rotation landed: {:?}", h.state().error);
 }
+
+/// Review (MEDIUM, Codex): a Free Transform open when a rotation comes in is applied first, as
+/// its own step: its box is in the frame before the rotation (left open, it stayed there over the
+/// rotated layers, and applying it then put the old box on them). Undo takes back the rotation,
+/// then the transform.
+#[test]
+fn t3b_a_free_transform_open_when_the_rotation_comes_in_is_applied_first_as_its_own_step() {
+    let mut h = studio();
+    in_pixel(&mut h);
+    let open = |h: &Harness<'_, crate::StudioShell>| h.state().pixel.as_ref().unwrap().app.ui.transform.is_some();
+    let paint = |h: &Harness<'_, crate::StudioShell>| pixel_state(h).1[1].2;
+    press(&mut h, egui::Modifiers::COMMAND, egui::Key::T);
+    press(&mut h, egui::Modifiers::NONE, egui::Key::ArrowRight);
+    h.run_steps(3);
+    assert!(open(&h), "Free Transform is open, nudged");
+    rotate_left(&mut h);
+    h.run_steps(1);
+    assert!(!open(&h), "applied as the rotation came in");
+    let t0 = std::time::Instant::now();
+    while h.state().develop_rendering() {
+        assert!(t0.elapsed().as_secs() < 300, "never landed");
+        h.run_steps(1);
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    h.run_steps(2);
+    assert_eq!(paint(&h), Some((100, 298, 101, 299)), "nudged, then turned with the photo");
+    let rows: Vec<_> = h.state().document.as_ref().unwrap().history.entries().into_iter().map(|e| (e.label, e.develop, e.pixel)).collect();
+    let n = rows.len();
+    assert!(!rows[n - 2].1 && rows[n - 2].2, "the transform, a Pixel step: {rows:?}");
+    assert_eq!(rows[n - 1], ("Rotate Left".to_owned(), true, true), "then the rotation and its follow");
+    h.state_mut().run("edit.undo").unwrap();
+    assert_eq!(h.state().document.as_ref().unwrap().develop.orientation, Default::default());
+    assert_eq!(paint(&h), Some((301, 100, 302, 101)), "the rotation undone, the nudge kept");
+    h.state_mut().run("edit.undo").unwrap();
+    assert_eq!(paint(&h), Some((300, 100, 301, 101)), "then the transform");
+    assert_eq!(h.state().error, None);
+}

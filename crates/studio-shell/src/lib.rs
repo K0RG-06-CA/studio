@@ -232,6 +232,7 @@ impl StudioShell {
     /// made right after it (a script's next command) comes after it.
     pub fn run_with(&mut self, id: &str, params: &Value) -> Result<(), String> {
         self.guard_originals();
+        self.apply_before_reframe();
         let r = self.dispatch(id, params);
         self.settle();
         r
@@ -594,6 +595,20 @@ impl StudioShell {
         r
     }
 
+    /// A Develop change to the frame (a rotation, a crop: a script's, say) comes after what
+    /// PhotoCraft has open (a Free Transform, type, a pen path): that is applied first, as its own
+    /// step, before the change is noted. A Free Transform's box is in the frame before the change:
+    /// left open, it stayed there over the moved layers, and an edit made while the change waits
+    /// for its render would be taken for the change's Pixel half. Before every frame and command.
+    fn apply_before_reframe(&mut self) {
+        let (Some(doc), Some(lr), Some(px)) = (&mut self.document, &self.lightroom, &mut self.pixel) else { return };
+        let framing = studio_doc::pixel::framing;
+        if doc.photo().and_then(|p| lr.app.session.develop_of(p)).is_some_and(|s| framing(&s) != framing(&doc.develop)) {
+            px.apply_pending();
+            doc.copy_back(&mut px.app.session);
+        }
+    }
+
     /// The document's base layer follows its photo's develop settings; once per frame.
     fn document_tick(&mut self, ctx: &egui::Context) {
         // a Pixel gesture in progress (a stroke or drag: a button held; Free Transform; typing):
@@ -724,6 +739,7 @@ impl StudioShell {
         if std::mem::take(&mut self.close_window) {
             ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
         }
+        self.apply_before_reframe();
         // Every way of closing the window (its close button, Ctrl+Q, LightCraft's Quit) arrives
         // here: an unsaved document stops it and asks.
         if ui.input(|i| i.viewport().close_requested()) && self.unsaved() {
