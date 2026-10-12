@@ -9,6 +9,15 @@ on:
   pull_request:
     paths-ignore: ["**.md"]
 
+# Read-only token: CI only builds and tests.
+permissions:
+  contents: read
+
+# A newer push to the same branch or PR cancels the run it replaces.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 # No debug info: with PhotoCraft, target/ outgrew ubuntu-latest's disk (ld died with 30 MB left).
 env:
   CARGO_PROFILE_DEV_DEBUG: 0
@@ -22,7 +31,9 @@ jobs:
       matrix:
         os: [windows-latest, windows-11-arm, ubuntu-latest, ubuntu-24.04-arm]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       # Same list as PhotoCraft's CI minus GTK (rfd's Linux dialogs use the XDG portal, pure Rust).
       - name: Install Linux system dependencies (egui/winit)
@@ -32,12 +43,12 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             libxkbcommon-dev libwayland-dev libx11-dev libxrandr-dev libxi-dev libgl1-mesa-dev
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
         with:
           components: clippy, rustfmt
 
       # target/ and the cargo registry/git checkouts (LightCraft) per OS and Cargo.lock
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
 
       - name: Format
         if: runner.os == 'Linux'
