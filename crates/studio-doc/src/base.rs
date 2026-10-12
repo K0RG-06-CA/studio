@@ -113,7 +113,10 @@ impl Base {
             // the render a Develop step waited for can't come: the step goes back
             doc.follow_failed(session, e);
         }
-        if !doc.history.pending_follow() {
+        // one that finished and waits for a held gesture (`ready`) is no render in flight: it
+        // lands at the release, however long the gesture lasts
+        let held = self.ready.as_ref().is_some_and(|r| r.0 == doc.develop.hash64());
+        if !doc.history.pending_follow() || held {
             self.waiting = None;
             return r;
         }

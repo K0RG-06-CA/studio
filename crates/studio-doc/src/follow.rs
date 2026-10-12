@@ -906,6 +906,34 @@ mod tests {
         assert!(t.doc.take_notice().is_some());
     }
 
+    /// Review: the ceiling is for a render still in flight. One that finished and waits for a
+    /// held Pixel gesture (`hold`) isn't undone however long the gesture lasts: it lands at the
+    /// release.
+    #[test]
+    fn a_finished_render_held_for_a_gesture_outlasts_the_ceiling() {
+        let mut t = open();
+        t.paint("Paint", 300, 100);
+        t.base.hold = true;
+        t.rotate_left();
+        let t0 = Instant::now();
+        t.frame().unwrap();
+        while t.base.rendering() {
+            assert!(t0.elapsed() < Duration::from_secs(300), "the render never finished");
+            t.frame().unwrap();
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(t.doc.history.pending_follow(), "finished, held for the gesture");
+        t.base.ceiling = Some(Duration::from_millis(50));
+        std::thread::sleep(Duration::from_millis(100));
+        t.frame().unwrap();
+        assert!(t.doc.history.pending_follow(), "still held, not undone");
+        t.base.hold = false;
+        t.frame().unwrap();
+        assert!(!t.doc.history.pending_follow());
+        assert_eq!((t.size(), dot(&t.pc(), "Paint")), ((400, 600), (100, 299)), "landed at the release");
+        assert_eq!(t.doc.take_notice(), None);
+    }
+
     #[test]
     fn finish_waits_for_the_render_and_lands_it() {
         let mut t = open();
