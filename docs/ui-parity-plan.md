@@ -390,6 +390,8 @@ PROGRESS.md.
     follows LightCraft's view (a `lightcraft:view.detail` lands in Develop, `view.photoGrid` back
     in Library).
   - Update PROGRESS.md's Automated checks and Known untested.
+  - Make the render-heavy tests (LightCraft's demo scene: `tests_images`, `tests_parity`, …)
+    share a lock instead of relying on CI's `--test-threads=2` (see PROGRESS › Going public).
   - Tick roadmap 1.
 
 ## T0 findings (2026-10-10; tests in `crates/studio-shell/src/tests_parity_spike.rs`)

@@ -566,6 +566,7 @@ In this order, ahead of PRD milestone 6:
   - [x] README (what Studio is, pre-release, build, tests, licence, no-affiliation line)
   - [x] CI hardened per zizmor: read-only token, actions pinned to commit hashes, no persisted credentials, superseded runs cancelled
   - [x] LightCraft's Help links say they go to upstream ("LightCraft upstream website", …), relabelled in `lightcraft_menu::adapt` (`lightcrafts_help_links_say_they_are_upstreams`, seen failing first). Accepted parity difference: these six labels differ from LightCraft's, and show in English in every language. PhotoCraft's: on T3m's list above.
+  - [x] Repo public (2026-10-12) with secret scanning, push protection and approval for all external contributors' PR workflows. T3's first CI run timed out on both x64 runners: `a_file_saved_by_milestone_4_opens`, `pixel_makes_a_document_from_the_picked_photo…` and `library_and_develop_are_lightcrafts_own_window` hit their 300 s render limits; the ARM runners passed. With studio-shell on `--test-threads=2` in CI (as locally), all 4 jobs pass (run 38291683030). On windows-latest, `a_file_saved…` took 20 s there, against 152 s and >300 s before. The render tests are sensitive to parallel load. Likely cause: public runners have 4 CPUs (2 when private), so twice as many demo renders run at once (unconfirmed: the logs don't print the CPU count). The x64 parity test still takes ~310 s in total, close to its 300 s limit per wait. Proper fix on T8's list: the render-heavy tests share a lock.
 
 ## Automated checks
 
