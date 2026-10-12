@@ -1647,6 +1647,50 @@ fn t3b_a_stroke_held_when_the_rotation_begins_paints_nothing() {
     assert_eq!(layers[1].2, Some((100, 299, 101, 300)), "only the old pixel, turned");
 }
 
+/// Review (HIGH): a drag still held when a rotation begins commits nothing: its adjustment
+/// sliders commit on egui's drag stop, which egui keeps whatever the pointer says, so a release
+/// while the rotation waited ran `layer.setAdjustment` past the block. Only the rotation is a
+/// new state.
+#[test]
+fn t3b_a_drag_held_when_the_rotation_begins_commits_nothing() {
+    let mut h = studio();
+    in_pixel(&mut h);
+    let session = &mut h.state_mut().pixel.as_mut().unwrap().app.session;
+    session.execute("layer.newAdjustmentLayer.selectiveColor", serde_json::json!({})).unwrap();
+    h.run_steps(3);
+    // its Cyan slider, in the docked Properties, under its label's row
+    let dock = canvas(&h).max.x;
+    let drag = |h: &mut Harness<'_, crate::StudioShell>, at: egui::Pos2, release_now: bool| {
+        h.event(egui::Event::PointerMoved(at));
+        h.run_steps(1);
+        h.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE });
+        h.run_steps(1);
+        for i in 1..5 {
+            h.event(egui::Event::PointerMoved(at + egui::vec2(12.0 * i as f32, 0.0)));
+            h.run_steps(1);
+        }
+        if release_now {
+            release(h, at + egui::vec2(48.0, 0.0));
+            h.run_steps(3);
+        }
+    };
+    let cyan = painted(&h, "Cyan", |r| r.min.x > dock).expect("Selective Color's Cyan in its Properties");
+    let at = egui::pos2(cyan.min.x + 40.0, cyan.max.y + 14.0);
+    let s0 = pixel_state(&h).0;
+    drag(&mut h, at, true);
+    assert_eq!(pixel_state(&h).0, s0 + 1, "the slider commits at its release");
+    let before = pixel_state(&h).0;
+    drag(&mut h, at, false);
+    assert!(h.ctx.dragged_id().is_some(), "the slider is dragged");
+    block(&mut h);
+    h.event(egui::Event::PointerMoved(at + egui::vec2(80.0, 0.0)));
+    h.run_steps(1);
+    release(&mut h, at + egui::vec2(80.0, 0.0));
+    h.run_steps(3);
+    assert_eq!(pixel_state(&h).0, before, "nothing committed while the rotation waits");
+    land(&mut h);
+    assert_eq!(pixel_state(&h).0, before + 1, "the rotation is the one new state");
+}
 /// T3b: its right dock takes no click: a click on a layer's row in its Layers panel doesn't pick
 /// it; once the render lands, it does.
 #[test]

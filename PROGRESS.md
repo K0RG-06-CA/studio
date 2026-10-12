@@ -248,6 +248,12 @@ In this order, ahead of PRD milestone 6:
        check (the menu's), and without the frame ceiling (both ceiling tests, the shell's and
        `follow::a_render_past_the_ceiling_undoes_the_waiting_step_between_frames_too`). The
        HIGH 2 test stays.
+     - Review fixes (one commit each, each test seen failing first): HIGH: a drag of one of
+       PhotoCraft's widgets still held when the rotation began (an adjustment slider, a guide
+       out of a ruler, a layer's eye) committed at its release under the block: egui keeps a
+       drag, its start and its stop whatever the pointer says, and those widgets commit on
+       them. Such a drag is the block's from the first blocked frame
+       (`t3b_a_drag_held_when_the_rotation_begins_commits_nothing`, Selective Color's slider).
 2. [ ] **Pixel slow-frame fix** (Open items: frames over 0.4 s); the deferred `bench.rs` peak
    bytes during a follow waits on it.
 3. [ ] **Film**.

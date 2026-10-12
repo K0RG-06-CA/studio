@@ -200,13 +200,22 @@ impl Pixel {
     /// none of its widgets is hovered, pressed or dragged. And while it draws, it gets neither the
     /// frame's events (keys, typing, the accessibility tree's clicks) nor the pointer, which its
     /// canvas and dialogs also read themselves (a stroke held from before the block paints no
-    /// further: it has no pointer to follow); both go back to Studio after it.
+    /// further: it has no pointer to follow); both go back to Studio after it. A drag of one of
+    /// its widgets from before the block (or decided under it) is the block's from then on:
+    /// egui keeps a drag, its start and its stop whatever the pointer says, and its sliders and
+    /// rulers commit on them.
     pub fn ui_blocked(&mut self, ui: &mut egui::Ui, area: Rect) {
         let ctx = ui.ctx().clone();
-        egui::Area::new(egui::Id::new("studio.pixel.block"))
+        let block = egui::Area::new(egui::Id::new("studio.pixel.block"))
             .order(egui::Order::Tooltip)
             .fixed_pos(area.min)
-            .show(&ctx, |ui| ui.allocate_exact_size(area.size(), egui::Sense::click_and_drag()));
+            .show(&ctx, |ui| ui.allocate_exact_size(area.size(), egui::Sense::click_and_drag()).1)
+            .inner;
+        let theirs = |id: Option<egui::Id>| id.is_some_and(|id| id != block.id);
+        if theirs(ctx.dragged_id()) || theirs(ctx.drag_started_id()) || theirs(ctx.drag_stopped_id()) {
+            ctx.set_dragged_id(block.id);
+            ctx.stop_dragging();
+        }
         // its style is on only once its `logic` ran since Pixel showed
         if self.studio.is_none() {
             return;
