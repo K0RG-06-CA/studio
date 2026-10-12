@@ -159,7 +159,8 @@ In this order, ahead of PRD milestone 6:
      from Clipboard, Open Recent, Close All, Close Others, Purge. Off (would make a second
      document, which Studio's one document closes at once): Image › Duplicate, Smart Objects ›
      Edit Contents, Crop and Straighten Photos, Photomerge, Merge to HDR Pro, Contact Sheet II,
-     Load Files into Stack. Help's links say they go to upstream ("PhotoCraft upstream website",
+     Load Files into Stack; since the review, Statistics and the batch processors. Help's links
+     say they go to upstream ("PhotoCraft upstream website",
      …), in English in every language, as LightCraft's. The menus are off while a Develop
      geometry change renders (as PhotoCraft's `logic`).
      - Keys: PhotoCraft's keys go where their items route (`pixel_menu::keys`, from its live
@@ -185,6 +186,29 @@ In this order, ahead of PRD milestone 6:
        Studio's commands, dialogs and prompt; Revert; hidden items absent and off items disabled;
        Window › History; the keys; a menu edit is one Pixel step; the menus are off while Develop
        renders; the palette.
+     - Review fixes (one commit each, each test seen failing first): HIGH: Batch, Image Processor
+       and Lens Correction (batch) are off (given their input folder as output they rewrite the
+       library's originals in place, the document's photo among them); Statistics is off (it
+       stacks into a new document, closed at once); an undo key rebound in PhotoCraft's Keyboard
+       Shortcuts is Studio's undo (it ran PhotoCraft's own: the T0 bug); PhotoCraft's own
+       History is kept off every frame, however it was turned on (a workspace key, a saved
+       workspace, its rail button, which does nothing until T4 routes it); Ctrl+Z with a
+       Tab-focused button or slider is Studio's undo in every persona (only a text field keeps
+       its own). The no-op Revert check in its test could not fail; now it can.
+     - Left (LOW): within one frame, Studio's own keys run before PhotoCraft's routed ones, not
+       in the order pressed; the routed keys ignore PhotoCraft's focus rules, so a plain key
+       rebound to an off, hidden or document item is taken while typing in a text field;
+       Revert's prompt offers Save, which saves and reopens (nothing reverted, the history
+       gone); items PhotoCraft adds at runtime (plug-in filters, saved workspaces) are
+       unclassified, so off, and the routing test walks the default state only (Plug-ins'
+       install is Pass); Studio's Reset Workspace and PhotoCraft's don't reopen a History closed
+       by Window › History; Image › Calculations into a new document loses its result (closed at
+       once); PhotoCraft's exports that write where its forms say (Layers to Files, Package,
+       Color Lookup Tables, Artboards, Data Sets, Render Video…) have no guard against the
+       document's source path (their names come from the document or its layers, so only by
+       the user's choice), correcting T3's "can't write"; the palette test proves the close, not
+       that a one-frame palette can't run a command; Alt-click, a Help-search click and
+       `pixel_menu_item`'s re-check of an off or hidden id have no test.
 2. [ ] **Pixel slow-frame fix** (Open items: frames over 0.4 s); the deferred `bench.rs` peak
    bytes during a follow waits on it.
 3. [ ] **Film**.
