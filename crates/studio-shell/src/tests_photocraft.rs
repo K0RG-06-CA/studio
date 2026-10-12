@@ -47,7 +47,7 @@ pub(crate) fn pixel_doc() -> Document {
     doc
 }
 
-fn painted_text(output: &egui::FullOutput) -> String {
+pub(crate) fn painted_text(output: &egui::FullOutput) -> String {
     output
         .shapes
         .iter()

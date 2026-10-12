@@ -134,12 +134,17 @@ impl Pixel {
     /// PhotoCraft's whole window (title bar, options bar, tool bar, dock, document area, its
     /// dialogs and windows), in `ui`, if its `logic` ran this frame (not on the frame Pixel was
     /// picked in the persona bar: the next one draws it). Its command palette is closed after it
-    /// (L19, see `pixel_menu`): opened by its title bar's icon, it shows for that frame only.
+    /// (L19, see `pixel_menu`): opened by its title bar's icon, it shows for that frame only. Its
+    /// own History stays off before and after (D1: its rows would undo past Studio's history),
+    /// however it was turned on: a workspace (its key, a saved one), its rail button (whose click
+    /// lands after its dock is drawn, so it never shows).
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         if std::mem::take(&mut self.ran) {
+            self.app.ui.panels.history = false;
             eframe::App::ui(&mut self.app, ui, &mut self.frame);
         }
         self.app.ui.palette_open = false;
+        self.app.ui.panels.history = false;
     }
 
     /// Where its document tab strip is (above its canvas, while it shows documents), for Studio

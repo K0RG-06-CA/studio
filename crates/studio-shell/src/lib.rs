@@ -1024,8 +1024,6 @@ impl StudioShell {
                 if let Err(e) = photocraft_ui_egui::menus::invoke(&mut px.app, ctx, id, serde_json::json!({})) {
                     px.app.ui.status = e;
                 }
-                // its own History shows its states only (D1): a workspace that turns it on doesn't
-                px.app.ui.panels.history = false;
             }
             Some(pixel_menu::Route::Off | pixel_menu::Route::Hidden) | None => {}
         }

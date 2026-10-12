@@ -276,6 +276,30 @@ fn window_history_is_studios_history_panel() {
     assert!(px.app.ui.panels.history, "PhotoCraft's Photography workspace has its History");
     px.app.ui.panels.history = false;
     h.state_mut().pixel_menu_item(&ctx, "window.workspace.photography");
+    h.run_steps(1);
+    assert!(!h.state().pixel.as_ref().unwrap().app.ui.panels.history);
+}
+
+/// Review: PhotoCraft's own History never shows, however it is turned on past the menus (a
+/// workspace key the user binds, a saved workspace, its rail button): its rows would undo in its
+/// session, past Studio's history.
+#[test]
+fn photocrafts_own_history_never_shows() {
+    let dir = temp_dir("t3m-own-history");
+    let mut h = studio();
+    pixel_edited(&mut h, &dir.join("trip.studio"));
+    // Studio's closed, so a "History" drawn would be PhotoCraft's
+    h.state_mut().run("window.history").unwrap();
+    h.run_steps(2);
+    // its dock tabs are painted, not in the accessibility tree
+    let drawn = |h: &Harness<'_, StudioShell>| crate::tests_photocraft::painted_text(h.output()).split(" | ").filter(|t| *t == "History").count();
+    assert_eq!(drawn(&h), 0);
+    // as its workspace key or a saved workspace does, in its `logic`
+    h.state_mut().pixel.as_mut().unwrap().app.ui.panels.history = true;
+    for _ in 0..3 {
+        h.run_steps(1);
+        assert_eq!(drawn(&h), 0, "PhotoCraft's History drawn");
+    }
     assert!(!h.state().pixel.as_ref().unwrap().app.ui.panels.history);
 }
 
