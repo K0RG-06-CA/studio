@@ -204,6 +204,10 @@ In this order, ahead of PRD milestone 6:
        file (`photocrafts_exports_never_write_over_an_original`, seen failing without the gate).
        A read of one by path is refused too (only a script names one: PhotoCraft has no file
        dialogs here).
+     - LOW fixed (user, 2026-10-12): Image › Calculations is off, as Statistics (its result can
+       go to a new document, which Studio's one document closes at once); so is its result into
+       a channel or selection of the open one
+       (`items_that_make_a_second_document_are_off`, seen failing first).
      - Left (LOW): within one frame, Studio's own keys run before PhotoCraft's routed ones, not
        in the order pressed; the routed keys ignore PhotoCraft's focus rules, so a plain key
        rebound to an off, hidden or document item is taken while typing in a text field;
@@ -211,8 +215,7 @@ In this order, ahead of PRD milestone 6:
        gone); items PhotoCraft adds at runtime (plug-in filters, saved workspaces) are
        unclassified, so off, and the routing test walks the default state only (Plug-ins'
        install is Pass); Studio's Reset Workspace and PhotoCraft's don't reopen a History closed
-       by Window › History; Image › Calculations into a new document loses its result (closed at
-       once); the palette test proves the close, not
+       by Window › History; the palette test proves the close, not
        that a one-frame palette can't run a command; Alt-click, a Help-search click and
        `pixel_menu_item`'s re-check of an off or hidden id have no test.
 2. [ ] **Pixel slow-frame fix** (Open items: frames over 0.4 s); the deferred `bench.rs` peak

@@ -1,7 +1,6 @@
 # PhotoCraft menu items and key bindings Studio runs as PhotoCraft runs them (pixel_menu::Route::Pass):
 # they edit the open document (a Pixel step in Studio's history), or change PhotoCraft's view, panels,
-# tools or preferences. Every id here was reviewed: none opens, saves or closes a document (Image › Calculations
-# can put its result in a new document, which Studio's one document closes: a known LOW).
+# tools or preferences. Every id here was reviewed: none opens, saves, closes or makes a document.
 channel.target.composite
 channel.target.slot3
 channel.target.slot4
@@ -229,7 +228,6 @@ image.applyImage
 image.autoColor
 image.autoContrast
 image.autoTone
-image.calculations
 image.canvasSize
 image.crop
 image.imageRotation.180

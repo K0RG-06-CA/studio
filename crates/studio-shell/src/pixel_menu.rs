@@ -90,6 +90,8 @@ pub fn route(id: &str) -> Option<Route> {
         | "file.automate.contactSheetII"
         | "file.scripts.loadFilesIntoStack"
         | "file.scripts.statistics"
+        // its result can go to a new document
+        | "image.calculations"
         // batch processors: given their input folder as output, they write over the originals
         | "file.automate.batch"
         | "file.scripts.imageProcessor"
@@ -505,10 +507,12 @@ mod tests {
     }
 
     /// What would make a second PhotoCraft document is off: Studio's one document would close it at
-    /// once, its result silently gone (review: Statistics stacks its files into a new document).
+    /// once, its result silently gone (review: Statistics stacks its files into a new document;
+    /// Image › Calculations can put its result in one).
     #[test]
     fn items_that_make_a_second_document_are_off() {
-        for id in ["image.duplicate", "file.scripts.loadFilesIntoStack", "file.scripts.statistics", "file.automate.photomerge"] {
+        for id in ["image.duplicate", "file.scripts.loadFilesIntoStack", "file.scripts.statistics", "file.automate.photomerge", "image.calculations"]
+        {
             assert_eq!(route(id), Some(Route::Off), "{id}");
         }
     }
