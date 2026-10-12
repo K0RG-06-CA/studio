@@ -379,6 +379,50 @@ fn photocrafts_palette_never_stays_open() {
     assert!(!h.state().pixel.as_ref().unwrap().app.ui.palette_open);
 }
 
+/// Review (MEDIUM): PhotoCraft's exports write where their forms say (Layers to Files, a layer's
+/// Export As, Color Lookup Tables…), run here as their forms run them: never over an original
+/// (the library's, the image the document was opened from, the document's own file) nor into an
+/// original's folder; anywhere else they write.
+#[test]
+fn photocrafts_exports_never_write_over_an_original() {
+    let dir = temp_dir("t3m-originals");
+    let [library, opened, saved, free] = ["library", "opened", "saved", "free"].map(|d| dir.join(d));
+    for d in [&library, &opened, &saved, &free] {
+        std::fs::create_dir_all(d).unwrap();
+    }
+    let mut h = studio();
+    h.run_steps(3);
+    let photo = crate::tests_images::image(&library, "photo.png");
+    let lr = &mut h.state_mut().lightroom.as_mut().unwrap().app.session;
+    lr.execute("library.import", &serde_json::json!({"paths": [photo.to_string_lossy()]})).unwrap();
+    let art = crate::tests_images::image(&opened, "art.png");
+    h.state_mut().run_with("document.open", &serde_json::json!({"path": art})).unwrap();
+    let file = saved.join("art.studio");
+    h.state_mut().run_with("document.saveAs", &serde_json::json!({"path": file})).unwrap();
+    h.run_steps(2);
+    let listing = |d: &std::path::Path| {
+        let mut files: Vec<_> =
+            std::fs::read_dir(d).unwrap().map(|e| (e.as_ref().unwrap().file_name(), std::fs::read(e.unwrap().path()).unwrap())).collect();
+        files.sort();
+        files
+    };
+    let before = [&library, &opened, &saved].map(|d| listing(d));
+    let app = &mut h.state_mut().pixel.as_mut().unwrap().app;
+    let refused = [
+        ("layer.exportAs", serde_json::json!({"path": photo})),
+        ("layer.exportAs", serde_json::json!({"path": art})),
+        ("file.export.colorLookupTables", serde_json::json!({"path": file, "size": 17})),
+        ("file.export.layersToFiles", serde_json::json!({"dir": library, "prefix": "photo", "format": "png"})),
+    ];
+    for (id, params) in refused {
+        let e = app.run(id, params.clone()).unwrap_err();
+        assert!(e.contains("never writes over an original"), "{id} {params}: {e}");
+    }
+    assert_eq!([&library, &opened, &saved].map(|d| listing(d)), before, "nothing written");
+    app.run("file.export.layersToFiles", serde_json::json!({"dir": free, "prefix": "art", "format": "png"})).unwrap();
+    assert!(!listing(&free).is_empty(), "written elsewhere");
+}
+
 /// Nothing of PhotoCraft's menus runs while a Develop geometry change is on its way into the
 /// layers (as its own `logic` doesn't): the bar's menus are off.
 #[test]

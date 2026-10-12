@@ -99,6 +99,14 @@ pub struct StudioShell {
     /// Studio's History panel in Pixel is closed (PhotoCraft's Window › History: `window.history`).
     #[serde(skip)]
     pub history_hidden: bool,
+    /// The image file the open document was opened from (a document without a photo): an
+    /// original, as the library's are.
+    #[serde(skip)]
+    pub image_source: Option<PathBuf>,
+    /// What [`pixel::set_originals`] was last given, by a hash of what it came from: the library's
+    /// revision and size, the document's file, its image.
+    #[serde(skip)]
+    pub originals: Option<u64>,
 }
 
 /// What a save returns when its dialog was cancelled: not a failure, nothing to show.
@@ -149,6 +157,8 @@ impl Default for StudioShell {
             held: Vec::new(),
             pointer: None,
             history_hidden: false,
+            image_source: None,
+            originals: None,
         }
     }
 }
@@ -210,9 +220,29 @@ impl StudioShell {
     /// What a command changed in either engine is a history step when it returns, so a step
     /// made right after it (a script's next command) comes after it.
     pub fn run_with(&mut self, id: &str, params: &Value) -> Result<(), String> {
+        self.guard_originals();
         let r = self.dispatch(id, params);
         self.settle();
         r
+    }
+
+    /// What PhotoCraft's commands may never name (`pixel::set_originals`): every original in the
+    /// library, the image the document was opened from, the document's own file. Given again
+    /// when one of them changes, before anything PhotoCraft runs (a frame, a command).
+    fn guard_originals(&mut self) {
+        use std::hash::{BuildHasher, BuildHasherDefault, DefaultHasher};
+        let catalog = self.lightroom.as_ref().map(|lr| &lr.app.session.catalog);
+        let file = self.document.as_ref().and_then(|d| d.path.clone());
+        let key = BuildHasherDefault::<DefaultHasher>::default().hash_one((catalog.map(|c| (c.revision, c.len())), &file, &self.image_source));
+        if self.originals == Some(key) {
+            return;
+        }
+        let library = catalog.into_iter().flat_map(|c| c.photos()).filter_map(|p| match &p.source {
+            lightcraft_engine::catalog::model::Source::File { path } => Some(PathBuf::from(path)),
+            lightcraft_engine::catalog::model::Source::Demo { .. } => None,
+        });
+        pixel::set_originals(library.chain(file).chain(self.image_source.clone()).collect());
+        self.originals = Some(key);
     }
 
     fn dispatch(&mut self, id: &str, params: &Value) -> Result<(), String> {
@@ -354,6 +384,7 @@ impl StudioShell {
                     studio_doc::pixel::close_all(&mut px.app.session);
                 }
                 self.document_path = None;
+                self.image_source = None;
                 Ok(())
             }
             other => Err(format!("unknown command `document.{other}`")),
@@ -470,6 +501,7 @@ impl StudioShell {
         let name = path.file_name().map_or_else(|| path.to_string_lossy(), |n| n.to_string_lossy()).into_owned();
         let (doc, warnings) = Document::from_image(&name, &bytes)?;
         self.replace(doc)?;
+        self.image_source = Some(path.to_path_buf());
         if !warnings.is_empty() {
             self.error = Some((format!("Opened \u{201c}{name}\u{201d} with warnings"), warnings.join("\n")));
         }
@@ -478,6 +510,7 @@ impl StudioShell {
 
     fn replace(&mut self, mut doc: Document) -> Result<(), String> {
         self.document_path = doc.path.clone();
+        self.image_source = None;
         // its pixels' home from now on (whatever PhotoCraft held goes)
         if let Some(px) = &mut self.pixel {
             doc.attach(&mut px.app.session);
@@ -674,6 +707,7 @@ impl StudioShell {
         if let Some(pos) = ui.input(|i| i.pointer.latest_pos()) {
             self.pointer = Some(pos);
         }
+        self.guard_originals();
         self.document_tick(ui.ctx());
         // egui repaints only on input: keep polling for the render while one is in flight (one
         // held for a gesture goes in on the input that ends it)

@@ -30,8 +30,9 @@ use studio_doc::Document;
 pub enum Route {
     /// As PhotoCraft runs it (`menus::invoke`): it edits the open document (a Pixel step in
     /// Studio's history), or changes PhotoCraft's view, panels, tools or preferences. Its exports
-    /// write new files named after the document or its layers where the user says (those of its
-    /// own save dialog can't: Studio gives it no file services), never the document's file.
+    /// write new files named after the document or its layers where their forms say (those of its
+    /// own save dialog can't: Studio gives it no file services), never over an original nor into
+    /// its folder (`pixel::gate`).
     Pass,
     /// Studio's `document.*` command: its prompt, its never-overwrite-the-source rule.
     Document(&'static str),

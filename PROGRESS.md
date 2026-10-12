@@ -195,6 +195,15 @@ In this order, ahead of PRD milestone 6:
        workspace, its rail button, which does nothing until T4 routes it); Ctrl+Z with a
        Tab-focused button or slider is Studio's undo in every persona (only a text field keeps
        its own). The no-op Revert check in its test could not fail; now it can.
+     - Raised from LOW to MEDIUM (user, 2026-10-12), fixed: PhotoCraft's exports that write
+       where their forms say (Layers to Files, Package, Color Lookup Tables, Artboards, Data Sets,
+       Render Video, a layer's Export As…) never write over an original. Studio's gate on its
+       session (`Session::authorize`, which every command and every step one runs passes:
+       `pixel::gate`) refuses a command whose parameters name an original or a folder holding
+       one: the library's originals, the image the document was opened from, the document's own
+       file (`photocrafts_exports_never_write_over_an_original`, seen failing without the gate).
+       A read of one by path is refused too (only a script names one: PhotoCraft has no file
+       dialogs here).
      - Left (LOW): within one frame, Studio's own keys run before PhotoCraft's routed ones, not
        in the order pressed; the routed keys ignore PhotoCraft's focus rules, so a plain key
        rebound to an off, hidden or document item is taken while typing in a text field;
@@ -203,10 +212,7 @@ In this order, ahead of PRD milestone 6:
        unclassified, so off, and the routing test walks the default state only (Plug-ins'
        install is Pass); Studio's Reset Workspace and PhotoCraft's don't reopen a History closed
        by Window › History; Image › Calculations into a new document loses its result (closed at
-       once); PhotoCraft's exports that write where its forms say (Layers to Files, Package,
-       Color Lookup Tables, Artboards, Data Sets, Render Video…) have no guard against the
-       document's source path (their names come from the document or its layers, so only by
-       the user's choice), correcting T3's "can't write"; the palette test proves the close, not
+       once); the palette test proves the close, not
        that a one-frame palette can't run a command; Alt-click, a Help-search click and
        `pixel_menu_item`'s re-check of an off or hidden id have no test.
 2. [ ] **Pixel slow-frame fix** (Open items: frames over 0.4 s); the deferred `bench.rs` peak

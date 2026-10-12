@@ -49,11 +49,56 @@
 //! }
 //! ```
 
+use std::cell::RefCell;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use egui::{Rect, Theme, ThemePreference};
 use photocraft_ui_egui::PhotocraftApp;
 use photocraft_ui_egui::native_menu::{Backend, Event, MenuBar, NativeMenu};
+use serde_json::Value;
+
+thread_local! {
+    /// What PhotoCraft's commands may not name ([`gate`]), as the shell last set it
+    /// ([`set_originals`]): per thread, as its session's gate is a plain `fn`, run on the session's
+    /// thread.
+    static ORIGINALS: RefCell<Vec<PathBuf>> = const { RefCell::new(Vec::new()) };
+}
+
+/// The files no PhotoCraft command may write over: the library's originals, the image the
+/// document was opened from, the document's own file.
+pub fn set_originals(paths: Vec<PathBuf>) {
+    ORIGINALS.set(paths);
+}
+
+/// Studio's gate on PhotoCraft's session (`Session::authorize`, which every command passes, and
+/// every step one runs on its behalf): a command whose parameters name an original, or a folder
+/// holding one, is refused. Its exports write where their forms say (Layers to Files, Package,
+/// Render Video, Color Lookup Tables, a layer's Export As…: any folder or file), so none writes
+/// over an original, nor (given its folder) over one named like a layer. A read of one by path is
+/// refused too; PhotoCraft has no file dialogs here, so only a script names one.
+fn gate(id: &str, params: &Value) -> photocraft_engine::Result<()> {
+    fn strings<'v>(v: &'v Value, out: &mut Vec<&'v str>) {
+        match v {
+            Value::String(s) => out.push(s),
+            Value::Array(a) => a.iter().for_each(|v| strings(v, out)),
+            Value::Object(o) => o.values().for_each(|v| strings(v, out)),
+            _ => {}
+        }
+    }
+    let mut named = Vec::new();
+    strings(params, &mut named);
+    // ponytail: every original is resolved again for each existing path a command names (exports
+    // only, in practice); a set kept with the library's revision if a big library makes that slow
+    let hit = named.into_iter().find(|s| {
+        let Ok(p) = std::fs::canonicalize(s) else { return false };
+        ORIGINALS.with_borrow(|o| o.iter().filter_map(|o| std::fs::canonicalize(o).ok()).any(|o| o == p || o.parent() == Some(p.as_path())))
+    });
+    match hit {
+        Some(s) => Err(photocraft_engine::EngineError::Other(format!("{id}: Studio never writes over an original, nor into its folder ({s})"))),
+        None => Ok(()),
+    }
+}
 
 pub struct Pixel {
     /// PhotoCraft's editor; its session holds the open document's pixels.
@@ -88,11 +133,13 @@ pub fn hide_menus(app: &mut PhotocraftApp) {
 }
 
 impl Pixel {
-    /// PhotoCraft as it ships, but for two things: its History panel is off (the document's
-    /// history is Studio's, across personas: D1) and its menus are hidden.
+    /// PhotoCraft as it ships, but for three things: its History panel is off (the document's
+    /// history is Studio's, across personas: D1), its menus are hidden, and its commands pass
+    /// Studio's [`gate`].
     pub fn new(mut app: PhotocraftApp) -> Self {
         app.ui.panels.history = false;
         hide_menus(&mut app);
+        app.session.authorize = Some(gate);
         Pixel { app, frame: eframe::Frame::_new_kittest(), frames: 0, ran: false, style: None, studio: None }
     }
 
