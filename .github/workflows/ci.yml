@@ -59,4 +59,9 @@ jobs:
 
       # Headless egui_kittest tests; the GPU `render_personas` test is #[ignore]d (no GPU on runners).
       - name: Test
-        run: cargo test --workspace --locked
+        run: cargo test --workspace --exclude studio-shell --locked
+
+      # 2 threads, as locally: with the default count, its demo renders waited past their 300 s
+      # limits on the x64 runners
+      - name: Test studio-shell
+        run: cargo test -p studio-shell --locked -- --test-threads=2
