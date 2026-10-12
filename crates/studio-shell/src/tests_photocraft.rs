@@ -1691,6 +1691,47 @@ fn t3b_a_drag_held_when_the_rotation_begins_commits_nothing() {
     land(&mut h);
     assert_eq!(pixel_state(&h).0, before + 1, "the rotation is the one new state");
 }
+/// Review: a Layers row drag still held when a rotation begins leaves no drag behind: released
+/// under the block, PhotoCraft never saw the release that ends it, so its marker stayed and the
+/// next click-release on a row dropped that layer there (onto the locked Develop layer: refused).
+#[test]
+fn t3b_a_layer_row_drag_held_when_the_rotation_begins_leaves_no_drag() {
+    let mut h = studio();
+    in_pixel(&mut h);
+    let marker = |h: &Harness<'_, crate::StudioShell>| h.ctx.data(|d| d.get_temp::<u64>(egui::Id::new("layer-drag")));
+    // its row in the Layers panel: the "Paint" clipped to one row (Properties and Studio's History
+    // show the name too)
+    let row = h
+        .output()
+        .shapes
+        .iter()
+        .find_map(|c| match &c.shape {
+            egui::Shape::Text(t) if t.galley.text() == "Paint" && c.clip_rect.height() < 40.0 => Some(t.visual_bounding_rect().center()),
+            _ => None,
+        })
+        .expect("the Paint row in the Layers panel");
+    h.event(egui::Event::PointerMoved(row));
+    h.run_steps(1);
+    h.event(egui::Event::PointerButton { pos: row, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE });
+    h.run_steps(1);
+    for i in 1..4 {
+        h.event(egui::Event::PointerMoved(row + egui::vec2(0.0, 6.0 * i as f32)));
+        h.run_steps(1);
+    }
+    assert!(marker(&h).is_some(), "the row is dragged");
+    block(&mut h);
+    release(&mut h, row + egui::vec2(0.0, 18.0));
+    h.run_steps(3);
+    land(&mut h);
+    assert_eq!(marker(&h), None, "no drag left");
+    let before = pixel_state(&h);
+    let dock = canvas(&h).max.x;
+    let base = painted(&h, studio_doc::BASE_LAYER, |r| r.min.x > dock).expect("the Develop layer's row").center();
+    crate::tests_lightcraft::click_at(&mut h, base);
+    h.run_steps(2);
+    assert_eq!((pixel_state(&h), h.state().error.clone()), (before, None), "a click picks the row, it drops nothing there");
+}
+
 /// Review: a stroke held when a rotation begins, as it really goes (no render held back by the
 /// test): the render finishes under the held button and waits, the release lands it, and the
 /// stroke paints nothing then either; the rotation is the one new state.

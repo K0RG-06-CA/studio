@@ -216,6 +216,9 @@ impl Pixel {
             ctx.set_dragged_id(block.id);
             ctx.stop_dragging();
         }
+        // and a Layers row's: it marks the row itself, and ends it only at a release it sees (a
+        // later click-release on a row or footer button would drop that layer there)
+        ctx.data_mut(|d| d.remove::<u64>(egui::Id::new("layer-drag")));
         // its style is on only once its `logic` ran since Pixel showed
         if self.studio.is_none() {
             return;
