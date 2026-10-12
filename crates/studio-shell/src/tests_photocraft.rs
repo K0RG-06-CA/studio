@@ -1868,3 +1868,27 @@ fn t3b_a_render_past_the_ceiling_rolls_back_and_lifts_the_block() {
     h.run_steps(3);
     assert_ne!(pixel_state(&h), before, "the block lifted: a stroke paints");
 }
+
+/// Review (MEDIUM): a Free Transform open when a rotation begins doesn't hold its render back:
+/// under the block nothing can end the transform, so the render waited in vain until the
+/// ceiling undid the rotation ("took longer"). It lands, as a save or an undo lands it.
+#[test]
+fn t3b_a_free_transform_open_when_the_rotation_begins_doesnt_hold_its_render() {
+    let mut h = studio();
+    in_pixel(&mut h);
+    let ctx = h.ctx.clone();
+    photocraft_ui_egui::menus::invoke(&mut h.state_mut().pixel.as_mut().unwrap().app, &ctx, "edit.freeTransform", serde_json::json!({})).unwrap();
+    h.run_steps(2);
+    assert!(h.state().pixel.as_ref().unwrap().app.ui.transform.is_some(), "Free Transform is open");
+    // long enough for any render here; a held one only ever ends at it
+    h.state_mut().base.ceiling = Some(std::time::Duration::from_secs(120));
+    rotate_left(&mut h);
+    h.run_steps(1);
+    let t0 = std::time::Instant::now();
+    while h.state().develop_rendering() {
+        assert!(t0.elapsed().as_secs() < 300, "never landed");
+        h.run_steps(1);
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert_ne!(h.state().document.as_ref().unwrap().develop.orientation, Default::default(), "the rotation landed: {:?}", h.state().error);
+}

@@ -597,10 +597,12 @@ impl StudioShell {
     /// The document's base layer follows its photo's develop settings; once per frame.
     fn document_tick(&mut self, ctx: &egui::Context) {
         // a Pixel gesture in progress (a stroke or drag: a button held; Free Transform; typing):
-        // a new render waits until it ends
+        // a new render waits until it ends. Not a Free Transform or typing while a Develop
+        // geometry change waits for its render: Pixel's block leaves nothing that could end them,
+        // so the render lands under them, as a save or an undo lands it (`flush`)
+        let open = |px: &pixel::Pixel| px.app.ui.transform.is_some() || px.app.ui.text_edit.is_some();
         self.base.hold = self.persona == Persona::Pixel
-            && (ctx.input(|i| i.pointer.any_down())
-                || self.pixel.as_ref().is_some_and(|px| px.app.ui.transform.is_some() || px.app.ui.text_edit.is_some()));
+            && (ctx.input(|i| i.pointer.any_down()) || (!self.develop_rendering() && self.pixel.as_ref().is_some_and(open)));
         #[cfg(test)]
         {
             self.base.hold |= self.hold_renders;

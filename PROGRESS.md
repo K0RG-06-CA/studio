@@ -254,6 +254,12 @@ In this order, ahead of PRD milestone 6:
        drag, its start and its stop whatever the pointer says, and those widgets commit on
        them. Such a drag is the block's from the first blocked frame
        (`t3b_a_drag_held_when_the_rotation_begins_commits_nothing`, Selective Color's slider).
+       MEDIUM: a Free Transform or type open when the rotation began held its render back, and
+       under the block nothing could end them, so the ceiling undid the rotation ("took longer
+       than 30 s"); now only a held button holds it while the block is up, and the render lands
+       under them, as a save or an undo lands it
+       (`t3b_a_free_transform_open_when_the_rotation_begins_doesnt_hold_its_render`). Test added:
+       a held stroke as it really goes, its release landing the render.
 2. [ ] **Pixel slow-frame fix** (Open items: frames over 0.4 s); the deferred `bench.rs` peak
    bytes during a follow waits on it.
 3. [ ] **Film**.

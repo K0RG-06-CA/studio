@@ -171,7 +171,8 @@ impl Base {
         if !doc.history.pending_follow() {
             return Ok(());
         }
-        // no gesture can be open in Pixel while it is barred: a render held for one goes in now
+        // a render held for a Pixel gesture goes in now (one still open, a Free Transform or
+        // type, is applied after it, by the shell's flush)
         self.hold = false;
         let ceiling = self.ceiling.unwrap_or(FOLLOW_CEILING);
         // counted from when the step began waiting, frames included
