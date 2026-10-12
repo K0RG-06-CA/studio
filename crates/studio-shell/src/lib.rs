@@ -1094,7 +1094,7 @@ impl StudioShell {
         if let Some(px) = self.pixel.as_ref().filter(|_| self.persona == Persona::Pixel)
             && ui.input(|i| i.events.iter().any(|e| matches!(e, egui::Event::Key { pressed: true, .. })))
         {
-            let routed = pixel_menu::keys(&px.app);
+            let routed = pixel_menu::keys(&px.app, typing);
             pressed.extend(ui.input_mut(|i| pixel_menu::take_keys(i, &routed)));
         }
         if self.persona == Persona::Pixel {

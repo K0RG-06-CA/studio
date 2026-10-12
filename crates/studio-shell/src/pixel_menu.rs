@@ -143,13 +143,22 @@ pub fn items(app: &PhotocraftApp, doc: Option<&Document>, history_shown: bool, t
 }
 
 /// PhotoCraft's keys that Studio takes in Pixel, by what their item routes to: Studio's command
-/// to run, or none (dropped: the item is off, hidden or unclassified). Undo, redo and quit keys
-/// aren't here (Studio's own keys, `UNDO_KEYS`, take them only while it has a document and the
-/// user isn't typing), nor are the keys of items that run as PhotoCraft runs them.
-pub fn keys(app: &PhotocraftApp) -> Vec<(KeyboardShortcut, Option<&'static str>)> {
+/// to run, or none (dropped: the item is off, hidden or unclassified). Undo, redo and the toggle
+/// are Studio's history, whatever key the user gave them, but not while `typing` (a text field's
+/// own undo); Studio's `UNDO_KEYS` already took Photoshop's. Not here: the quit key (Studio's
+/// close guard sees PhotoCraft's Exit too), and the keys of items that run as PhotoCraft runs them.
+pub fn keys(app: &PhotocraftApp, typing: bool) -> Vec<(KeyboardShortcut, Option<&'static str>)> {
     photocraft_ui_egui::shortcut_dispatch::bindings(app)
         .into_iter()
         .filter_map(|(id, sc)| match route(&id) {
+            Some(Route::History) if !typing => Some((
+                sc,
+                Some(match id.as_str() {
+                    "edit.redo" => "edit.redo",
+                    "edit.toggleLastState" => "edit.toggleLastState",
+                    _ => "edit.undo",
+                }),
+            )),
             Some(Route::Pass | Route::History | Route::Quit) => None,
             Some(Route::Document(cmd)) => Some((sc, Some(cmd))),
             Some(Route::HistoryPanel) => Some((sc, Some("window.history"))),
@@ -506,7 +515,7 @@ mod tests {
     /// PhotoCraft's keys go where their items route: Studio's command, or dropped.
     #[test]
     fn photocrafts_keys_follow_their_items() {
-        let keys = keys(&app());
+        let keys = keys(&app(), false);
         let of = |s: &str| shortcuts::parse(s).and_then(|sc| keys.iter().find(|(k, _)| *k == sc)).map(|(_, cmd)| *cmd);
         assert_eq!(of("F12"), Some(Some("document.revert")));
         assert_eq!(of("Cmd+Alt+Shift+O"), Some(Some("document.open")));
@@ -515,7 +524,9 @@ mod tests {
         assert_eq!(of("Cmd+Alt+P"), Some(None), "Close Others: dropped");
         assert_eq!(of("Cmd+K"), Some(None), "the palette: dropped");
         assert_eq!(of("Cmd+L"), None, "Levels: PhotoCraft's own");
-        assert_eq!(of("Cmd+Z"), None, "undo: Studio's own keys take it, or the text field");
+        assert_eq!(of("Cmd+Z"), Some(Some("edit.undo")), "undo: Studio's history");
+        let typing = super::keys(&app(), true);
+        assert!(!typing.iter().any(|(_, cmd)| *cmd == Some("edit.undo")), "a text field's own undo");
     }
 
     /// The items Studio hides are absent from the model it draws; those it routes are there.

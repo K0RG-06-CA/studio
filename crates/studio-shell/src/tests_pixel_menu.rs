@@ -120,6 +120,29 @@ fn photocrafts_menus_leave_room_for_the_persona_buttons() {
     assert_eq!(h.state().persona, crate::Persona::Library);
 }
 
+/// Review: an undo key the user binds in PhotoCraft's Keyboard Shortcuts is Studio's undo too,
+/// as Ctrl+Z is: PhotoCraft's own undo would take two steps at once (the T0 bug).
+#[test]
+fn a_rebound_undo_key_is_studios_undo() {
+    let mut h = studio();
+    h.run_steps(3);
+    pick_first(&mut h);
+    h.state_mut().run("document.new").unwrap();
+    settle_base(&mut h);
+    crate::tests_photocraft::add_layer(&mut h, "Paint");
+    h.run_steps(1);
+    let lr = h.state_mut().lightroom.as_mut().unwrap();
+    lr.app.run("develop.set", serde_json::json!({"control": "light.exposure", "value": 1.0})).unwrap();
+    h.run_steps(1);
+    h.state_mut().run("persona.pixel").unwrap();
+    h.run_steps(3);
+    let px = h.state_mut().pixel.as_mut().unwrap();
+    px.app.session.edit_prefs(|p| p.shortcuts.insert("edit.undo".into(), "Cmd+U".into()));
+    press(&mut h, egui::Modifiers::COMMAND, egui::Key::U);
+    h.run_steps(2);
+    assert_eq!((layers(&h), history(&h).1), (2, 1), "only the Develop step undone");
+}
+
 /// A PhotoCraft menu item that edits the document runs as PhotoCraft runs it: one Pixel step.
 #[test]
 fn a_photocraft_menu_edit_is_one_pixel_step() {
