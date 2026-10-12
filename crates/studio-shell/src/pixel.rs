@@ -194,6 +194,31 @@ impl Pixel {
         self.app.ui.panels.history = false;
     }
 
+    /// Its window while a Develop geometry change is on its way into its layers (its `logic`
+    /// doesn't run then): drawn, but given no input. A transparent area over `area`, above all its
+    /// layers (its windows, its modal dialogs, their popups), is what the pointer points at, so
+    /// none of its widgets is hovered, pressed or dragged. And while it draws, it gets neither the
+    /// frame's events (keys, typing, the accessibility tree's clicks) nor the pointer, which its
+    /// canvas and dialogs also read themselves (a stroke held from before the block paints no
+    /// further: it has no pointer to follow); both go back to Studio after it.
+    pub fn ui_blocked(&mut self, ui: &mut egui::Ui, area: Rect) {
+        let ctx = ui.ctx().clone();
+        egui::Area::new(egui::Id::new("studio.pixel.block"))
+            .order(egui::Order::Tooltip)
+            .fixed_pos(area.min)
+            .show(&ctx, |ui| ui.allocate_exact_size(area.size(), egui::Sense::click_and_drag()));
+        // its style is on only once its `logic` ran since Pixel showed
+        if self.studio.is_none() {
+            return;
+        }
+        let saved = ctx.input_mut(|i| (std::mem::take(&mut i.events), std::mem::take(&mut i.raw.events), std::mem::take(&mut i.pointer)));
+        self.app.ui.panels.history = false;
+        eframe::App::ui(&mut self.app, ui, &mut self.frame);
+        ctx.input_mut(|i| (i.events, i.raw.events, i.pointer) = saved);
+        self.app.ui.palette_open = false;
+        self.app.ui.panels.history = false;
+    }
+
     /// Where its document tab strip is (above its canvas, while it shows documents), for Studio
     /// to cover (L15).
     pub fn tab_strip(&self, ctx: &egui::Context) -> Option<Rect> {

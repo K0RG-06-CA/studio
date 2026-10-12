@@ -107,6 +107,11 @@ pub struct StudioShell {
     /// revision and size, the document's file, its image.
     #[serde(skip)]
     pub originals: Option<u64>,
+    /// Tests: a finished render waits, as under a Pixel gesture, so a Develop step stays on its
+    /// way into the layers until this is cleared (or something waits for it).
+    #[cfg(test)]
+    #[serde(skip)]
+    pub(crate) hold_renders: bool,
 }
 
 /// What a save returns when its dialog was cancelled: not a failure, nothing to show.
@@ -162,6 +167,8 @@ impl Default for StudioShell {
             history_hidden: false,
             image_source: None,
             originals: None,
+            #[cfg(test)]
+            hold_renders: false,
         }
     }
 }
@@ -594,6 +601,10 @@ impl StudioShell {
         self.base.hold = self.persona == Persona::Pixel
             && (ctx.input(|i| i.pointer.any_down())
                 || self.pixel.as_ref().is_some_and(|px| px.app.ui.transform.is_some() || px.app.ui.text_edit.is_some()));
+        #[cfg(test)]
+        {
+            self.base.hold |= self.hold_renders;
+        }
         if let (Some(doc), Some(lr), Some(px)) = (&mut self.document, &mut self.lightroom, &mut self.pixel) {
             if let Err(e) = self.base.sync(&mut lr.app.session, &mut px.app.session, doc) {
                 self.base_error = Some(e);
@@ -941,20 +952,27 @@ impl StudioShell {
     }
 
     /// Pixel: PhotoCraft's whole window, as it ships. Studio adds only what the document needs:
-    /// - nothing at all while a Develop geometry change is on its way into the layers (its
-    ///   `logic` doesn't run then, so neither does its `ui`: its canvas, panels and windows would
-    ///   edit the layers the render is about to turn);
+    /// - no input while a Develop geometry change is on its way into the layers (T3b; its
+    ///   `logic` doesn't run then either): its canvas, dock, windows and dialogs would edit the
+    ///   layers the render is about to turn. It stays drawn, under Studio's block
+    ///   ([`pixel::Pixel::ui_blocked`]; Studio's History is under it too); Studio's keys wait for
+    ///   the render (an undo, a save: as in milestone 5), its own do nothing;
     /// - its document tab strip covered (L15: its × and Close would close the document past
     ///   Studio's close; Ctrl+W and Studio's commands close it);
     /// - "Rendering Develop…" over its canvas while the base layer is behind Develop;
     /// - Studio's History, floating at the left edge of its dock (D1; until T4 restyles it),
     ///   unless its Window › History closed it.
     fn pixel_area(&mut self, ui: &mut egui::Ui) {
+        let blocked = self.develop_rendering();
         let Some(px) = self.pixel.as_mut() else { return };
         // its views follow its documents first: a document Studio opened since its `logic`
         // (which syncs them) ran, and its panels index them unchecked
         px.app.sync_views();
-        px.ui(ui);
+        if blocked {
+            px.ui_blocked(ui, ui.available_rect_before_wrap());
+        } else {
+            px.ui(ui);
+        }
         if let Some(strip) = px.tab_strip(ui.ctx()) {
             ui.interact(strip, egui::Id::new("studio.pixel.tab_strip"), egui::Sense::click());
         }

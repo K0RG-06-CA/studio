@@ -1522,3 +1522,273 @@ fn quitting_without_saving_says_nothing_about_photocrafts_documents() {
     assert!(s.document.is_none() && s.pixel.as_ref().unwrap().app.session.documents().is_empty());
     assert_eq!(s.error, None);
 }
+
+// --- T3b: Pixel stays drawn while a Develop rotation renders, and takes no input ---
+
+/// The rect of the painted text `text` that `pick` keeps (PhotoCraft paints its rows, tabs and
+/// pills; they aren't in the accessibility tree).
+fn painted(h: &Harness<'_, crate::StudioShell>, text: &str, pick: impl Fn(Rect) -> bool) -> Option<Rect> {
+    h.output().shapes.iter().find_map(|c| match &c.shape {
+        egui::Shape::Text(t) if t.galley.text() == text && pick(t.visual_bounding_rect()) => Some(t.visual_bounding_rect()),
+        _ => None,
+    })
+}
+
+/// PhotoCraft's window is drawn: its options bar shows.
+fn photocraft_drawn(h: &Harness<'_, crate::StudioShell>) -> bool {
+    painted_text(h.output()).contains("Smoothing:")
+}
+
+/// A painted document open in Pixel, with the brush.
+fn in_pixel(h: &mut Harness<'_, crate::StudioShell>) {
+    painted_document(h);
+    h.state_mut().run("persona.pixel").unwrap();
+    h.state_mut().run_with("pixel.tool", &serde_json::json!({"name": "brush"})).unwrap();
+    h.run_steps(3);
+}
+
+/// A scripted Develop rotation (as MCP will make one) while Pixel shows, its render held back
+/// (`hold_renders`) so it stays on its way into the layers until [`land`].
+fn block(h: &mut Harness<'_, crate::StudioShell>) {
+    h.state_mut().hold_renders = true;
+    rotate_left(h);
+    h.run_steps(2);
+    assert!(h.state().develop_rendering());
+    assert!(photocraft_drawn(h), "Pixel shows while it waits");
+}
+
+/// The held render lands: the block lifts.
+fn land(h: &mut Harness<'_, crate::StudioShell>) {
+    h.state_mut().hold_renders = false;
+    let t0 = std::time::Instant::now();
+    while h.state().develop_rendering() {
+        assert!(t0.elapsed().as_secs() < 300, "the render never landed");
+        h.run_steps(1);
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    h.run_steps(2);
+}
+
+/// What a Pixel edit would change: PhotoCraft's states and the document's layers' pixels.
+/// A layer's name, visibility and painted bounds.
+type LayerState = (String, bool, Option<(i32, i32, i32, i32)>);
+
+fn pixel_state(h: &Harness<'_, crate::StudioShell>) -> (usize, Vec<LayerState>) {
+    let st = h.state().pixel.as_ref().unwrap().app.session.active().unwrap();
+    let layers = st
+        .doc
+        .layers
+        .iter()
+        .map(|l| {
+            let b = l.surface().map(photocraft_compose::bounds::content_bounds).filter(|b| !b.is_empty());
+            (l.name.clone(), l.visible, b.map(|b| (b.x0, b.y0, b.x1, b.y1)))
+        })
+        .collect();
+    (st.history.past_len(), layers)
+}
+
+/// T3b: while a Develop rotation is on its way into the layers, PhotoCraft's window stays drawn
+/// (before T3b it went blank), and a brush stroke on its canvas paints nothing, PhotoCraft drawn
+/// throughout; once the render lands, a stroke paints.
+#[test]
+fn t3b_the_canvas_takes_no_stroke_while_develop_renders() {
+    let mut h = studio();
+    in_pixel(&mut h);
+    block(&mut h);
+    let before = pixel_state(&h);
+    // what the pointer finds over its canvas is Studio's block, not PhotoCraft
+    let block = egui::LayerId::new(egui::Order::Tooltip, egui::Id::new("studio.pixel.block"));
+    assert_eq!(h.ctx.layer_id_at(canvas(&h).center()), Some(block));
+    let end = stroke_down(&mut h);
+    assert!(photocraft_drawn(&h), "drawn while the button is held");
+    release(&mut h, end);
+    h.run_steps(3);
+    assert!(h.state().develop_rendering() && photocraft_drawn(&h));
+    assert_eq!(pixel_state(&h), before, "nothing painted");
+    land(&mut h);
+    let landed = pixel_state(&h);
+    let end = stroke_down(&mut h);
+    release(&mut h, end);
+    h.run_steps(3);
+    assert_ne!(pixel_state(&h), landed, "the block lifted: a stroke paints");
+}
+
+/// T3b: a stroke still held when a rotation begins (a script's, while the user paints) is called
+/// off: it paints nothing, not while the rotation waits nor after it lands, and the rotation is
+/// the one new state.
+#[test]
+fn t3b_a_stroke_held_when_the_rotation_begins_paints_nothing() {
+    let mut h = studio();
+    in_pixel(&mut h);
+    let before = pixel_state(&h);
+    let c = canvas(&h).center();
+    h.event(egui::Event::PointerMoved(c));
+    h.event(egui::Event::PointerButton { pos: c, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE });
+    h.run_steps(1);
+    for i in 1..4 {
+        h.event(egui::Event::PointerMoved(c + egui::vec2(8.0 * i as f32, 0.0)));
+        h.run_steps(1);
+    }
+    h.state_mut().hold_renders = true;
+    rotate_left(&mut h);
+    for i in 4..9 {
+        h.event(egui::Event::PointerMoved(c + egui::vec2(8.0 * i as f32, 0.0)));
+        h.run_steps(1);
+        assert!(h.state().develop_rendering() && photocraft_drawn(&h), "drawn while it waits");
+    }
+    assert_eq!(pixel_state(&h), before, "nothing painted");
+    release(&mut h, c + egui::vec2(64.0, 0.0));
+    h.run_steps(3);
+    assert_eq!(pixel_state(&h), before, "nor at the release");
+    land(&mut h);
+    h.run_steps(3);
+    let (states, layers) = pixel_state(&h);
+    assert_eq!(states, before.0 + 1, "the rotation is the one new state");
+    assert_eq!(layers[1].2, Some((100, 299, 101, 300)), "only the old pixel, turned");
+}
+
+/// T3b: its right dock takes no click: a click on a layer's row in its Layers panel doesn't pick
+/// it; once the render lands, it does.
+#[test]
+fn t3b_the_right_dock_takes_no_click_while_develop_renders() {
+    let mut h = studio();
+    in_pixel(&mut h);
+    let active = |h: &Harness<'_, crate::StudioShell>| {
+        let st = h.state().pixel.as_ref().unwrap().app.session.active().unwrap();
+        st.active_layer.and_then(|id| st.doc.layer(id)).map(|l| l.name.clone())
+    };
+    assert_eq!(active(&h).as_deref(), Some("Paint"));
+    block(&mut h);
+    let dock = canvas(&h).max.x;
+    let row = painted(&h, studio_doc::BASE_LAYER, |r| r.min.x > dock).expect("the Develop layer's row in the dock");
+    crate::tests_lightcraft::click_at(&mut h, row.center());
+    assert_eq!(active(&h).as_deref(), Some("Paint"), "the row wasn't picked");
+    land(&mut h);
+    let row = painted(&h, studio_doc::BASE_LAYER, |r| r.min.x > dock).unwrap();
+    crate::tests_lightcraft::click_at(&mut h, row.center());
+    assert_eq!(active(&h).as_deref(), Some(studio_doc::BASE_LAYER), "picked once it landed");
+}
+
+/// A middle-button drag across the canvas's left part (clear of a dialog centred on the window).
+fn middle_drag(h: &mut Harness<'_, crate::StudioShell>) {
+    let c = canvas(h);
+    let at = egui::pos2(c.min.x + 40.0, c.center().y);
+    h.event(egui::Event::PointerMoved(at));
+    h.event(egui::Event::PointerButton { pos: at, button: egui::PointerButton::Middle, pressed: true, modifiers: egui::Modifiers::NONE });
+    h.run_steps(1);
+    for i in 1..5 {
+        h.event(egui::Event::PointerMoved(at + egui::vec2(10.0 * i as f32, 0.0)));
+        h.run_steps(1);
+    }
+    h.event(egui::Event::PointerButton {
+        pos: at + egui::vec2(40.0, 0.0),
+        button: egui::PointerButton::Middle,
+        pressed: false,
+        modifiers: egui::Modifiers::NONE,
+    });
+    h.run_steps(2);
+}
+
+/// T3b: its dialogs (ctx-level modal windows) take no click and no key: Levels, open when the
+/// rotation began, isn't applied by its OK nor by Enter, and stays open; nor does a middle drag
+/// on the canvas pan the view under it (PhotoCraft reads that pointer itself). Once the render
+/// lands, the drag pans and OK applies it.
+#[test]
+fn t3b_photocrafts_dialogs_take_no_click_or_key_while_develop_renders() {
+    let mut h = studio();
+    in_pixel(&mut h);
+    press(&mut h, egui::Modifiers::COMMAND, egui::Key::L);
+    h.run_steps(2);
+    let open = |h: &Harness<'_, crate::StudioShell>| !h.state().pixel.as_ref().unwrap().app.ui.dialogs.is_empty();
+    let view = |h: &Harness<'_, crate::StudioShell>| h.state().pixel.as_ref().unwrap().app.ui.views[0].center;
+    assert!(open(&h), "Levels is open");
+    block(&mut h);
+    let before = pixel_state(&h);
+    let ok = h.get_by_label("OK").rect();
+    crate::tests_lightcraft::click_at(&mut h, ok.center());
+    press(&mut h, egui::Modifiers::NONE, egui::Key::Enter);
+    h.run_steps(2);
+    assert!(open(&h) && h.query_by_label("OK").is_some(), "Levels stays open");
+    assert_eq!(pixel_state(&h).0, before.0, "nothing applied");
+    let centre = view(&h);
+    middle_drag(&mut h);
+    assert_eq!(view(&h), centre, "the view didn't pan");
+    land(&mut h);
+    let centre = view(&h);
+    middle_drag(&mut h);
+    assert_ne!(view(&h), centre, "it pans once the render landed");
+    let landed = pixel_state(&h).0;
+    let ok = h.get_by_label("OK").rect();
+    crate::tests_lightcraft::click_at(&mut h, ok.center());
+    assert!(!open(&h), "OK closes it once the render landed");
+    assert_eq!(pixel_state(&h).0, landed + 1, "and applies it");
+}
+
+/// T3b: its floating windows take no click: Brush Settings' Brushes tab doesn't switch, nor does
+/// its × close it; once the render lands, the tab switches.
+#[test]
+fn t3b_photocrafts_floating_panels_take_no_click_while_develop_renders() {
+    let mut h = studio();
+    in_pixel(&mut h);
+    h.state_mut().pixel.as_mut().unwrap().app.ui.panels.brush_settings = true;
+    h.run_steps(2);
+    let ui = |h: &Harness<'_, crate::StudioShell>| {
+        let ui = &h.state().pixel.as_ref().unwrap().app.ui;
+        (ui.panels.brush_settings, ui.brush_tab)
+    };
+    assert_eq!(ui(&h), (true, 0));
+    block(&mut h);
+    let window = h.ctx.memory(|m| m.area_rect(egui::Id::new("brush-settings"))).expect("Brush Settings floats");
+    let tab = painted(&h, "Brushes", |r| window.contains_rect(r)).expect("its Brushes tab");
+    crate::tests_lightcraft::click_at(&mut h, tab.center());
+    assert_eq!(ui(&h), (true, 0), "the tab didn't switch");
+    land(&mut h);
+    let tab = painted(&h, "Brushes", |r| window.contains_rect(r)).unwrap();
+    crate::tests_lightcraft::click_at(&mut h, tab.center());
+    assert_eq!(ui(&h), (true, 1), "it switches once the render landed");
+}
+
+/// T3b: PhotoCraft's own keys do nothing while it waits (its `logic` doesn't run, and its window
+/// gets none), and Studio's wait for the render, as in milestone 5: Ctrl+Z lands the rotation,
+/// then undoes it, the newest step.
+#[test]
+fn t3b_keys_while_develop_renders() {
+    let mut h = studio();
+    in_pixel(&mut h);
+    block(&mut h);
+    let before = pixel_state(&h);
+    // Layer via Copy, PhotoCraft's own
+    press(&mut h, egui::Modifiers::COMMAND, egui::Key::J);
+    h.run_steps(2);
+    assert_eq!(pixel_state(&h), before);
+    assert!(h.state().develop_rendering());
+    press(&mut h, egui::Modifiers::COMMAND, egui::Key::Z);
+    h.run_steps(2);
+    let doc = h.state().document.as_ref().unwrap();
+    assert!(!h.state().develop_rendering(), "the undo waited for the render");
+    assert_eq!(doc.develop.orientation, Default::default(), "and undid the rotation");
+    assert!(doc.history.can_redo());
+}
+
+/// T3b: the wait has its ceiling while Pixel shows too: a render that doesn't land within it
+/// undoes the rotation and says so, and the block lifts (a stroke paints).
+#[test]
+fn t3b_a_render_past_the_ceiling_rolls_back_and_lifts_the_block() {
+    let mut h = studio();
+    in_pixel(&mut h);
+    h.state_mut().base.ceiling = Some(std::time::Duration::from_millis(300));
+    block(&mut h);
+    std::thread::sleep(std::time::Duration::from_millis(400));
+    h.run_steps(2);
+    assert!(!h.state().develop_rendering(), "rolled back");
+    assert_eq!(h.state().document.as_ref().unwrap().develop.orientation, Default::default(), "the rotation undone");
+    assert!(painted_text(h.output()).contains("took longer"), "and said why: {:?}", h.state().error);
+    h.state_mut().run("document.dismissError").unwrap();
+    h.state_mut().hold_renders = false;
+    h.run_steps(2);
+    let before = pixel_state(&h);
+    let end = stroke_down(&mut h);
+    release(&mut h, end);
+    h.run_steps(3);
+    assert_ne!(pixel_state(&h), before, "the block lifted: a stroke paints");
+}

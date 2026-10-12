@@ -888,6 +888,24 @@ mod tests {
         assert!(notice.starts_with("Develop couldn\u{2019}t render \u{201c}Rotate Left\u{201d}: the edit was undone"), "{notice}");
     }
 
+    /// T3b: the ceiling holds while only frames wait too (no undo, save or switch asks for the
+    /// render; Pixel takes no input meanwhile): past it, a frame's sync undoes the waiting step.
+    #[test]
+    fn a_render_past_the_ceiling_undoes_the_waiting_step_between_frames_too() {
+        let mut t = open();
+        t.paint("Paint", 300, 100);
+        let (start, rows) = (t.pc(), t.rows());
+        t.base.ceiling = Some(Duration::ZERO);
+        t.rotate_left();
+        let e = t.base.sync(&mut t.lr, &mut t.px, &mut t.doc).unwrap_err();
+        assert!(e.contains("longer than"), "{e}");
+        assert!(!t.doc.history.pending_follow());
+        assert_eq!(t.lr.develop_of(t.id()).unwrap().orientation, Default::default(), "the rotation was undone");
+        assert!(Arc::ptr_eq(&t.pc(), &start), "Pixel untouched");
+        assert_eq!(t.rows(), rows);
+        assert!(t.doc.take_notice().is_some());
+    }
+
     #[test]
     fn finish_waits_for_the_render_and_lands_it() {
         let mut t = open();

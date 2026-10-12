@@ -221,6 +221,33 @@ In this order, ahead of PRD milestone 6:
        by Window › History; the palette test proves the close, not
        that a one-frame palette can't run a command; Alt-click, a Help-search click and
        `pixel_menu_item`'s re-check of an off or hidden id have no test.
+   - [x] T3b Pixel stays drawn while a Develop geometry change is on its way into its layers,
+     and takes no input (`Pixel::ui_blocked`): PhotoCraft's `ui` runs (its `logic` still doesn't,
+     as in milestone 5) under a transparent area over the persona area, above all its layers
+     (`Order::Tooltip`: its windows, its modal dialogs, their popups), so none of its widgets is
+     hovered, pressed or dragged; and while it draws it gets neither the frame's events (keys,
+     typing, accessibility clicks) nor the pointer, which its canvas and dialogs also read
+     themselves (both go back to Studio after it). Studio's keys wait for the render as in
+     milestone 5 (Ctrl+Z lands the rotation, then undoes it); PhotoCraft's own do nothing. The
+     menus in the persona bar stay off as since T3m. The wait's 30 s ceiling now holds while
+     only frames wait too (`Base::sync`; before, only an undo, save or switch timed out, so a
+     hung render would have kept Pixel blocked), counted with `finish` from when the step began
+     waiting.
+     - Deviation from the plan: an area (not egui's `Modal`, which would block the persona bar
+       too, and is drawn under PhotoCraft's own modal dialogs' order), and it doesn't replace
+       `ui.disable()`/`Viewer.barred` (gone since T3): it replaces "Pixel draws nothing".
+     - Tests (`tests_photocraft::t3b_*`, `tests_pixel_menu::t3b_*`; `hold_renders` is a test
+       knob that holds a finished render back): Pixel drawn while it waits; a stroke on the
+       canvas paints nothing, nor one held when the rotation begins; a click on a Layers row in
+       the dock picks nothing; Levels' OK and Enter apply nothing and a middle drag under it
+       pans nothing; Brush Settings' tab doesn't switch; an open menu's item runs nothing; keys;
+       a render past the ceiling (300 ms in the test) rolls back, says why, and lifts the block;
+       each surface also works once the render lands. Seen failing: without the block (the
+       four surface tests), without the area (the canvas's), without the events withheld
+       (Levels' Enter), without the pointer withheld (the pan), without the area and the menu's
+       check (the menu's), and without the frame ceiling (both ceiling tests, the shell's and
+       `follow::a_render_past_the_ceiling_undoes_the_waiting_step_between_frames_too`). The
+       HIGH 2 test stays.
 2. [ ] **Pixel slow-frame fix** (Open items: frames over 0.4 s); the deferred `bench.rs` peak
    bytes during a follow waits on it.
 3. [ ] **Film**.

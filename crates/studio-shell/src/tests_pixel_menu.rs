@@ -449,3 +449,35 @@ fn photocrafts_menus_are_off_while_develop_renders_a_rotation() {
     h.state_mut().pixel_menu_item(&ctx, "layer.hideLayers");
     assert_eq!((layers(&h), history(&h)), before);
 }
+
+/// T3b: a menu open in the persona bar when a Develop rotation begins runs nothing while it is on
+/// its way into the layers (a click on Layer › Hide Layers changes nothing); once it landed, the
+/// same click hides the layer.
+#[test]
+fn t3b_an_open_menu_runs_nothing_while_develop_renders() {
+    let dir = temp_dir("t3b-menu");
+    let mut h = studio();
+    pixel_edited(&mut h, &dir.join("trip.studio"));
+    let visible = |h: &Harness<'_, StudioShell>| h.state().document.as_ref().unwrap().pixel.layers.iter().map(|l| l.visible).collect::<Vec<_>>();
+    let rows = open_menu(&mut h, "Layer");
+    let hide = rows.iter().find(|(l, ..)| item_is(l, "Hide Layers")).expect("Hide Layers").2.center();
+    h.state_mut().hold_renders = true;
+    let id = h.state().document.as_ref().unwrap().photo().unwrap().0;
+    let lr = &mut h.state_mut().lightroom.as_mut().unwrap().app.session;
+    lr.execute("photo.rotateLeft", &serde_json::json!({"ids": [id]})).unwrap();
+    h.run_steps(2);
+    assert!(h.state().develop_rendering());
+    let before = (visible(&h), history(&h));
+    for pressed in [true, false] {
+        h.event(egui::Event::PointerButton { pos: hide, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE });
+        h.run_steps(1);
+    }
+    h.run_steps(3);
+    assert_eq!((visible(&h), history(&h)), before, "nothing ran");
+    h.state_mut().hold_renders = false;
+    settle_base(&mut h);
+    h.run_steps(2);
+    assert!(!h.state().develop_rendering());
+    click_row(&mut h, "Layer", "Hide Layers");
+    assert_eq!(visible(&h), [true, false], "it runs once the render landed");
+}

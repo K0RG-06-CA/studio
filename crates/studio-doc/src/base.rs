@@ -54,9 +54,11 @@ pub struct Base {
     pub hold: bool,
     /// A render that finished while `hold` was on: (settings hash, anchor, pixels, size).
     ready: Option<(u64, Anchor, Surface, Size)>,
-    /// How long [`Base::finish`] waits for a Develop step's render: [`FOLLOW_CEILING`] unless a
-    /// test shortens it.
+    /// How long a Develop step may wait for its render, in frames ([`Base::sync`]) and in
+    /// [`Base::finish`] together: [`FOLLOW_CEILING`] unless a test shortens it.
     pub ceiling: Option<Duration>,
+    /// Since when a Develop step has been waiting for its render.
+    waiting: Option<Instant>,
 }
 
 impl Base {
@@ -96,8 +98,9 @@ impl Base {
     /// the base is stale and no slider drag is open (a drag then renders once, at release).
     /// Errors are LightCraft's (a photo gone from the library, a
     /// decode that failed); the base keeps its last pixels, and a failed render is reported again
-    /// every frame, not retried, until the settings change. A document without a photo has no
-    /// base: nothing to do.
+    /// every frame, not retried, until the settings change. A Develop step whose render hasn't
+    /// landed within the ceiling is undone, as in [`Base::finish`]. A document without a photo has
+    /// no base: nothing to do.
     pub fn sync(&mut self, session: &mut Session, pixel: &mut PixelSession, doc: &mut Document) -> Result<(), String> {
         if doc.source.is_none() {
             return Ok(());
@@ -109,6 +112,20 @@ impl Base {
         {
             // the render a Develop step waited for can't come: the step goes back
             doc.follow_failed(session, e);
+        }
+        if !doc.history.pending_follow() {
+            self.waiting = None;
+            return r;
+        }
+        // nor may it take longer than the ceiling while only frames wait for it (Pixel takes no
+        // input meanwhile: a render that hangs would keep it so)
+        let ceiling = self.ceiling.unwrap_or(FOLLOW_CEILING);
+        if self.waiting.get_or_insert_with(Instant::now).elapsed() >= ceiling {
+            self.waiting = None;
+            self.pending = None;
+            let e = format!("the render took longer than {} s", ceiling.as_secs());
+            doc.follow_failed(session, &e);
+            return Err(e);
         }
         r
     }
@@ -139,6 +156,13 @@ impl Base {
     /// can't start, or takes longer than the ceiling ([`FOLLOW_CEILING`]) undoes the step (see
     /// [`Document::follow_failed`]) and is the error.
     pub(crate) fn finish(&mut self, session: &mut Session, pixel: &mut PixelSession, doc: &mut Document) -> Result<(), String> {
+        let r = self.wait_for_follow(session, pixel, doc);
+        // landed or undone: the next step waits from its own start
+        self.waiting = None;
+        r
+    }
+
+    fn wait_for_follow(&mut self, session: &mut Session, pixel: &mut PixelSession, doc: &mut Document) -> Result<(), String> {
         let Some(photo) = doc.photo() else { return Ok(()) };
         if session.interaction.as_ref().is_some_and(|i| i.photo == photo) {
             session.end_interaction().map_err(|e| e.to_string())?;
@@ -150,7 +174,8 @@ impl Base {
         // no gesture can be open in Pixel while it is barred: a render held for one goes in now
         self.hold = false;
         let ceiling = self.ceiling.unwrap_or(FOLLOW_CEILING);
-        let t0 = Instant::now();
+        // counted from when the step began waiting, frames included
+        let t0 = self.waiting.take().unwrap_or_else(Instant::now);
         while doc.history.pending_follow() {
             let Some((generation, want, anchor, rx)) = self.pending.take() else {
                 let before = self.started;

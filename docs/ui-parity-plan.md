@@ -361,6 +361,13 @@ PROGRESS.md.
     - PhotoCraft's own ctx-level windows (an open adjustment dialog, a floating panel);
     - its menus (title-bar menu clicks and keyboard shortcuts).
   - The HIGH 2 test stays.
+  - Done 2026-10-12, with these changes to the above (details in PROGRESS.md):
+    - The layer is a transparent `egui::Area` at `Order::Tooltip` over the persona area, not a
+      `Modal` (that would block the persona bar too, and sit under PhotoCraft's own modal
+      dialogs). While PhotoCraft draws under it, it also gets no events and no pointer (its
+      canvas and dialogs read the pointer themselves).
+    - The wait's 30 s ceiling holds between frames too (`Base::sync`), so a hung render can't
+      keep Pixel blocked; tested with a ceiling → rollback test.
 - **T4. Studio's History in PhotoCraft's style and place (D1).**
   - Restyle with PhotoCraft's widgets and tokens.
   - PhotoCraft's own History controls (rail button, Window › History) open and close it.
