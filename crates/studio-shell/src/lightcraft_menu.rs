@@ -214,6 +214,16 @@ const PASS: &[&str] = &[
     "app.about",
 ];
 
+/// LightCraft's Help links, relabelled: they go to its upstream project, not to Studio.
+const UPSTREAM_LINKS: &[(&str, &str)] = &[
+    ("app.help", "LightCraft Help (upstream)"),
+    ("app.discord", "Join the ArtCraft Discord (LightCraft upstream)…"),
+    ("app.feedback", "Send Feedback to LightCraft upstream…"),
+    ("app.website", "LightCraft upstream website"),
+    ("app.github", "LightCraft upstream on GitHub"),
+    ("app.artcraft", "ArtCraft website (LightCraft upstream)"),
+];
+
 /// How Studio routes the LightCraft menu item `id`; none: not classified (a new upstream item),
 /// so it is off.
 pub fn route(id: &str) -> Option<Route> {
@@ -255,7 +265,7 @@ pub fn shortcut_name(m: egui::Modifiers, k: egui::Key) -> String {
 }
 
 /// LightCraft's menu bar as Studio shows it: an item is enabled only where [`allowed`], undo and
-/// redo are Studio's while a document is open, and keys Studio takes (`taken`, as
+/// redo are Studio's while a document is open, Help's links say they are upstream's, and keys Studio takes (`taken`, as
 /// [`shortcut_name`] writes them) show on no item.
 pub fn bar(app: &LightcraftApp, doc: Option<&Document>, taken: &[String]) -> Vec<(String, Vec<MenuNode>)> {
     menubar::menu_bar(app).into_iter().map(|(title, nodes)| (title, adapt(nodes, app, doc, taken))).collect()
@@ -268,6 +278,9 @@ fn adapt(nodes: Vec<MenuNode>, app: &LightcraftApp, doc: Option<&Document>, take
                 let redo = id == "edit.redo";
                 label = if redo { "Redo" } else { "Undo" }.to_owned();
                 enabled = if redo { doc.history.can_redo() } else { doc.history.can_undo() };
+            }
+            if let Some((_, upstream)) = UPSTREAM_LINKS.iter().find(|(link, _)| *link == id) {
+                label = (*upstream).to_owned();
             }
             enabled &= allowed(&id, app, doc);
             shortcut = shortcut.filter(|s| !taken.contains(s));

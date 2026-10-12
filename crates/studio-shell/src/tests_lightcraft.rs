@@ -293,6 +293,25 @@ fn lightcrafts_menus_sit_in_the_persona_bar_and_show_studios_model() {
     }
 }
 
+/// LightCraft's Help links go to its upstream project, not to Studio: their labels say so.
+#[test]
+fn lightcrafts_help_links_say_they_are_upstreams() {
+    let mut h = studio();
+    h.run_steps(5);
+    let items: Vec<String> = open_menu(&mut h, "Help").into_iter().map(|(l, _)| l.trim().to_owned()).collect();
+    for want in [
+        "LightCraft Help (upstream) F1",
+        "Join the ArtCraft Discord (LightCraft upstream)…",
+        "Send Feedback to LightCraft upstream…",
+        "LightCraft upstream website",
+        "LightCraft upstream on GitHub",
+        "ArtCraft website (LightCraft upstream)",
+    ] {
+        assert!(items.iter().any(|l| l == want), "no {want:?} in Help: {items:?}");
+    }
+    close_menus(&mut h);
+}
+
 /// Studio over a library on disk holding one real photo file, `photo` (picked), with LightCraft's
 /// folder dialog there.
 fn file_library(dir: &std::path::Path, photo: &std::path::Path) -> Harness<'static, StudioShell> {

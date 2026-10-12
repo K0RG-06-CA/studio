@@ -145,6 +145,9 @@ In this order, ahead of PRD milestone 6:
    - Temporarily unavailable keys (T3 until T3m), dropped in Pixel: F12 Revert, Ctrl+Alt+W Close
      All, Ctrl+Alt+P Close Others, Ctrl+Alt+Shift+O Open As, Ctrl+Alt+S Save a Copy
      (`keys_of_photocraft_file_items_studio_will_hide_do_nothing`).
+   - For T3m: relabel PhotoCraft's Help links as upstream's, as LightCraft's are (Join the ArtCraft
+     Discord…, PhotoCraft Website, ArtCraft Website, PhotoCraft on GitHub, Report an Issue…);
+     Studio doesn't route PhotoCraft's menus yet.
 2. [ ] **Pixel slow-frame fix** (Open items: frames over 0.4 s); the deferred `bench.rs` peak
    bytes during a follow waits on it.
 3. [ ] **Film**.
@@ -562,6 +565,7 @@ In this order, ahead of PRD milestone 6:
   - [x] NOTICE credits everything PhotoCraft compiles in (JetBrains Mono, Lucide/Feather, the CC BY 3.0 Magnetic Lasso icon, SCOWL) and the crates with extra terms (jpeg-encoder IJG, epaint_default_fonts, libfuzzer-sys)
   - [x] README (what Studio is, pre-release, build, tests, licence, no-affiliation line)
   - [x] CI hardened per zizmor: read-only token, actions pinned to commit hashes, no persisted credentials, superseded runs cancelled
+  - [x] LightCraft's Help links say they go to upstream ("LightCraft upstream website", …), relabelled in `lightcraft_menu::adapt` (`lightcrafts_help_links_say_they_are_upstreams`, seen failing first). Accepted parity difference: these six labels differ from LightCraft's, and show in English in every language. PhotoCraft's: on T3m's list above.
 
 ## Automated checks
 
