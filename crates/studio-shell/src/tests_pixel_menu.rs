@@ -431,6 +431,42 @@ fn photocrafts_exports_never_write_over_an_original() {
     assert!(!listing(&free).is_empty(), "written elsewhere");
 }
 
+/// Review (LOW, Codex): Layers to Files names its files itself, and its atomic write follows a
+/// file link: a link in the folder it is given, pointing at an original, would have it written
+/// over. A folder holding a link to an original is refused, as one holding an original is.
+/// Making a link needs Developer Mode or an administrator on Windows: without them the test has
+/// nothing to make and says so (CI's runners make them).
+#[test]
+fn layers_to_files_never_writes_through_a_link_to_an_original() {
+    let dir = temp_dir("t3b-link");
+    let [library, out] = ["library", "out"].map(|d| dir.join(d));
+    for d in [&library, &out] {
+        std::fs::create_dir_all(d).unwrap();
+    }
+    let photo = crate::tests_images::image(&library, "photo.png");
+    let link = out.join("art_0000_Background.png");
+    #[cfg(unix)]
+    let made = std::os::unix::fs::symlink(&photo, &link);
+    #[cfg(windows)]
+    let made = std::os::windows::fs::symlink_file(&photo, &link);
+    if let Err(e) = made {
+        eprintln!("no file links here ({e}): nothing to test");
+        return;
+    }
+    let mut h = studio();
+    h.run_steps(3);
+    let lr = &mut h.state_mut().lightroom.as_mut().unwrap().app.session;
+    lr.execute("library.import", &serde_json::json!({"paths": [photo.to_string_lossy()]})).unwrap();
+    let art = crate::tests_images::image(&dir, "art.png");
+    h.state_mut().run_with("document.open", &serde_json::json!({"path": art})).unwrap();
+    h.run_steps(2);
+    let before = std::fs::read(&photo).unwrap();
+    let app = &mut h.state_mut().pixel.as_mut().unwrap().app;
+    let e = app.run("file.export.layersToFiles", serde_json::json!({"dir": out, "prefix": "art", "format": "png"})).unwrap_err();
+    assert!(e.contains("never writes over an original"), "{e}");
+    assert_eq!(std::fs::read(&photo).unwrap(), before, "the original is untouched");
+}
+
 /// Nothing of PhotoCraft's menus runs while a Develop geometry change is on its way into the
 /// layers (as its own `logic` doesn't): the bar's menus are off.
 #[test]

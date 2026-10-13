@@ -73,9 +73,10 @@ pub fn set_originals(paths: Vec<PathBuf>) {
 
 /// Studio's gate on PhotoCraft's session (`Session::authorize`, which every command passes, and
 /// every step one runs on its behalf): a command whose parameters name an original, or a folder
-/// holding one, is refused. Its exports write where their forms say (Layers to Files, Package,
-/// Render Video, Color Lookup Tables, a layer's Export As…: any folder or file), so none writes
-/// over an original, nor (given its folder) over one named like a layer. A read of one by path is
+/// holding one, or holding a file link to one, is refused. Its exports write where their forms
+/// say (Layers to Files, Package, Render Video, Color Lookup Tables, a layer's Export As…: any
+/// folder or file), so none writes over an original, nor (given its folder) over one named like a
+/// layer, nor through a link named so (its atomic writes follow links). A read of one by path is
 /// refused too; PhotoCraft has no file dialogs here, so only a script names one.
 fn gate(id: &str, params: &Value) -> photocraft_engine::Result<()> {
     fn strings<'v>(v: &'v Value, out: &mut Vec<&'v str>) {
@@ -92,7 +93,10 @@ fn gate(id: &str, params: &Value) -> photocraft_engine::Result<()> {
     // only, in practice); a set kept with the library's revision if a big library makes that slow
     let hit = named.into_iter().find(|s| {
         let Ok(p) = std::fs::canonicalize(s) else { return false };
-        ORIGINALS.with_borrow(|o| o.iter().filter_map(|o| std::fs::canonicalize(o).ok()).any(|o| o == p || o.parent() == Some(p.as_path())))
+        let originals: Vec<PathBuf> = ORIGINALS.with_borrow(|o| o.iter().filter_map(|o| std::fs::canonicalize(o).ok()).collect());
+        let links = std::fs::read_dir(&p).into_iter().flatten().flatten().filter(|e| e.file_type().is_ok_and(|t| t.is_symlink()));
+        originals.iter().any(|o| *o == p || o.parent() == Some(p.as_path()))
+            || links.filter_map(|e| std::fs::canonicalize(e.path()).ok()).any(|l| originals.contains(&l))
     });
     match hit {
         Some(s) => Err(photocraft_engine::EngineError::Other(format!("{id}: Studio never writes over an original, nor into its folder ({s})"))),
