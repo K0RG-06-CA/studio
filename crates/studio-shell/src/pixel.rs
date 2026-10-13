@@ -73,11 +73,12 @@ pub fn set_originals(paths: Vec<PathBuf>) {
 
 /// Studio's gate on PhotoCraft's session (`Session::authorize`, which every command passes, and
 /// every step one runs on its behalf): a command whose parameters name an original, or a folder
-/// holding one, or holding a file link to one, is refused. Its exports write where their forms
-/// say (Layers to Files, Package, Render Video, Color Lookup Tables, a layer's Export As…: any
-/// folder or file), so none writes over an original, nor (given its folder) over one named like a
-/// layer, nor through a link named so (its atomic writes follow links). A read of one by path is
-/// refused too; PhotoCraft has no file dialogs here, so only a script names one.
+/// above one, or holding a file link to one, or a path that climbs with `..`, is refused. Its
+/// exports write where their forms say (Layers to Files, Package, Render Video, Color Lookup
+/// Tables, a layer's Export As…: any folder or file), so none writes over an original, nor (given
+/// its folder) over one named like a layer, nor through a link named so (its atomic writes follow
+/// links), nor out of its folder by a name or format it joins on. A read of one by path is refused
+/// too; PhotoCraft has no file dialogs here, so only a script names one.
 fn gate(id: &str, params: &Value) -> photocraft_engine::Result<()> {
     fn strings<'v>(v: &'v Value, out: &mut Vec<&'v str>) {
         match v {
@@ -92,14 +93,19 @@ fn gate(id: &str, params: &Value) -> photocraft_engine::Result<()> {
     // ponytail: every original is resolved again for each existing path a command names (exports
     // only, in practice); a set kept with the library's revision if a big library makes that slow
     let hit = named.into_iter().find(|s| {
+        // what it makes up from a name or a format is joined onto its folder unchecked: one that
+        // climbs (`../library/photo`) could land anywhere
+        if s.contains(['/', '\\']) && s.split(['/', '\\']).any(|c| c == "..") {
+            return true;
+        }
         let Ok(p) = std::fs::canonicalize(s) else { return false };
         let originals: Vec<PathBuf> = ORIGINALS.with_borrow(|o| o.iter().filter_map(|o| std::fs::canonicalize(o).ok()).collect());
         let links = std::fs::read_dir(&p).into_iter().flatten().flatten().filter(|e| e.file_type().is_ok_and(|t| t.is_symlink()));
-        originals.iter().any(|o| *o == p || o.parent() == Some(p.as_path()))
-            || links.filter_map(|e| std::fs::canonicalize(e.path()).ok()).any(|l| originals.contains(&l))
+        // an original, or a folder above one (Package writes into a folder of its own in it)
+        originals.iter().any(|o| o.starts_with(&p)) || links.filter_map(|e| std::fs::canonicalize(e.path()).ok()).any(|l| originals.contains(&l))
     });
     match hit {
-        Some(s) => Err(photocraft_engine::EngineError::Other(format!("{id}: Studio never writes over an original, nor into its folder ({s})"))),
+        Some(s) => Err(photocraft_engine::EngineError::Other(format!("{id}: Studio never writes over an original, nor near it ({s})"))),
         None => Ok(()),
     }
 }

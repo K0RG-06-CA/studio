@@ -421,6 +421,12 @@ fn photocrafts_exports_never_write_over_an_original() {
         ("layer.exportAs", serde_json::json!({"path": art})),
         ("file.export.colorLookupTables", serde_json::json!({"path": file, "size": 17})),
         ("file.export.layersToFiles", serde_json::json!({"dir": library, "prefix": "photo", "format": "png"})),
+        // Review (Codex): names it makes up from its params, joined onto the folder unchecked,
+        // climbing out of it (Data Sets' naming, any export's format), and a package's folder
+        // inside the one named
+        ("file.export.dataSetsAsFiles", serde_json::json!({"dir": free, "naming": "../library/photo"})),
+        ("file.export.layersToFiles", serde_json::json!({"dir": free, "prefix": "art", "format": "x/../../library/photo.png"})),
+        ("file.package", serde_json::json!({"dir": dir, "format": "psd"})),
     ];
     for (id, params) in refused {
         let e = app.run(id, params.clone()).unwrap_err();
