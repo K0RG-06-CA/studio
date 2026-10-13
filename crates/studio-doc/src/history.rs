@@ -286,6 +286,11 @@ impl History {
         self.pending.is_some()
     }
 
+    /// The settings at the last step boundary (a drag's, mirrored live, are noted at its release).
+    pub fn noted_develop(&self) -> Option<&DevelopSettings> {
+        self.develop_base.as_ref().map(|(s, _)| &**s)
+    }
+
     /// The label of the step waiting for its follow.
     pub(crate) fn pending_label(&self) -> Option<&str> {
         self.pending.and_then(|_| self.steps.last()).map(|s| s.label.as_str())

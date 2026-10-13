@@ -599,11 +599,13 @@ impl StudioShell {
     /// PhotoCraft has open (a Free Transform, type, a pen path): that is applied first, as its own
     /// step, before the change is noted. A Free Transform's box is in the frame before the change:
     /// left open, it stayed there over the moved layers, and an edit made while the change waits
-    /// for its render would be taken for the change's Pixel half. Before every frame and command.
+    /// for its render would be taken for the change's Pixel half. A drag's change is noted at its
+    /// release, so one opened during it is applied at once. Before every frame and command.
     fn apply_before_reframe(&mut self) {
         let (Some(doc), Some(lr), Some(px)) = (&mut self.document, &self.lightroom, &mut self.pixel) else { return };
         let framing = studio_doc::pixel::framing;
-        if doc.photo().and_then(|p| lr.app.session.develop_of(p)).is_some_and(|s| framing(&s) != framing(&doc.develop)) {
+        let noted = framing(doc.history.noted_develop().unwrap_or(&doc.develop));
+        if doc.photo().and_then(|p| lr.app.session.develop_of(p)).is_some_and(|s| framing(&s) != noted) {
             px.apply_pending();
             doc.copy_back(&mut px.app.session);
         }

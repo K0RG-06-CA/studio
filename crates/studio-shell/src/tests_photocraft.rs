@@ -1970,3 +1970,38 @@ fn t3b_a_free_transform_open_when_the_rotation_comes_in_is_applied_first_as_its_
     assert_eq!(paint(&h), Some((300, 100, 301, 101)), "then the transform");
     assert_eq!(h.state().error, None);
 }
+
+/// Review (Codex, round 2): the same during a drag that changes the frame (a script's
+/// straighten): its settings are mirrored live, but the history notes them only at its release.
+/// A Free Transform opened meanwhile is in the frame before the drag: it is applied at once, so
+/// the follow at the release never lands under it.
+#[test]
+fn t3b_a_free_transform_opened_during_a_straighten_drag_never_has_its_follow_land_under_it() {
+    let mut h = studio();
+    in_pixel(&mut h);
+    let open = |h: &Harness<'_, crate::StudioShell>| h.state().pixel.as_ref().unwrap().app.ui.transform.is_some();
+    let id = h.state().document.as_ref().unwrap().photo().unwrap();
+    let lr = &mut h.state_mut().lightroom.as_mut().unwrap().app.session;
+    lr.selection.active = Some(id);
+    lr.begin_interaction("Straighten").unwrap();
+    let mut s = (*lr.develop_of(id).unwrap()).clone();
+    s.crop.geometry.angle = 5.0;
+    lr.set_develop(id, s, "Straighten").unwrap();
+    h.run_steps(2);
+    assert_eq!(h.state().document.as_ref().unwrap().develop.crop.geometry.angle, 5.0, "mirrored live");
+    press(&mut h, egui::Modifiers::COMMAND, egui::Key::T);
+    h.run_steps(2);
+    assert!(!open(&h), "applied: its box is in the frame before the drag");
+    h.state_mut().lightroom.as_mut().unwrap().app.session.end_interaction().unwrap();
+    let t0 = std::time::Instant::now();
+    h.run_steps(1);
+    while h.state().develop_rendering() {
+        assert!(t0.elapsed().as_secs() < 300, "never landed");
+        h.run_steps(1);
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert!(!open(&h));
+    let rows: Vec<_> = h.state().document.as_ref().unwrap().history.entries().into_iter().map(|e| (e.develop, e.pixel)).collect();
+    assert_eq!(rows.last(), Some(&(true, true)), "the straighten and its follow");
+    assert_eq!(h.state().error, None);
+}
