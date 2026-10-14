@@ -260,14 +260,38 @@ In this order, ahead of PRD milestone 6:
        under them, as a save or an undo lands it
        (`t3b_a_free_transform_open_when_the_rotation_begins_doesnt_hold_its_render`). Test added:
        a held stroke as it really goes, its release landing the render.
+     - Codex review (3 rounds, each finding checked by a fresh ECC reviewer, fixes picked by the
+       user; one commit each, each test seen failing first): MEDIUM: what PhotoCraft has open (a
+       Free Transform, type, a pen path) is applied first, as its own step, when a Develop change
+       to the frame comes in (`apply_before_reframe`, before every frame and command, against the
+       settings the history last noted, so during a drag too): left open, a Free Transform's box
+       stayed in the old frame over the turned layers; applied while the change waited, it would
+       have been taken for the change's Pixel half
+       (`t3b_a_free_transform_open_when_the_rotation_comes_in_is_applied_first_as_its_own_step`,
+       `t3b_a_free_transform_opened_during_a_straighten_drag_never_has_its_follow_land_under_it`).
+       MEDIUM: the export gate refuses a path that climbs with `..` (Data Sets' naming and any
+       export's format are joined onto the folder unchecked) and any folder above an original;
+       what is typed (`text`, `coalesce`) is never taken for a path, so a slash typed into a text
+       layer isn't refused (`photocrafts_exports_never_write_over_an_original`,
+       `pixel::tests::typed_text_is_never_taken_for_a_path`). LOW: the ceiling no longer counts a
+       finished render held for a gesture (a stroke held past 30 s undid a rotation that had
+       rendered; `a_finished_render_held_for_a_gesture_outlasts_the_ceiling`; the shell's ceiling
+       test now times out a render in flight). LOW: a Layers row drag held when the block begins
+       leaves no drag (`t3b_a_layer_row_drag_held_when_the_rotation_begins_leaves_no_drag`). LOW:
+       the gate refuses a folder holding a file link to an original
+       (`layers_to_files_never_writes_through_a_link_to_an_original`). LOW: Package is off (its
+       own subfolder, reached through a junction, could lead it onto an original). Not real,
+       skipped: polling past 30 s while a held render waits (the release is input), and keeping a
+       PNG protected after its document was saved as `.studio` and reopened (out of scope).
+     - Left (LOW): the gate refuses a layer or document name that is exactly `/`, `\` or `.`, or
+       holds `a/../b`; scripts can't name paths with `..` nor export into a folder above an
+       original; a link planted in a subfolder a name leads into (Data Sets' `naming` with a `/`)
+       still gets past it.
      - Left (LOW): the block covers the persona area, not the persona bar's row, so a PhotoCraft
        window dragged over the bar (or a tall dialog reaching it) is still hovered there (no
        click, key or drag reaches it: it has no pointer and no events, and a drag is the
        block's); Studio's own error notice and prompt are under the block too while it waits
-       (Escape still closes them; a prompt waits for the render first anyway); a Layers row
-       drag in flight when the block begins and released under it leaves PhotoCraft's row-drag
-       marker set, so the next click-release on a row moves that layer (as since milestone 5,
-       when PhotoCraft wasn't drawn at all then); PhotoCraft's own keys pressed while it waits
+       (Escape still closes them; a prompt waits for the render first anyway); PhotoCraft's own keys pressed while it waits
        are dropped, not queued (as in milestone 5); scroll and pinch deltas aren't withheld
        (PhotoCraft reads them by the pointer, which it hasn't got, and they only move the
        view); its control transport's synthetic input would be swallowed while it waits (not
@@ -861,8 +885,9 @@ it now runs one step a frame, two frames apart at least.
   O(steps) per frame, at most `HISTORY_STEPS` (1000).
 - ~~An undo key held for a stroke whose release egui never sees (button let go outside the
   window) runs at the next release.~~ Fixed in task 5: losing focus releases the buttons.
-- A Free Transform opened before a Develop rotation stays open over the rotated layers until
-  applied (its box predates the follow); applying it is PhotoCraft's own transform of the box.
+- ~~A Free Transform opened before a Develop rotation stays open over the rotated layers until
+  applied (its box predates the follow); applying it is PhotoCraft's own transform of the box.~~
+  Fixed in T3b's review: it is applied first, as its own step.
 - `history.goto` with a non-integer index says it "needs an `index`".
 - `StudioShell::held` is `pub` only so `main.rs`'s `..Default::default()` compiles.
 - An error from the end-of-frame reconcile (a jump PhotoCraft began that fails) takes the error
@@ -915,6 +940,7 @@ From the code review of milestone 3 (HIGH/MEDIUM were fixed, one commit each, wi
 - Real keyboard and mouse input through the OS: tests inject egui events and the smoke test runs commands, so OS key mapping (e.g. Ctrl as Cmd) isn't covered.
 - Readability at the real display's scaling: renders are at 1.0 points per pixel.
 - Windows x64 and Linux x64/ARM64: CI runs fmt, clippy and the headless tests there, but not the renders or the smoke test (no GPU/display on the runners).
+- The export gate's file-link test locally: this machine can't make file links without Developer Mode or an administrator, so `layers_to_files_never_writes_through_a_link_to_an_original` says so and returns; CI's runners make them.
 
 ## Notes
 
