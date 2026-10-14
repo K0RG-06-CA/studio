@@ -84,7 +84,9 @@ fn gate(id: &str, params: &Value) -> photocraft_engine::Result<()> {
         match v {
             Value::String(s) => out.push(s),
             Value::Array(a) => a.iter().for_each(|v| strings(v, out)),
-            Value::Object(o) => o.values().for_each(|v| strings(v, out)),
+            // what is typed (a text layer's keys, a note) is never a path, though "/" alone
+            // names the drive's root, above every original on it
+            Value::Object(o) => o.iter().filter(|(k, _)| !matches!(k.as_str(), "text" | "coalesce")).for_each(|(_, v)| strings(v, out)),
             _ => {}
         }
     }
@@ -272,5 +274,25 @@ impl Pixel {
     #[cfg(test)]
     pub(crate) fn frames(&self) -> u32 {
         self.frames
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    /// Review (Codex, round 3): what is typed is never a path. A slash typed into a text layer
+    /// (each key is a `type.edit` carrying its text) isn't refused, though "/" names the drive's
+    /// root, above every original on it; a path named so still is.
+    #[test]
+    fn typed_text_is_never_taken_for_a_path() {
+        let original = std::env::temp_dir().join(format!("studio-gate-text-{}.png", std::process::id()));
+        std::fs::write(&original, b"original").unwrap();
+        super::set_originals(vec![original.clone()]);
+        for text in ["/", "\\", "10/12", "a/../b"] {
+            assert!(super::gate("type.edit", &json!({"replace": {"text": text}})).is_ok(), "{text}");
+        }
+        assert!(super::gate("layer.exportAs", &json!({"path": "/"})).is_err(), "the root as a path");
+        let _ = std::fs::remove_file(&original);
     }
 }
