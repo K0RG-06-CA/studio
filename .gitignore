@@ -3,3 +3,4 @@
 **/tests/snapshots/*.new.png
 /.serena/
 /samples/
+.codex-review/
