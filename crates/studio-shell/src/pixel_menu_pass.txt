@@ -102,7 +102,6 @@ file.import.notes
 file.import.variableDataSets
 file.import.videoFramesToLayers
 file.import.wiaSupport
-file.package
 file.placeEmbedded
 file.placeLinked
 file.print

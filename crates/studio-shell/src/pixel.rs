@@ -78,8 +78,13 @@ pub fn set_originals(paths: Vec<PathBuf>) {
 /// Tables, a layer's Export As…: any folder or file), so none writes over an original, nor (given
 /// its folder) over one named like a layer, nor through a link named so (its atomic writes follow
 /// links), nor out of its folder by a name or format it joins on. A read of one by path is refused
-/// too; PhotoCraft has no file dialogs here, so only a script names one.
+/// too; PhotoCraft has no file dialogs here, so only a script names one. Package is off: it writes
+/// into a folder of its own inside the one named, where a link (a junction needs no rights on
+/// Windows) could lead it onto an original past anything the gate sees.
 fn gate(id: &str, params: &Value) -> photocraft_engine::Result<()> {
+    if id == "file.package" {
+        return Err(photocraft_engine::EngineError::Other(format!("{id}: Studio never writes over an original, so Package is off in Pixel")));
+    }
     fn strings<'v>(v: &'v Value, out: &mut Vec<&'v str>) {
         match v {
             Value::String(s) => out.push(s),
@@ -103,7 +108,7 @@ fn gate(id: &str, params: &Value) -> photocraft_engine::Result<()> {
         let Ok(p) = std::fs::canonicalize(s) else { return false };
         let originals: Vec<PathBuf> = ORIGINALS.with_borrow(|o| o.iter().filter_map(|o| std::fs::canonicalize(o).ok()).collect());
         let links = std::fs::read_dir(&p).into_iter().flatten().flatten().filter(|e| e.file_type().is_ok_and(|t| t.is_symlink()));
-        // an original, or a folder above one (Package writes into a folder of its own in it)
+        // an original, or a folder above one (a name it joins on may lead into a subfolder)
         originals.iter().any(|o| o.starts_with(&p)) || links.filter_map(|e| std::fs::canonicalize(e.path()).ok()).any(|l| originals.contains(&l))
     });
     match hit {

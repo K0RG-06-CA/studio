@@ -427,6 +427,8 @@ fn photocrafts_exports_never_write_over_an_original() {
         ("file.export.dataSetsAsFiles", serde_json::json!({"dir": free, "naming": "../library/photo"})),
         ("file.export.layersToFiles", serde_json::json!({"dir": free, "prefix": "art", "format": "x/../../library/photo.png"})),
         ("file.package", serde_json::json!({"dir": dir, "format": "psd"})),
+        // Package anywhere: it writes into a folder of its own, past what the gate can see
+        ("file.package", serde_json::json!({"dir": free, "format": "psd"})),
     ];
     for (id, params) in refused {
         let e = app.run(id, params.clone()).unwrap_err();

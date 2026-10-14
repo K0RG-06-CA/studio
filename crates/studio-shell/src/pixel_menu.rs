@@ -96,6 +96,9 @@ pub fn route(id: &str) -> Option<Route> {
         | "file.automate.batch"
         | "file.scripts.imageProcessor"
         | "file.automate.lensCorrection"
+        // it writes into a folder of its own, where a link could lead it onto an original (its
+        // command is refused too: `pixel::gate`)
+        | "file.package"
         | "edit.search" => Off,
         _ if PASS.contains(id) => Pass,
         _ => return None,
@@ -496,11 +499,12 @@ mod tests {
     /// Review (HIGH): PhotoCraft's batch processors write their results into the folder they're
     /// given, named after their inputs: given the input folder (Batch's and Lens Correction's
     /// format is "same"), they rewrite the library's originals in place, the document's photo
-    /// among them, past Studio's never-overwrite rule. They are off, and shown disabled.
+    /// among them, past Studio's never-overwrite rule. They are off, and shown disabled. So is
+    /// Package (review, Codex round 3): a link in the folder it makes leads it anywhere.
     #[test]
     fn batch_processors_that_can_write_over_their_inputs_are_off() {
         let shown = items(&app(), None, true, &[]);
-        for id in ["file.automate.batch", "file.scripts.imageProcessor", "file.automate.lensCorrection"] {
+        for id in ["file.automate.batch", "file.scripts.imageProcessor", "file.automate.lensCorrection", "file.package"] {
             assert_eq!(route(id), Some(Route::Off), "{id}");
             assert_eq!(shown.iter().find(|it| it.id == id).map(|it| it.enabled), Some(false), "{id}");
         }
